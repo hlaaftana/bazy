@@ -1,0 +1,49 @@
+object Person
+  firstName: String
+  middleName: Option[String]
+  lastName: String
+
+  this to String do "\firstName \{middleName ? "\middleName " ! ""}\lastName"
+
+object TVShow
+  name: String
+  cast: Map[Person, String]
+  *seasons: List[Season] # * implies spreading in the constructor
+
+scope TVShow
+  this to String
+    "\name starring:\n", cast |> {
+      pairs
+      collect [actor, character] => "\actor as \character"
+      join newline
+      # newline being a constant is more expressive than \n in my opinion (it would be \newline though)
+    }
+
+object Season
+  number: PositiveInteger
+  *episodes: List[Episode]
+
+object Episode
+  number: PositiveInteger
+  title: String
+
+ericAndreShow = TVShow("The Eric Andre Show",
+  cast: {
+    Person("Eric", "Andre"): "Himself",
+    Person("Hannibal", "Burress"): "Himself"
+  }
+  Season(1,
+    Episode 1 "George Clooney",
+    Episode 2 "Russell Brand",
+    Episode 3 "Tatyana Ali",
+    Episode 4 "Brandi Glanville",
+    Episode 5 "Reese Witherspoon",
+    Episode 6 "Jack",
+    Episode 7 "Sinbad",
+    Episode 8 "J-Moe",
+    Episode 9 "Evangelos",
+    Episode 10 "Ryan Phillippe",
+    Episode 11 "Wesley Snipes")
+  Season(2,
+    Episode 1 "Maria Menounos/Eric Balfour",
+    Episode 2 "hhhap"))
