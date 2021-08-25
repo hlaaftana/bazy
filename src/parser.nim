@@ -229,9 +229,11 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
     of tkComma:
       waiting = true
       var terms = reduceOperators(currentExprs)
-      echo terms
       let termLen = terms.len
-      echo termLen
+      if comma == NoComma and termLen > 1:
+        let first = terms[0]
+        terms.delete(0)
+        expressions.add(first)
       var expression = terms.pop
       while terms.len != 0:
         expression = Expression(kind: Call, address: terms.pop, arguments: @[expression])
@@ -316,7 +318,9 @@ when isMainModule:
     "a(b, c)",
     "a * b / c ^ d ^ e << f | g + h < i as j",
     "a do\n  b",
-    "a\n  b\n  c\nd\ne",
+    "a\n  b\n  c\nd\ne\n  f\n    g\nh",
+    "a b, c",
+    "a b c, d e, f",
     readFile("concepts/test.ba")
   ]
 
