@@ -58,17 +58,14 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
     elif token.kind == tkColon and result.statements.len > 0 and
       result.statements[^1].kind in {Call, Infix, Prefix, Postfix}:
       inc parser.pos
-      for tok in parser.nextTokens:
-        case tok.kind
-        of tkNone, tkWhitespace: continue
-        of tkWord:
-          inc parser.pos
-          result.statements[^1].arguments.add(Expression(kind: ExpressionKind.Colon,
-            left: Expression(kind: Name, identifier: tok.raw),
-            right: parser.recordWideLine()))
-        else:
-          result.statements[^1].arguments.add(parser.recordWideLine())
-        break
+      let tok = parser.tokens[parser.pos]
+      if tok.kind == tkWord:
+        inc parser.pos
+        result.statements[^1].arguments.add(Expression(kind: ExpressionKind.Colon,
+          left: Expression(kind: Name, identifier: tok.raw),
+          right: parser.recordWideLine()))
+      else:
+        result.statements[^1].arguments.add(parser.recordWideLine())
     elif token.kind == tkBackslash and result.statements.len > 0 and
       result.statements[^1].kind in {Call, Infix, Prefix, Postfix} and (
       when false:
@@ -102,20 +99,17 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
         valid): # epic abuse
       inc parser.pos
       let ex = lastEx
-      for tok in parser.nextTokens:
-        case tok.kind
-        of tkNone, tkWhitespace: continue
-        of tkWord:
-          inc parser.pos
-          let name = tok.raw
-          ex.arguments.add(Expression(kind: ExpressionKind.Colon,
-            left: Expression(kind: Name, identifier: name),
-            right: parser.recordWideLine()))
-          backslashNames.add(name)
-        else:
-          ex.arguments.add(parser.recordWideLine())
-          backslashNames.add("")
-        break
+      let tok = parser.tokens[parser.pos]
+      if tok.kind == tkWord:
+        inc parser.pos
+        let name = tok.raw
+        ex.arguments.add(Expression(kind: ExpressionKind.Colon,
+          left: Expression(kind: Name, identifier: name),
+          right: parser.recordWideLine()))
+        backslashNames.add(name)
+      else:
+        ex.arguments.add(parser.recordWideLine())
+        backslashNames.add("")
       dec parser.pos
       continue
     else:
