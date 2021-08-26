@@ -4,12 +4,13 @@ type
   Precedence* = enum
     None
     Access # dot operators
+    Colon
     Exponent
     Shift
     Multiplication, Addition
     Range
     Conversion # as etc
-    Comparison, And, Or
+    Comparison, Not, And, Or
     Misc
     Accusative # ? @ etc
     Separation # julia uses this for => pairings, no idea what to use for here
@@ -17,11 +18,12 @@ type
     Lambda
     Statement # postfix if/for
   
-  Associativity* = enum Left, Right
+  Associativity* = enum Left, Right, Unary
 
 const Associativities*: array[Precedence, Associativity] = [
   None: Left,
   Access: Left,
+  Colon: Right,
   Exponent: Right,
   Shift: Left,
   Multiplication: Left,
@@ -29,6 +31,7 @@ const Associativities*: array[Precedence, Associativity] = [
   Range: Left,
   Conversion: Left,
   Comparison: Left,
+  Not: Unary,
   And: Left,
   Or: Left,
   Misc: Left,
@@ -44,12 +47,13 @@ proc precedence*(symbol: string): Precedence =
   case symbol
   of "": None
   of "=": Assignment
-  of ":": Access
+  of ":": Colon
   of "**", "pow": Exponent # not keyword
   of "shl", "shr": Shift # not keywords
   of "div", "mod", "rem": Multiplication # rem not a keyword
   of "as", "from": Conversion
   of "is", "in", "of": Comparison # maybe not of
+  of "not", "!": Not
   of "and", "&&": And
   of "or", "||": Or
   of "for", "if", "while", "unless", "until", "do": Statement # not sure if these can be keywords
@@ -58,7 +62,7 @@ proc precedence*(symbol: string): Precedence =
   else:
     case symbol[0]
     of '^': Exponent
-    of '*', '%', '/', '&': Multiplication
+    of '*', '%', '/', '&', '\\': Multiplication
     of '+', '-', '~', '|': Addition
     of '.':
       if symbol.len > 1 and symbol[1] == '.':
@@ -93,7 +97,7 @@ proc reduceOperators*(exprs: seq[Expression], lowestKind = succ(Precedence.None)
       mustPrefix = false
     inc i
   if mustPrefix:
-    let startIndex = if prefixStack.len + 1 == result.len: 0 else: result.len - prefixStack.len - 1
+    let startIndex = if prefixStack.len + 1 == result.len: 0 else: result.len - prefixStack.len - 2
     var e = result[startIndex]
     for i in startIndex + 1 ..< result.len:
       e = Expression(kind: Postfix, address: result[i], arguments: @[e])
@@ -111,7 +115,7 @@ proc reduceOperators*(exprs: seq[Expression], lowestKind = succ(Precedence.None)
         lhs = e
         lhsStart = i
       else:
-        lhs = Expression(kind: Infix, address: op, arguments: @[lhs, e])
+        lhs = makeInfix(op, lhs, e)
         result[lhsStart .. i] = [lhs]
         i = lhsStart
         op = nil
@@ -127,9 +131,23 @@ proc reduceOperators*(exprs: seq[Expression], lowestKind = succ(Precedence.None)
         rhs = e
         rhsStart = i
       else:
-        rhs = Expression(kind: Infix, address: op, arguments: @[e, rhs])
+        rhs = makeInfix(op, e, rhs)
         result[i .. rhsStart] = [rhs]
-        i = rhsStart - 2
+        i = rhsStart - 1
         op = nil
       dec i
+  of Unary:
+    var stack: seq[Expression]
+    var i = 0
+    while i < result.len:
+      var e = result[i]
+      if e.isOperator:
+        stack.add(e)
+      else:
+        let sl = stack.len
+        while stack.len != 0:
+          e = Expression(kind: Prefix, address: stack.pop, arguments: @[e])
+        result[i - sl .. i] = [e]
+        i -= sl
+      inc i
   result = reduceOperators(result, succ(lowestKind))

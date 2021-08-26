@@ -13,4 +13,4 @@ command tag
 
   name
     if not_null? c = ??guild_data.tags[name].content, strip_mentions c
-    else "Invalid tag"
+    \else "Invalid tag"

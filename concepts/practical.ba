@@ -30,4 +30,4 @@ next(args: Arguments) =
           done = true
         else
           x += ch
-    if x == "", x = next args
+    if x == "", x = next(args)

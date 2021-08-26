@@ -29,7 +29,13 @@ type
     of Block:
       statements*: seq[Expression]
 
-from strutils import join
+proc makeInfix*(op, a, b: Expression): Expression =
+  if op.kind == Symbol and op.identifier == ":":
+    Expression(kind: Colon, left: a, right: b)
+  else:
+    Expression(kind: Infix, address: op, arguments: @[a, b])
+
+import strutils
 
 proc `$`*(ex: Expression): string =
   if ex.isNil: return "nil"
@@ -39,9 +45,15 @@ proc `$`*(ex: Expression): string =
   of String: "\"" & ex.str & "\""
   of Name, Symbol: ex.identifier
   of Call: $ex.address & "(" & ex.arguments.join(", ") & ")"
-  of Infix: "(" & $ex.arguments[0] & " " & $ex.address & " " & $ex.arguments[1] & ")"
-  of Postfix: "(" & $ex.arguments[0] & " " & $ex.address & ")"
-  of Prefix: "(" & $ex.address & " " & $ex.arguments[0] & ")"
+  of Infix:
+    "(" & $ex.arguments[0] & " " & $ex.address & " " & $ex.arguments[1] & ")" &
+      (if ex.arguments.len > 2: " {" & ex.arguments[2..^1].join(", ") & "}" else: "")
+  of Postfix:
+    "(" & $ex.arguments[0] & " " & $ex.address & ")" &
+      (if ex.arguments.len > 1: " {" & ex.arguments[1..^1].join(", ") & "}" else: "")
+  of Prefix:
+    "(" & $ex.address & " " & $ex.arguments[0] & ")" &
+      (if ex.arguments.len > 1: " {" & ex.arguments[1..^1].join(", ") & "}" else: "")
   of Subscript: $ex.address & "[" & ex.arguments.join(", ") & "]"
   of CurlySubscript: $ex.address & "{" & ex.arguments.join(", ") & "}"
   of Dot: $ex.left & "." & $ex.right
@@ -49,4 +61,12 @@ proc `$`*(ex: Expression): string =
   of Tuple: "(" & ex.elements.join(", ") & ")"
   of Array: "[" & ex.elements.join(", ") & "]"
   of Set: "{" & ex.elements.join(", ") & "}"
-  of Block: "(" & ex.statements.join("; ") & ")"
+  of Block:
+    var s = "(\n"
+    for i in 0 ..< ex.statements.len:
+      let ss = $ex.statements[i]
+      for sl in ss.splitLines:
+        s.add("  " & sl & "\n")
+      if i < ex.statements.len - 1:
+        s[^1 .. ^1] = ";\n"
+    s & ")"

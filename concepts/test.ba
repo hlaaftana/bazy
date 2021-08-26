@@ -3,3 +3,34 @@ a do
 
 a
   b
+
+binary_search(a, k) =
+  for result i = 0
+    b = a.size
+    while i < b
+      if a[mid] < k, i = mid + 1, b = mid
+    unless i < a.size and a[i] == k, i = -1
+
+a do b do
+  c do d do
+    e do f
+    g do
+      h
+
+if a
+  b
+\else if c
+  d
+\else if e
+  f
+\else g
+  h
+
+try
+  a
+:catch b
+  c
+:catch d
+  e
+:finally f
+  g
