@@ -1,8 +1,16 @@
 import tokenizer, expressions, operators
 
-type Parser* = object
-  tokens*: seq[Token]
-  pos*: int
+type
+  ParserOptions* = object
+    curlyBlocks*, operatorIndentMakesBlock*: bool
+
+  Parser* = object
+    tokens*: seq[Token]
+    pos*: int
+    options*: ParserOptions
+
+proc defaultOptions*(): ParserOptions =
+  ParserOptions(curlyBlocks: false, operatorIndentMakesBlock: true)
 
 iterator nextTokens*(p: var Parser): Token =
   while p.pos < p.tokens.len:
@@ -11,6 +19,8 @@ iterator nextTokens*(p: var Parser): Token =
 
 # probably a lot of indent bugs, and need a way to stop all infinity bugs (mostly delimiters?)
 # maybe some kind of delimiter counter. we have a parser object
+# maybe make distinction between open and parenthesized calls
+# maybe make distinction between (a) and a
 
 proc recordLineLevel*(parser: var Parser, closed = false): Expression
 
@@ -68,20 +78,6 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
         result.statements[^1].arguments.add(parser.recordWideLine())
     elif token.kind == tkBackslash and result.statements.len > 0 and
       result.statements[^1].kind in {Call, Infix, Prefix, Postfix} and (
-      when false:
-        var exs = result.statements;
-        var valid = exs.len > 0 and exs[^1].kind in {Call, Infix, Prefix, Postfix};
-        valid and ((for n in backslashNames:
-          if n == "" and exs.len > 0 and exs[^1].kind in {Call, Infix, Prefix, Postfix}:
-            exs = exs[^1].arguments
-          elif n != "" and exs.len > 0 and exs[^1].kind == ExpressionKind.Colon and
-            exs[^1].left.kind == Name and exs[^1].left.identifier == n and
-            exs[^1].right.kind in {Call, Infix, Prefix, Postfix}:
-            exs = exs[^1].right.arguments
-          else:
-            valid = false
-            break); valid)
-      else:
         var lastEx = result.statements[^1]
         var valid = true
         for n in backslashNames:
@@ -148,16 +144,19 @@ proc recordParen*(parser: var Parser): Expression =
 
 proc recordCurly*(parser: var Parser): Expression =
   var s: seq[Expression]
+  var makeSet = not parser.options.curlyBlocks
   for t in parser.nextTokens:
     case t.kind
-    of tkNone, tkWhitespace, tkIndent, tkIndentBack, tkNewline, tkComma: discard
+    of tkNone, tkWhitespace, tkIndent, tkIndentBack, tkNewline: discard
+    of tkComma: makeSet = true
     of tkCloseCurly:
       break
     of tkCloseBrack, tkCloseParen:
       discard #error "error wwrong token for brack"
     else:
-      s.add(parser.recordWideLine(true))
-  Expression(kind: Set, elements: s)
+      s.add(parser.recordWideLine(makeSet))
+  if makeSet: Expression(kind: Set, elements: s)
+  else: Expression(kind: Block, statements: s)
 
 proc recordSingle*(parser: var Parser): Expression =
   # +a is a path
@@ -274,6 +273,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
   var waiting = false
   var currentExprs: seq[Expression]
   var indent: Expression
+  var indentIsDo: bool
   template finish() =
     dec parser.pos
     if currentExprs.len != 0:
@@ -282,7 +282,8 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
     #echo expressions
     #echo indent
     if not indent.isNil:
-      if expressions.len == 1 and expressions[0].kind in {Prefix, Infix, Postfix, Call}:
+      if (parser.options.operatorIndentMakesBlock or indentIsDo) and
+        expressions.len == 1 and expressions[0].kind in {Prefix, Infix, Postfix, Call}:
         #echo "we here tho"
         #echo expressions[0].arguments
         expressions[0].arguments.add(indent)
@@ -349,6 +350,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
       if not waiting:
         inc parser.pos
         indent = parser.recordBlockLevel(indented = true)
+        indentIsDo = false
         finish()
         #[if currentExprs.len != 0:
           var terms = reduceOperators(currentExprs)
@@ -362,6 +364,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
       waiting = false
       inc parser.pos, 2
       indent = parser.recordWideLine()
+      indentIsDo = true
       finish()
     else:
       let ex = parser.recordSingle()
@@ -370,7 +373,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
   finish()
 
 proc recordBlockLevel*(tokens: seq[Token]): Expression =
-  var parser = Parser(tokens: tokens, pos: 0)
+  var parser = Parser(tokens: tokens, pos: 0, options: defaultOptions())
   result = parser.recordBlockLevel()
 
 proc parse*(str: string): Expression =
