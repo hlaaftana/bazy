@@ -21,6 +21,8 @@ iterator nextTokens*(p: var Parser): Token =
 # maybe some kind of delimiter counter. we have a parser object
 # maybe make distinction between open and parenthesized calls
 # maybe make distinction between (a) and a
+# maybe make distinction between indent and normal argument
+# a = \ b c => a = b(c). completely inconsistent with other \ uses but worth a try
 
 proc recordLineLevel*(parser: var Parser, closed = false): Expression
 
@@ -98,12 +100,14 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
       let tok = parser.tokens[parser.pos]
       if tok.kind == tkWord:
         inc parser.pos
+        if parser.tokens[parser.pos].kind == tkNewLine: inc parser.pos
         let name = tok.raw
         ex.arguments.add(Expression(kind: ExpressionKind.Colon,
           left: Expression(kind: Name, identifier: name),
           right: parser.recordWideLine()))
         backslashNames.add(name)
       else:
+        if parser.tokens[parser.pos].kind == tkNewLine: inc parser.pos
         ex.arguments.add(parser.recordWideLine())
         backslashNames.add("")
       dec parser.pos
@@ -343,6 +347,10 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
         finish()
     of tkSemicolon, tkCloseBrack, tkCloseCurly, tkCloseParen:
       finish()
+    of tkBackslash:
+      inc parser.pos
+      currentExprs.add(parser.recordLineLevel(closed))
+      finish()
     of tkColon:
       waiting = true
       currentExprs.add(Expression(kind: Symbol, identifier: ":"))
@@ -383,19 +391,6 @@ proc parse*(str: string): Expression =
 
 when isMainModule:
   let tests = [
-    "a",
-    "a.b",
-    "a+b",
-    "a + b",
-    "a +b",
-    "a+ b",
-    "a.b+c/2",
-    "a(b, c)",
-    "a * b / c ^ d ^ e << f | g + h < i as j",
-    "a do\n  b",
-    "a\n  b\n  c\nd\ne\n  f\n    g\nh",
-    "a b, c",
-    "a b c, d e, f",
     readFile("concepts/test.ba"),
     readFile("concepts/tag.ba"),
     readFile("concepts/practical.ba"),

@@ -11,23 +11,23 @@ next(args: Arguments) =
   if args.index >= args.str.size
     args.index = args.str.size
     ""
-  else for result x = ""
+  \else for result x = ""
     quote = 0 as char
     done = escaped = false
     while args.index < args.str.size
       ch = args.str[args.index]
       if done
         break
-      else if not escaped and ch == '\\'
+      \else if not escaped and ch == '\\'
         escaped = true
-      else if not escaped and ch == quote
+      \else if not escaped and ch == quote
         quote = 0
         done = true
-      else
+      \else
         escaped = false
         if quote == 0 and ch is whitespace
           # this is probably going to be ch.isWhitespace but you can have an is operator which calls a predicate on a value
           done = true
-        else
+        \else
           x += ch
     if x == "", x = next(args)

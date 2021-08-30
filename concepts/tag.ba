@@ -1,16 +1,15 @@
 strip_mentions(content: String) = content.replace("@", "@\u{200b}")
 
 command tag
-  set (name) [content]
+  set @name *content
     get_or_set(guild_data.tags, {:})[name] = {
       "content": content,
       "author": message.author.id
     }
     "Successful"
 
-  author (name)
+  author @name
     format "Author for tag {name} is {get_user guild_data.tags[name].author}"
 
-  name
-    if not_null? c = ??guild_data.tags[name].content, strip_mentions c
-    \else "Invalid tag"
+  @name
+    if not_null c = ??guild_data.tags[name].content, strip_mentions c, else: "Invalid tag"
