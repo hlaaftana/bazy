@@ -17,12 +17,22 @@ iterator nextTokens*(p: var Parser): Token =
     yield p.tokens[p.pos]
     inc p.pos
 
-# probably a lot of indent bugs, and need a way to stop all infinity bugs (mostly delimiters?)
-# maybe some kind of delimiter counter. we have a parser object
-# maybe make distinction between open and parenthesized calls
-# maybe make distinction between (a) and a
-# maybe make distinction between indent and normal argument
-# a = \ b c => a = b(c). completely inconsistent with other \ uses but worth a try
+#[
+
+notes:
+
+* probably a lot of indent bugs
+* some kind of delimiter counter/stack on parser object would stop some infinity bugs
+* almost definitely make distinction between (a) and a
+* maybe make distinction between open and circumfix calls
+* maybe make distinction between indent and normal argument
+* absorb wideline into block and add parameter to emulate wideline behavior.
+  this would mean ; and newline get equal treatment in blocks which i am not sure about
+* maybe = gets special treatment in lines. if you encounter = and comma kind is
+  none or list, finish line, record new line, make = expression, otherwise
+  consider as normal symbol
+
+]#
 
 proc recordLineLevel*(parser: var Parser, closed = false): Expression
 
