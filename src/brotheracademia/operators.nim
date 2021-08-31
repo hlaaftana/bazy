@@ -2,7 +2,6 @@ import expressions
 
 type
   Precedence* = enum
-    None
     Access # dot operators
     Colon
     Exponent
@@ -17,11 +16,11 @@ type
     Assignment
     Lambda
     Statement # postfix if/for
+    None
   
   Associativity* = enum Left, Right, Unary
 
 const Associativities*: array[Precedence, Associativity] = [
-  None: Left,
   Access: Left,
   Colon: Right,
   Exponent: Right,
@@ -39,7 +38,8 @@ const Associativities*: array[Precedence, Associativity] = [
   Separation: Right,
   Assignment: Right,
   Lambda: Right,
-  Statement: Left
+  Statement: Left,
+  None: Left
 ]
 
 proc precedence*(symbol: string): Precedence =
@@ -74,9 +74,9 @@ proc precedence*(symbol: string): Precedence =
     elif symbol[^1] == '=': Assignment
     else: Misc
 
-proc reduceOperators*(exprs: seq[Expression], lowestKind = succ(Precedence.None)): seq[Expression] =
+proc reduceOperators*(exprs: seq[Expression], lowestKind = low(Precedence)): seq[Expression] =
   result = exprs
-  if exprs.len <= 1 or lowestKind == high(Precedence): return
+  if exprs.len <= 1 or lowestKind == Precedence.None: return
   template isOperator(e: Expression): bool = e.kind == Symbol and e.identifier.precedence == lowestKind
   let assoc = Associativities[lowestKind]
   var mustPrefix = true

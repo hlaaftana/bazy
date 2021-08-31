@@ -444,8 +444,8 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
       of '#': comment = true
       of SpecialCharacterSet:
         let kind = TokenKind(low(SpecialCharacterKind).ord + find(SpecialCharacters, ch))
-        if kind in {tkDot, tkColon, tkSemicolon} and lastKind == kind:
-          dropLast
+        if kind in {tkDot, tkColon, #[tkSemicolon]#} and lastKind == kind:
+          dropLast()
           addToken(Token(kind: tkSymbol, raw: ch & recordSymbolPlus(tz, ch)))
         else:
           addTokenOf(kind)
@@ -463,6 +463,10 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
           addToken(Token(kind: tkNumber, num: recordNumber(tz, ch == '-')))
         else:
           addToken(Token(kind: tkSymbol, raw: recordSymbol(tz)))
+      elif lastKind in {tkDot, tkColon}:
+        let ch = SpecialCharacters[lastKind]
+        dropLast()
+        addToken(Token(kind: tkSymbol, raw: ch & recordSymbol(tz)))
       else: addToken(Token(kind: tkSymbol, raw: recordSymbol(tz)))
 
 proc tokenize*(str: string): seq[Token] =

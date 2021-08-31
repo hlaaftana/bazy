@@ -31,6 +31,7 @@ notes:
 * maybe = gets special treatment in lines. if you encounter = and comma kind is
   none or list, finish line, record new line, make = expression, otherwise
   consider as normal symbol
+* maybe statement operators like for can be called normally as well as infix
 
 ]#
 
