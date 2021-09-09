@@ -23,8 +23,6 @@ notes:
 
 * probably a lot of indent bugs
 * some kind of delimiter counter/stack on parser object would stop some infinity bugs
-* almost definitely make distinction between (a) and a
-* maybe make distinction between open and circumfix calls
 * maybe make distinction between indent and normal argument
 * absorb wideline into block and add parameter to emulate wideline behavior.
   this would mean ; and newline get equal treatment in blocks which i am not sure about
@@ -79,7 +77,7 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
     of tkComma, tkCloseBrack, tkCloseCurly, tkCloseParen:
       discard # error unexpected token
     elif token.kind == tkColon and result.statements.len > 0 and
-      result.statements[^1].kind in {Call, Infix, Prefix, Postfix}:
+      result.statements[^1].kind in {OpenCall, WrappedCall, Infix, Prefix, Postfix}:
       inc parser.pos
       let tok = parser.tokens[parser.pos]
       if tok.kind == tkWord:
@@ -90,17 +88,17 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
       else:
         result.statements[^1].arguments.add(parser.recordWideLine())
     elif token.kind == tkBackslash and result.statements.len > 0 and
-      result.statements[^1].kind in {Call, Infix, Prefix, Postfix} and (
+      result.statements[^1].kind in {OpenCall, WrappedCall, Infix, Prefix, Postfix} and (
         var lastEx = result.statements[^1]
         var valid = true
         for n in backslashNames:
           if n == "" and lastEx.arguments.len > 0 and
-            lastEx.arguments[^1].kind in {Call, Infix, Prefix, Postfix}:
+            lastEx.arguments[^1].kind in {OpenCall, WrappedCall, Infix, Prefix, Postfix}:
             lastEx = lastEx.arguments[^1]
           elif n != "" and lastEx.arguments.len > 0 and
             lastEx.arguments[^1].kind == ExpressionKind.Colon and
             lastEx.arguments[^1].left.kind == Name and lastEx.arguments[^1].left.identifier == n and
-            lastEx.arguments[^1].right.kind in {Call, Infix, Prefix, Postfix}:
+            lastEx.arguments[^1].right.kind in {OpenCall, WrappedCall, Infix, Prefix, Postfix}:
             lastEx = lastEx.arguments[^1].right
           else:
             valid = false
@@ -154,7 +152,7 @@ proc recordParen*(parser: var Parser): Expression =
       discard #error "error wwrong token for brack"
     else:
       s.add(parser.recordWideLine(true))
-  if not commad and s.len == 1: s[0]
+  if not commad and s.len == 1: Expression(kind: Wrapped, wrapped: s[0])
   else: Expression(kind: Tuple, elements: s)
 
 proc recordCurly*(parser: var Parser): Expression =
@@ -241,15 +239,15 @@ proc recordSingle*(parser: var Parser): Expression =
         case ex.kind
         of Tuple:
           if result.kind == Dot:
-            result = Expression(kind: Call, address: result.right, arguments: @[result.left] & ex.elements)
+            result = Expression(kind: WrappedCall, address: result.right, arguments: @[result.left] & ex.elements)
           else:
-            result = Expression(kind: Call, address: result, arguments: ex.elements)
+            result = Expression(kind: WrappedCall, address: result, arguments: ex.elements)
         of Array: result = Expression(kind: Subscript, address: result, arguments: ex.elements)
         of Set: result = Expression(kind: CurlySubscript, address: result, arguments: ex.elements)
         elif result.kind == Dot:
-          result = Expression(kind: Call, address: result.right, arguments: @[result.left, ex])
+          result = Expression(kind: WrappedCall, address: result.right, arguments: @[result.left, ex])
         else:
-          result = Expression(kind: Call, address: result, arguments: @[ex])
+          result = Expression(kind: WrappedCall, address: result, arguments: @[ex])
       else:
         result = Expression(kind: Infix, address: currentSymbol, arguments: @[result, ex])
         currentSymbol = nil
@@ -278,7 +276,7 @@ proc collectLineExpression*(exprs: seq[Expression]): Expression =
   var terms = reduceOperators(exprs)
   result = terms.pop
   while terms.len != 0:
-    result = Expression(kind: Call, address: terms.pop, arguments: @[result])
+    result = Expression(kind: OpenCall, address: terms.pop, arguments: @[result])
 
 proc recordLineLevel*(parser: var Parser, closed = false): Expression =
   type CommaKind = enum
@@ -298,7 +296,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
     #echo indent
     if not indent.isNil:
       if (parser.options.operatorIndentMakesBlock or indentIsDo) and
-        expressions.len == 1 and expressions[0].kind in {Prefix, Infix, Postfix, Call}:
+        expressions.len == 1 and expressions[0].kind in {Prefix, Infix, Postfix, OpenCall, WrappedCall}:
         #echo "we here tho"
         #echo expressions[0].arguments
         expressions[0].arguments.add(indent)
@@ -312,7 +310,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
     elif expressions.len == 1:
       result = expressions[0]
     else:
-      result = Expression(kind: Call, address: expressions[0], arguments: expressions[1..^1])
+      result = Expression(kind: OpenCall, address: expressions[0], arguments: expressions[1..^1])
     return
   for token in parser.nextTokens:
     case token.kind
@@ -329,7 +327,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
         expressions.add(first)
       var expression = terms.pop
       while terms.len != 0:
-        expression = Expression(kind: Call, address: terms.pop, arguments: @[expression])
+        expression = Expression(kind: OpenCall, address: terms.pop, arguments: @[expression])
       if comma == NoComma:
         comma = if termLen > 1: CommaCall else: CommaList
       expressions.add(expression)

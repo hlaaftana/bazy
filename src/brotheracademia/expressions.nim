@@ -5,7 +5,9 @@ type
     None
     Number, String
     Name, Symbol
-    Call, Infix, Prefix, Postfix, Subscript, CurlySubscript
+    Wrapped
+    OpenCall, WrappedCall, Infix, Prefix, Postfix
+    Subscript, CurlySubscript
     Dot, Colon
     Tuple, Array, Set
     Block
@@ -18,7 +20,9 @@ type
       str*: string
     of Name, Symbol:
       identifier*: string
-    of Call, Infix, Prefix, Postfix, Subscript, CurlySubscript:
+    of Wrapped:
+      wrapped*: Expression
+    of OpenCall, WrappedCall, Infix, Prefix, Postfix, Subscript, CurlySubscript:
       address*: Expression
       arguments*: seq[Expression]
     of Dot, Colon:
@@ -44,7 +48,9 @@ proc `$`*(ex: Expression): string =
   of Number: $ex.number
   of String: "\"" & ex.str & "\""
   of Name, Symbol: ex.identifier
-  of Call: $ex.address & "(" & ex.arguments.join(", ") & ")"
+  of Wrapped: "(" & $ex.wrapped & ")"
+  of OpenCall: "(" & $ex.address & " " & ex.arguments.join(", ") & ")"
+  of WrappedCall: $ex.address & "(" & ex.arguments.join(", ") & ")"
   of Infix:
     "(" & $ex.arguments[0] & " " & $ex.address & " " & $ex.arguments[1] & ")" &
       (if ex.arguments.len > 2: " {" & ex.arguments[2..^1].join(", ") & "}" else: "")
