@@ -9,7 +9,7 @@ when isMainModule:
     case ex.kind
     of None: discard
     of Number:
-      result.add(ex.number.floating.char)
+      result.add(ex.number.kind.char)
       result.add(ex.number.bits.char)
       let str = $ex.number
       result.add(str.len.char)

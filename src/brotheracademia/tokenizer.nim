@@ -9,9 +9,12 @@ type
   
   SpecialCharacterKind* = range[tkBackslash..tkCloseCurly]
 
+  NumberKind* = enum Integer Floating Unsigned
+
   NumberToken* = object
     base*: seq[byte]
-    floating*, negative*: bool
+    kind*: NumberKind
+    negative*: bool
     exp*, bits*: int
 
   Token* = object
@@ -55,7 +58,7 @@ proc `$`*(number: NumberToken): string =
     result.add('-')
   for d in number.base:
     result.add(('0'.byte + d).char)
-  if number.floating and -number.exp < number.base.len:
+  if number.kind == Floating and -number.exp < number.base.len:
     result.insert(".", number.base.len + number.exp)
   elif number.exp != 0:
     result.add('e')
@@ -255,9 +258,9 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
   result.negative = negative
   
   defer:
-    if not result.floating:
+    if result.kind != Floating:
       if lastZeros < -result.exp:
-        result.floating = true
+        result.kind = Floating
       elif result.exp < 0:
         # remove excessive zeros, ie 10000e-3 is simplified to 10
         result.exp = 0
@@ -275,15 +278,18 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
           lastZeros = 0
         result.base.add(c.byte - '0'.byte)
       of '.':
-        result.floating = true
+        result.kind = Floating
         stage = inDecimal
       of 'e', 'E':
         stage = inExpStart
       of 'i', 'I':
-        result.floating = false
+        result.kind = Integer
+        stage = inBits
+      of 'u', 'U':
+        result.kind = Unsigned
         stage = inBits
       of 'f', 'F':
-        result.floating = true
+        result.kind = Floating
         stage = inBits
       else:
         return
@@ -315,10 +321,13 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
     of inExp, inExpNeg:
       case c
       of 'i', 'I':
-        result.floating = false
+        result.kind = Integer
+        stage = inBits
+      of 'u', 'U':
+        result.kind = Unsigned
         stage = inBits
       of 'f', 'F':
-        result.floating = true
+        result.kind = Floating
         stage = inBits
       of '0'..'9':
         let val = (c.byte - '0'.byte).int

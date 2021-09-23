@@ -2,7 +2,7 @@ type
   TypeId* = distinct int
 
   ValueKind* = enum
-    vkInteger, vkFloat, vkFunction, vkPointer, vkOther
+    vkNone, vkInteger, vkFloat, vkFunction, vkPointer, vkOther
   
   OtherValueKind* = enum
     ovkString, ovkSeqValue, ovkTyped
@@ -19,12 +19,13 @@ type
 
   Value* = object
     case kind*: ValueKind
+    of vkNone: discard
     of vkInteger:
       integerValue*: int
     of vkFloat:
       floatValue*: float
     of vkFunction:
-      functionValue*: proc (args: sink seq[Value])
+      functionValue*: proc (args: sink seq[Value]): Value
     of vkPointer:
       pointerValue*: pointer
     of vkOther:
