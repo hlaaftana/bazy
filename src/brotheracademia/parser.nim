@@ -395,7 +395,9 @@ proc recordBlockLevel*(tokens: seq[Token]): Expression =
 
 proc parse*(str: string): Expression =
   var tokenizer = Tokenizer(str: str, pos: 0)
-  tokenizer.symbolWords = @["do", "and", "or", "is", "as", "not"]
+  tokenizer.symbolWords = @[
+    "do", "and", "or", "is", "as", "not", "in", "div", "mod", "xor"
+  ]
   result = parser.recordBlockLevel(tokenizer.tokenize())
 
 when isMainModule:

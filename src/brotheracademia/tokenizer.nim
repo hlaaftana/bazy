@@ -305,6 +305,8 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
       of 'e', 'E':
         stage = inExpStart
       else:
+        dec tz.pos
+        result.kind = Integer
         return
     of inExpStart:
       case c

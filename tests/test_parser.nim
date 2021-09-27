@@ -39,6 +39,10 @@ test "simple code":
     a = (b = \c d
       e = \f g
     h = \i j)""": "(a = ((b = (c (d (e = (f (g (h = (i j))))))))))",
+    "\"abc\"": "\"abc\"",
+    "1..20": "(1 .. 20)",
+    "1a": "(1 a)",
+    "1ea": "(1 ea)"
   }
 
   for inp, outp in tests.items:
