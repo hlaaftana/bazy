@@ -14,6 +14,6 @@ requires "nim >= 1.4.0"
 
 task buildall, "builds library and exe":
   echo "building all"
-  exec "nim c -d:release --gc:arc --d:useMalloc --outdir:bin src/brotheracademia"
-  exec "nim c --app:lib -d:release --gc:arc --d:useMalloc --outdir:bin src/brotheracademia"
+  exec "nim c -d:release --gc:arc --d:useMalloc --outdir:bin src/bazy"
+  exec "nim c --app:lib -d:release --gc:arc --d:useMalloc --outdir:bin src/bazy"
   echo "done building"

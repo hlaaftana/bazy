@@ -1,4 +1,4 @@
-import brotheracademia/[parser, tokenizer, expressions, runtime]
+import bazy/[parser, tokenizer, expressions, runtime]
 export parser, tokenizer, expressions, runtime
 
 when isMainModule:

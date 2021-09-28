@@ -1,6 +1,6 @@
 import unittest
 
-import brotheracademia/[parser, expressions]
+import bazy/[parser, expressions]
 
 test "simple code":
   let tests = {
