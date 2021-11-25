@@ -1,23 +1,21 @@
+import types, tables
+
 type
-  TypeId* = distinct int
-
   ValueKind* = enum
-    vkNone, vkInteger, vkFloat, vkFunction, vkPointer, vkOther
-  
-  OtherValueKind* = enum
-    ovkString, ovkSeqValue, ovkTyped
-  
-  OtherValue* = object
-    case kind*: OtherValueKind
-    of ovkString:
-      stringValue*: string
-    of ovkSeqValue:
-      seqValue*: seq[Value]
-    of ovkTyped:
-      typeId*: TypeId
-      typedData*: pointer
+    vkNone # some kind of null value
+    vkInteger, vkFloat # not sure of size
+    vkFunction # argument should be tuple?
+    vkTuple # VLA, not necessarily heterogenously typed
+    vkReference # reference to value
+    vkString, vkSeq # references to string and seq of value (string is general byte seq)
+    vkComposite # like tuple, but fields are tied to names and unordered
+    vkNominalTyped # value with an attached nominal type, unfortunately this is pointer to save memory
 
-  Value* = object
+  NominalTypedValue* = object
+    nominalType*: Type
+    value*: Value
+
+  Value* {.acyclic.} = object
     case kind*: ValueKind
     of vkNone: discard
     of vkInteger:
@@ -26,51 +24,17 @@ type
       floatValue*: float
     of vkFunction:
       functionValue*: proc (args: sink seq[Value]): Value
-    of vkPointer:
-      pointerValue*: pointer
-    of vkOther:
-      otherValue*: ref OtherValue
-
-# probably wont do bytecode and instead do expressions with value error tuple
-type
-  # stack is a seq
-  InstructionKind* = enum # most abstract instruction set maybe
-    ikStorePointer # stores a value in the stack to a pointer in the stack
-    ikReadPointer # reads a value in a pointer to the given index in the stack
-    ikStackSetConstant
-    ikStackSet
-    ikStackAdd
-    ikStackLen
-    ikStackSetLen
-    ikFunctionCall
-    ikGoto
-    ikCondGoto
-  
-  Instruction* = object
-    case kind*: InstructionKind
-    of ikStorePointer:
-      spPointerIndex*: int
-      spIndex*: int
-    of ikReadPointer:
-      rpPointerIndex*: int
-      rpIndex*: int
-    of ikStackSetConstant:
-      sscIndex*: int
-      sscConstant*: Value # not other
-    of ikStackSet:
-      ssIndex*: int
-      ssValueIndex*: int
-    of ikStackAdd:
-      saValueIndex*: int
-    of ikStackLen:
-      slIndex*: int
-    of ikStackSetLen:
-      sslValueIndex*: int
-    of ikFunctionCall:
-      fcArgsIndexes*: seq[int]
-    of ikGoto:
-      gtNumber*: int
-    of ikCondGoto:
-      cgtIndex*: int
-      cgtNumber*: int
-
+    of vkTuple:
+      # supposed to be just length and pointer, might do 16 bits length 48 bits pointer
+      tupleValue*: ref seq[Value]
+    of vkReference:
+      referenceValue*: ref Value
+    of vkString:
+      stringValue*: ref string
+    of vkSeq:
+      seqValue*: ref seq[Value]
+    of vkComposite:
+      # supposed to be represented more efficiently
+      compositeValue*: ref Table[string, Value]
+    of vkNominalTyped:
+      nominalValue*: ref NominalTypedValue

@@ -24,12 +24,14 @@ notes:
 * probably a lot of indent bugs
 * some kind of delimiter counter/stack on parser object would stop some infinity bugs
 * maybe make distinction between indent and normal argument
-* absorb wideline into block and add parameter to emulate wideline behavior.
-  this would mean ; and newline get equal treatment in blocks which i am not sure about
-* maybe = gets special treatment in lines. if you encounter = and comma kind is
-  none or list, finish line, record new line, make = expression, otherwise
-  consider as normal symbol
-* maybe statement operators like for can be called normally as well as infix
+* distinction between ; block and normal block
+* special statement operators. if you encounter operators like = and comma kind is
+  none or list, record new line afterward
+* similar to above, postfix statements like if/for/while can work the same way
+  except ending the line before and not caring about commas
+* a + b c should not parse as (a + b)(c),
+  unfortunately cant think of good solution other than unwrapping the preceding AST
+* also a+b c should parse as (a + b)(c), so maybe PathPrefix/Infix/Postfix etc
 
 ]#
 

@@ -1,21 +1,19 @@
-# indented block expressions with do
 # `do` for indented block, inferred in indents outside parens etc.
-# old kismet path syntax is retained so you can do `foo(a, b)` and `a.foo(b)` and a dot can go between ( and preceding token
-# calls can be done like `foo a, b`
-# however to call `a.foo` you have to do `(a.foo b)` or `(a.foo)(b)` if i can make that work
-# (foo a, b) parses as ~~(foo(a), b)~~ (foo(a, b)), and a, b by itself parses as (a, b)
-# operators exist, always have more precedence than open calls, so `foo a = b` is `foo(a = b)`
+# `foo(a, b)`, `foo.(a, b)`, `a.foo(b)`, `foo a, b`
+# `(a.foo b)`, `(a.foo)(b)` for calling `a.foo`
+# `(foo a, b)` => `(foo(a, b))`, `a, b` => `(a, b)`
+# operators exist, in the usual case `foo a = b` is `foo(a = b)`
 # operators can be words, `is`, `div`, `and`
 # foo bar a, b parses as foo(bar(a), b) not foo(bar(a, b)) conflicted on this
 # foo bar a, b do c parses as foo(bar(a), b, c)
 
-# maybe does or => or ->
-binary_search(a, k) = # indent without do
-  # functions can be generic, which makes them gradually typed
+binary_search(a, k) =
+  # indent without do
   for result i = 0
-    b = a.size # the type of a is checked to see if .size can be called and how
+    b = a.size
     while i < b
-      if a[mid] < k, i = mid + 1, else: b = mid # current if else syntax
+      # current if else syntax
+      if a[mid] < k, i = mid + 1, else: b = mid
     unless i < a.size and a[i] == k, i = -1
 
 binary_search(a, k) =
@@ -33,7 +31,7 @@ assert
   binary_search([3, 5, 1, 4, 1], 1) == -1
 
 space functional
-  permutation(n: Int, r: Int) = \product n - r + 1 .. n
+  permutation(n: Int, r: Int) = \product n - r + 1 .. n # \ will become unneeded here
   factorial(n: Int) = permutation(n, n)
   combination(n: Int, r: Int) = permutation(n, r) / factorial(r)
 
@@ -45,7 +43,7 @@ space imperative
 
   permutation(n: Int, r: Int) =
     for result x = 1, each i = succ n - r .. n
-      x |>= * i # this operator is made up but is possible
+      x |>= *i # this operator is made up but is possible
 
   combination(n: Int, r: Int) = do for result x = 1, each i in 0..<r do while i < r do x = x * (n - i) / (r - i)
 

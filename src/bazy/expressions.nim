@@ -10,7 +10,7 @@ type
     Subscript, CurlySubscript
     Dot, Colon
     Tuple, Array, Set
-    Block
+    Block, SemicolonBlock
   Expression* {.acyclic.} = ref object
     case kind*: ExpressionKind
     of None: discard
@@ -30,7 +30,7 @@ type
     of Tuple, Array, Set:
       # these can be colon expressions
       elements*: seq[Expression]
-    of Block:
+    of Block, SemicolonBlock:
       statements*: seq[Expression]
 
 proc makeInfix*(op, a, b: Expression): Expression =
@@ -67,7 +67,7 @@ proc `$`*(ex: Expression): string =
   of Tuple: "(" & ex.elements.join(", ") & ")"
   of Array: "[" & ex.elements.join(", ") & "]"
   of Set: "{" & ex.elements.join(", ") & "}"
-  of Block:
+  of Block, SemicolonBlock:
     var s = "(\n"
     for i in 0 ..< ex.statements.len:
       let ss = $ex.statements[i]

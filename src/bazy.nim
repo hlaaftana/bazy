@@ -31,7 +31,7 @@ when isMainModule:
       result.add(binary(ex.right))
     of OpenCall, WrappedCall, Infix, Prefix, Postfix,
        Subscript, CurlySubscript,
-       Tuple, Array, Set, Block:
+       Tuple, Array, Set, Block, SemicolonBlock:
       let exprs =
         case ex.kind
         of OpenCall, WrappedCall, Infix, Prefix, Postfix,

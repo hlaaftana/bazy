@@ -1,7 +1,6 @@
 Arguments = object(str: String, index: Int)
-# objects are not nominal, but types are unique. meaning functions defined on Arguments are only defined on Arguments
 
-arguments(str: String) = (str: str, index: 0)
+arguments(str: String) = Arguments(str: str, index: 0)
 
 goBack(args: Arguments, chars: Int) = args.index -= chars
 rest(args: Arguments) = raw[min(args.index, args.str.size) .. args.str.lastIndex]

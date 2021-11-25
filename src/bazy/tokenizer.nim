@@ -53,16 +53,18 @@ const
     result
 
 proc `$`*(number: NumberToken): string =
-  result = newStringOfCap(number.base.len + 2)
+  result = newStringOfCap(number.base.len + 10)
   if number.negative:
     result.add('-')
   for d in number.base:
     result.add(('0'.byte + d).char)
-  if number.kind == Floating and -number.exp < number.base.len:
-    result.insert(".", number.base.len + number.exp)
+  if number.kind == Floating and number.exp < 0 and -number.exp < number.base.len:
+    result.insert(".", number.negative.ord + number.base.len + number.exp)
   elif number.exp != 0:
+    if number.base.len > 1:
+      result.insert(".", number.negative.ord + 1)
     result.add('e')
-    result.add($number.exp)
+    result.add($(number.exp + number.base.len - 1))
 
 proc `$`*(token: Token): string =
   result = case token.kind
@@ -249,19 +251,21 @@ proc recordString*(tz: var Tokenizer, quote: char): string =
 
 proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
   type Stage = enum
-    inBase, inDecimal, inExpStart, inExp, inExpNeg, inBits
+    inBase, inDecimalStart, inDecimal, inExpStart, inExp, inExpNeg, inBits
 
   var
     stage = inBase
     lastZeros: Natural = 0
+    recordedExp = 0
   
   result.negative = negative
   
   defer:
+    result.exp += recordedExp
     if result.kind != Floating:
       if lastZeros < -result.exp:
         result.kind = Floating
-      elif result.exp < 0:
+      elif result.exp < 0 and -result.exp < result.base.len:
         # remove excessive zeros, ie 10000e-3 is simplified to 10
         result.exp = 0
         result.base.setLen(result.base.len + result.exp)
@@ -279,7 +283,7 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
         result.base.add(c.byte - '0'.byte)
       of '.':
         result.kind = Floating
-        stage = inDecimal
+        stage = inDecimalStart
       of 'e', 'E':
         stage = inExpStart
       of 'i', 'I':
@@ -292,6 +296,15 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
         result.kind = Floating
         stage = inBits
       else:
+        return
+    of inDecimalStart:
+      case c
+      of '0'..'9':
+        stage = inDecimal
+        dec tz.pos
+      else:
+        dec tz.pos
+        result.kind = Integer
         return
     of inDecimal:
       case c
@@ -305,8 +318,6 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
       of 'e', 'E':
         stage = inExpStart
       else:
-        dec tz.pos
-        result.kind = Integer
         return
     of inExpStart:
       case c
@@ -316,12 +327,15 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
         stage = inExpNeg
       of '0'..'9':
         stage = inExp
-        continue
+        dec tz.pos
       else:
         dec tz.pos
         return
     of inExp, inExpNeg:
       case c
+      of '0'..'9':
+        let val = (c.byte - '0'.byte).int
+        recordedExp = recordedExp * 10 + (if stage == inExpNeg: -val else: val)
       of 'i', 'I':
         result.kind = Integer
         stage = inBits
@@ -331,11 +345,7 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
       of 'f', 'F':
         result.kind = Floating
         stage = inBits
-      of '0'..'9':
-        let val = (c.byte - '0'.byte).int
-        result.exp = result.exp * 10 + (if stage == inExpNeg: -val else: val)
-      else:
-        return
+      else: return
     of inBits:
       case c
       of '0'..'9':
@@ -492,5 +502,6 @@ when isMainModule:
     let b = cpuTime()
     echo "took ", b - a
 
-  echo tokenize(";;")
+  echo tokenize("3.0 / 2.0")
+  echo tokenize("+3.0 / +2.0")
   #echo tokenize(readFile("concepts/v2.ksmt2"))
