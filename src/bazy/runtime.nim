@@ -1,25 +1,28 @@
-import types, tables
+import tables
+
+# would super prefer not to use a different runtime
+# the transition from prototyped to real application code should be as smooth as possible
+
+# type system + well integrated contracts pattern matching whatever runtime checks
 
 type
   ValueKind* = enum
     vkNone # some kind of null value
-    vkInteger, vkFloat # not sure of size
+    vkInteger, vkUnsigned, vkFloat # not sure of size
     vkFunction # argument should be tuple?
-    vkTuple # VLA, not necessarily heterogenously typed
+    vkTuple # like java array but typed like TS, not necessarily hetero or homogenously typed
     vkReference # reference to value
     vkString, vkSeq # references to string and seq of value (string is general byte seq)
     vkComposite # like tuple, but fields are tied to names and unordered
     vkNominalTyped # value with an attached nominal type, unfortunately this is pointer to save memory
-
-  NominalTypedValue* = object
-    nominalType*: Type
-    value*: Value
 
   Value* {.acyclic.} = object
     case kind*: ValueKind
     of vkNone: discard
     of vkInteger:
       integerValue*: int
+    of vkUnsigned:
+      unsignedValue*: uint
     of vkFloat:
       floatValue*: float
     of vkFunction:
@@ -38,3 +41,15 @@ type
       compositeValue*: ref Table[string, Value]
     of vkNominalTyped:
       nominalValue*: ref NominalTypedValue
+
+  NominalTypeKind* = enum
+    ntDistinct, ntEnum, ntObject
+
+  NominalType* = ref object
+    name*: string
+    case kind*: NominalTypeKind
+    of ntDistinct, ntEnum, ntObject: discard
+
+  NominalTypedValue* = object
+    nominalType*: NominalType
+    value*: Value

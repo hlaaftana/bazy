@@ -502,6 +502,4 @@ when isMainModule:
     let b = cpuTime()
     echo "took ", b - a
 
-  echo tokenize("3.0 / 2.0")
-  echo tokenize("+3.0 / +2.0")
   #echo tokenize(readFile("concepts/v2.ksmt2"))

@@ -6,6 +6,7 @@ description   = "brother academia"
 license       = "MIT"
 srcDir        = "src"
 installExt    = @["nim"]
+skipDirs      = @["src/bazy/off"]
 
 
 # Dependencies
@@ -23,7 +24,7 @@ task docs, "build docs for all modules":
 
 task tests, "run tests for multiple backends":
   when declared(runTests):
-    runTests(backends = {c, js, #[nims]#})
+    runTests(backends = {c, js, nims}, optionCombos = @[""#[, "--gc:arc"]#])
   else:
     echo "tests task not implemented, need nimbleutils"
 

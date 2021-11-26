@@ -1,4 +1,7 @@
-import unittest
+when (compiles do: import nimbleutils/bridge):
+  import nimbleutils/bridge
+else:
+  import unittest
 
 import bazy/[parser, expressions]
 
@@ -6,11 +9,11 @@ test "simple code":
   let tests = {
     "a": "a",
     "a.b": "a.b",
-    "a+b": "(a + b)",
+    "a+b": "(a+b)",
     "a + b": "(a + b)",
-    "a +b": "(a (+ b))",
-    "a+ b": "((a +) b)",
-    "a.b+c/2": "((a.b + c) / 2)",
+    "a +b": "(a (+b))",
+    "a+ b": "((a+) b)",
+    "a.b+c/2": "((a.b+c)/2)",
     "a(b, c)": "a(b, c)",
     "a * b / c ^ d ^ e << f | g + h < i as j":
       "((((a * b) / (c ^ (d ^ e))) << ((f | g) + h)) < (i as j))",
@@ -40,14 +43,17 @@ test "simple code":
       e = \f g
     h = \i j)""": "(a = ((b = (c (d (e = (f (g (h = (i j))))))))))",
     "\"abc\"": "\"abc\"",
-    "1..20": "(1 .. 20)",
+    "1..20": "(1..20)",
     "1a": "(1 a)",
     "1ea": "(1 ea)",
     "+3.0 / -2.0": "(3.0 / -2.0)",
     "3e-2000 / 2e1400": "(3e-2000 / 2e1400)",
     "+3.1419e2 / -27.828e-1": "(314.19 / -2.7828)",
     "0.03": "0.03",
-    "0.00042e-4": "0.00042e-4"
+    "0.00042e-4": "0.00042e-4",
+    "a + b c + d e": "(a + (b (c + (d e))))",
+    "a+b c+d e": "((a+b) ((c+d) e))",
+    "a + b c, d e + f g": "((a + (b c)), (d (e + (f g))))"
   }
 
   for inp, outp in tests.items:

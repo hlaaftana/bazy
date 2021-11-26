@@ -6,7 +6,8 @@ type
     Number, String
     Name, Symbol
     Wrapped
-    OpenCall, WrappedCall, Infix, Prefix, Postfix
+    OpenCall, Infix, Prefix, Postfix
+    PathCall, PathInfix, PathPrefix, PathPostfix
     Subscript, CurlySubscript
     Dot, Colon
     Tuple, Array, Set
@@ -22,7 +23,9 @@ type
       identifier*: string
     of Wrapped:
       wrapped*: Expression
-    of OpenCall, WrappedCall, Infix, Prefix, Postfix, Subscript, CurlySubscript:
+    of OpenCall, Infix, Prefix, Postfix,
+      PathCall, PathInfix, PathPrefix, PathPostfix,
+      Subscript, CurlySubscript:
       address*: Expression
       arguments*: seq[Expression]
     of Dot, Colon:
@@ -50,7 +53,6 @@ proc `$`*(ex: Expression): string =
   of Name, Symbol: ex.identifier
   of Wrapped: "(" & $ex.wrapped & ")"
   of OpenCall: "(" & $ex.address & " " & ex.arguments.join(", ") & ")"
-  of WrappedCall: $ex.address & "(" & ex.arguments.join(", ") & ")"
   of Infix:
     "(" & $ex.arguments[0] & " " & $ex.address & " " & $ex.arguments[1] & ")" &
       (if ex.arguments.len > 2: " {" & ex.arguments[2..^1].join(", ") & "}" else: "")
@@ -59,6 +61,16 @@ proc `$`*(ex: Expression): string =
       (if ex.arguments.len > 1: " {" & ex.arguments[1..^1].join(", ") & "}" else: "")
   of Prefix:
     "(" & $ex.address & " " & $ex.arguments[0] & ")" &
+      (if ex.arguments.len > 1: " {" & ex.arguments[1..^1].join(", ") & "}" else: "")
+  of PathCall: $ex.address & "(" & ex.arguments.join(", ") & ")"
+  of PathInfix:
+    "(" & $ex.arguments[0] & $ex.address & $ex.arguments[1] & ")" &
+      (if ex.arguments.len > 2: " {" & ex.arguments[2..^1].join(", ") & "}" else: "")
+  of PathPostfix:
+    "(" & $ex.arguments[0] & $ex.address & ")" &
+      (if ex.arguments.len > 1: " {" & ex.arguments[1..^1].join(", ") & "}" else: "")
+  of PathPrefix:
+    "(" & $ex.address & $ex.arguments[0] & ")" &
       (if ex.arguments.len > 1: " {" & ex.arguments[1..^1].join(", ") & "}" else: "")
   of Subscript: $ex.address & "[" & ex.arguments.join(", ") & "]"
   of CurlySubscript: $ex.address & "{" & ex.arguments.join(", ") & "}"

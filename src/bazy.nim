@@ -29,12 +29,14 @@ when isMainModule:
     of Dot, Colon:
       result.add(binary(ex.left))
       result.add(binary(ex.right))
-    of OpenCall, WrappedCall, Infix, Prefix, Postfix,
+    of OpenCall, Infix, Prefix, Postfix,
+       PathCall, PathInfix, PathPrefix, PathPostfix,
        Subscript, CurlySubscript,
        Tuple, Array, Set, Block, SemicolonBlock:
       let exprs =
         case ex.kind
-        of OpenCall, WrappedCall, Infix, Prefix, Postfix,
+        of OpenCall, Infix, Prefix, Postfix,
+           PathCall, PathInfix, PathPrefix, PathPostfix,
            Subscript, CurlySubscript:
           let args = ex.arguments
           @[ex.address] & args

@@ -43,7 +43,7 @@ proc toJs*(ex: Expression): string =
       result.addEscapedChar(c)
   of Name, Symbol: result = mangle(ex.identifier)
   of Wrapped: result = "(" & toJs(ex.wrapped) & ")"
-  of OpenCall, WrappedCall, Infix, Prefix, Postfix:
+  of OpenCall, PathCall, Infix, Prefix, Postfix:
     discard
   of Subscript, CurlySubscript:
     result = "(" & toJs(ex.address) & ")[" & ex.arguments[0].toJs & "]"

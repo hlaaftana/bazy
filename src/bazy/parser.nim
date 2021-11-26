@@ -21,17 +21,11 @@ iterator nextTokens*(p: var Parser): Token =
 
 notes:
 
-* probably a lot of indent bugs
-* some kind of delimiter counter/stack on parser object would stop some infinity bugs
-* maybe make distinction between indent and normal argument
-* distinction between ; block and normal block
-* special statement operators. if you encounter operators like = and comma kind is
-  none or list, record new line afterward
-* similar to above, postfix statements like if/for/while can work the same way
-  except ending the line before and not caring about commas
-* a + b c should not parse as (a + b)(c),
-  unfortunately cant think of good solution other than unwrapping the preceding AST
-* also a+b c should parse as (a + b)(c), so maybe PathPrefix/Infix/Postfix etc
+* probably a lot of indent bugs when you indent in parentheses or with variable spaces
+* some kind of delimiter counter/stack on parser object would stop infinite loops from errors
+* maybe make distinction between indent and normal argument, or `do` and indent, no idea
+* maybe postfix statements like if/for/while can end the line and record a new line for the RHS,
+  or maybe some god operator like |-> to invoke these, dont know a not ugly operator though
 
 ]#
 
@@ -58,14 +52,11 @@ proc recordWideLine*(parser: var Parser, closed = false): Expression =
         break
     else:
       s.add(parser.recordLineLevel(closed))
-  if semicoloned: Expression(kind: Block, statements: s)
+  if semicoloned: Expression(kind: SemicolonBlock, statements: s)
   elif s.len == 0: Expression(kind: ExpressionKind.None)
   else: s[0]
 
 proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
-  template finish =
-    if result.statements.len == 1: result = result.statements[0]
-    return
   result = Expression(kind: Block)
   var backslashNames: seq[string]
   for token in parser.nextTokens:
@@ -73,34 +64,31 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
     of tkNone, tkWhitespace, tkIndent, tkNewline: continue
     of tkSemicolon: discard
     of tkIndentBack:
-      if indented:
-        finish()
-      continue
+      assert indented, "should not receive indent back at top level"
+      break
     of tkComma, tkCloseBrack, tkCloseCurly, tkCloseParen:
-      discard # error unexpected token
+      assert false, "wrong delim in block"
     elif token.kind == tkColon and result.statements.len > 0 and
-      result.statements[^1].kind in {OpenCall, WrappedCall, Infix, Prefix, Postfix}:
+      result.statements[^1].kind in {OpenCall, PathCall, Infix, Prefix, Postfix}:
       inc parser.pos
-      let tok = parser.tokens[parser.pos]
-      if tok.kind == tkWord:
+      result.statements[^1].arguments.add(parser.recordWideLine())
+      #[if tok.kind == tkWord:
         inc parser.pos
         result.statements[^1].arguments.add(Expression(kind: ExpressionKind.Colon,
           left: Expression(kind: Name, identifier: tok.raw),
-          right: parser.recordWideLine()))
-      else:
-        result.statements[^1].arguments.add(parser.recordWideLine())
+          right: parser.recordWideLine()))]#
     elif token.kind == tkBackslash and result.statements.len > 0 and
-      result.statements[^1].kind in {OpenCall, WrappedCall, Infix, Prefix, Postfix} and (
+      result.statements[^1].kind in {OpenCall, PathCall, Infix, Prefix, Postfix} and (
         var lastEx = result.statements[^1]
         var valid = true
         for n in backslashNames:
           if n == "" and lastEx.arguments.len > 0 and
-            lastEx.arguments[^1].kind in {OpenCall, WrappedCall, Infix, Prefix, Postfix}:
+            lastEx.arguments[^1].kind in {OpenCall, PathCall, Infix, Prefix, Postfix}:
             lastEx = lastEx.arguments[^1]
           elif n != "" and lastEx.arguments.len > 0 and
             lastEx.arguments[^1].kind == ExpressionKind.Colon and
             lastEx.arguments[^1].left.kind == Name and lastEx.arguments[^1].left.identifier == n and
-            lastEx.arguments[^1].right.kind in {OpenCall, WrappedCall, Infix, Prefix, Postfix}:
+            lastEx.arguments[^1].right.kind in {OpenCall, PathCall, Infix, Prefix, Postfix}:
             lastEx = lastEx.arguments[^1].right
           else:
             valid = false
@@ -121,12 +109,13 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
         if parser.tokens[parser.pos].kind == tkNewLine: inc parser.pos
         ex.arguments.add(parser.recordWideLine())
         backslashNames.add("")
-      dec parser.pos
+      #dec parser.pos
+      #^ why was this here? it broke everything
       continue
     else:
       result.statements.add(parser.recordWideLine())
     reset backslashNames
-  finish()
+  if result.statements.len == 1: result = result.statements[0]
 
 proc recordBrack*(parser: var Parser): Expression =
   var s: seq[Expression]
@@ -136,7 +125,7 @@ proc recordBrack*(parser: var Parser): Expression =
     of tkCloseBrack:
       break
     of tkCloseCurly, tkCloseParen:
-      discard #error "error wwrong token for brack"
+      assert false, "wrong delim for brack"
     else:
       s.add(parser.recordWideLine(true))
   Expression(kind: Array, elements: s)
@@ -151,7 +140,7 @@ proc recordParen*(parser: var Parser): Expression =
     of tkCloseParen:
       break
     of tkCloseCurly, tkCloseBrack:
-      discard #error "error wwrong token for brack"
+      assert false, "wrong delim for paren"
     else:
       s.add(parser.recordWideLine(true))
   if not commad and s.len == 1: Expression(kind: Wrapped, wrapped: s[0])
@@ -167,7 +156,7 @@ proc recordCurly*(parser: var Parser): Expression =
     of tkCloseCurly:
       break
     of tkCloseBrack, tkCloseParen:
-      discard #error "error wwrong token for brack"
+      assert false, "wrong delim for curly"
     else:
       s.add(parser.recordWideLine(makeSet))
   if makeSet: Expression(kind: Set, elements: s)
@@ -182,19 +171,21 @@ proc recordSingle*(parser: var Parser): Expression =
   var currentSymbol: Expression
   var lastWhitespace: bool
   var lastDot: bool
-  template finish =
+  defer:
     dec parser.pos
     let resultWasNil = result.isNil
     if not currentSymbol.isNil:
       if resultWasNil:
         result = currentSymbol
       else:
-        result = Expression(kind: Postfix, address: currentSymbol, arguments: @[result])
-    if precedingDot:
-      discard # error no idea wtf preceding dot does
+        result = Expression(kind: PathPostfix, address: currentSymbol, arguments: @[result])
     if not precedingSymbol.isNil and not resultWasNil:
-      result = Expression(kind: Prefix, address: precedingSymbol, arguments: @[result])
-    return
+      result = Expression(kind: PathPrefix, address: precedingSymbol, arguments: @[result])
+    if precedingDot:
+      result = Expression(kind: Dot,
+        left: Expression(kind: ExpressionKind.None),
+        right: result)
+  template finish = return
   for token in parser.nextTokens:
     case token.kind
     of tkNone: discard
@@ -202,7 +193,9 @@ proc recordSingle*(parser: var Parser): Expression =
       if not currentSymbol.isNil:
         finish()
       lastWhitespace = true
-    of tkIndent, tkIndentBack, tkNewLine, tkComma, tkSemicolon, tkCloseParen, tkCloseCurly, tkCloseBrack, tkColon:
+    of tkIndent, tkIndentBack, tkNewLine,
+       tkComma, tkSemicolon, tkCloseParen,
+       tkCloseCurly, tkCloseBrack, tkColon:
       finish()
     of tkString, tkNumber, tkWord:
       let ex = case token.kind
@@ -220,7 +213,7 @@ proc recordSingle*(parser: var Parser): Expression =
       elif lastDot:
         result = Expression(kind: Dot, left: result, right: ex)
       elif not currentSymbol.isNil:
-        result = Expression(kind: Infix, address: currentSymbol, arguments: @[result, ex])
+        result = Expression(kind: PathInfix, address: currentSymbol, arguments: @[result, ex])
         currentSymbol = nil
       else: # lastWhitespace
         finish()
@@ -241,17 +234,17 @@ proc recordSingle*(parser: var Parser): Expression =
         case ex.kind
         of Tuple:
           if result.kind == Dot:
-            result = Expression(kind: WrappedCall, address: result.right, arguments: @[result.left] & ex.elements)
+            result = Expression(kind: PathCall, address: result.right, arguments: @[result.left] & move ex.elements)
           else:
-            result = Expression(kind: WrappedCall, address: result, arguments: ex.elements)
-        of Array: result = Expression(kind: Subscript, address: result, arguments: ex.elements)
-        of Set: result = Expression(kind: CurlySubscript, address: result, arguments: ex.elements)
-        elif result.kind == Dot:
-          result = Expression(kind: WrappedCall, address: result.right, arguments: @[result.left, ex])
+            result = Expression(kind: PathCall, address: result, arguments: move ex.elements)
+        of Array: result = Expression(kind: Subscript, address: result, arguments: move ex.elements)
+        of Set: result = Expression(kind: CurlySubscript, address: result, arguments: move ex.elements)
+        elif result.kind == Dot: # single expression
+          result = Expression(kind: PathCall, address: result.right, arguments: @[result.left, ex])
         else:
-          result = Expression(kind: WrappedCall, address: result, arguments: @[ex])
+          result = Expression(kind: PathCall, address: result, arguments: @[ex])
       else:
-        result = Expression(kind: Infix, address: currentSymbol, arguments: @[result, ex])
+        result = Expression(kind: PathInfix, address: currentSymbol, arguments: @[result, ex])
         currentSymbol = nil
       lastDot = false
       lastWhitespace = false
@@ -271,14 +264,21 @@ proc recordSingle*(parser: var Parser): Expression =
       lastDot = false
       lastWhitespace = false
     else: discard
-  finish()
 
 proc collectLineExpression*(exprs: seq[Expression]): Expression =
   if exprs.len == 0: return Expression(kind: ExpressionKind.None)
   var terms = reduceOperators(exprs)
   result = terms.pop
   while terms.len != 0:
-    result = Expression(kind: OpenCall, address: terms.pop, arguments: @[result])
+    let callee = terms.pop
+    if callee.kind in {Prefix, Infix}: # postfix should not be possible
+      var deepest = callee
+      while deepest.arguments[^1].kind in {Prefix, Infix}:
+        deepest = deepest.arguments[^1]
+      deepest.arguments[^1] = Expression(kind: OpenCall, address: deepest.arguments[^1], arguments: @[result])
+      result = callee
+    else:
+      result = Expression(kind: OpenCall, address: callee, arguments: @[result])
 
 proc recordLineLevel*(parser: var Parser, closed = false): Expression =
   type CommaKind = enum
@@ -289,22 +289,17 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
   var currentExprs: seq[Expression]
   var indent: Expression
   var indentIsDo: bool
-  template finish() =
+  defer: # rather defer than put this at the end and try to put `break` everywhere
     dec parser.pos
     if currentExprs.len != 0:
       expressions.add(currentExprs.collectLineExpression())
       reset currentExprs
-    #echo expressions
-    #echo indent
     if not indent.isNil:
       if (parser.options.operatorIndentMakesBlock or indentIsDo) and
-        expressions.len == 1 and expressions[0].kind in {Prefix, Infix, Postfix, OpenCall, WrappedCall}:
-        #echo "we here tho"
-        #echo expressions[0].arguments
+        expressions.len == 1 and expressions[0].kind in {Prefix, Infix, Postfix, OpenCall, PathCall}:
         expressions[0].arguments.add(indent)
       else:
         expressions.add(indent)
-    #echo expressions
     if expressions.len == 0:
       result = Expression(kind: ExpressionKind.None)
     elif comma == CommaList:
@@ -313,7 +308,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
       result = expressions[0]
     else:
       result = Expression(kind: OpenCall, address: expressions[0], arguments: expressions[1..^1])
-    return
+  template finish = return
   for token in parser.nextTokens:
     case token.kind
     of tkNone, tkWhitespace: discard
@@ -321,19 +316,17 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
       if closed:
         finish()
       waiting = true
-      var terms = reduceOperators(currentExprs)
-      let termLen = terms.len
-      if comma == NoComma and termLen > 1:
-        let first = terms[0]
-        terms.delete(0)
-        expressions.add(first)
-      var expression = terms.pop
-      while terms.len != 0:
-        expression = Expression(kind: OpenCall, address: terms.pop, arguments: @[expression])
-      if comma == NoComma:
-        comma = if termLen > 1: CommaCall else: CommaList
-      expressions.add(expression)
-      reset currentExprs
+      if currentExprs.len != 0: # consider ,, typo as ,
+        let ex = collectLineExpression(currentExprs)
+        if comma == NoComma and ex.kind == OpenCall:
+          assert ex.arguments.len == 1, "opencall with more than 1 argument should be impossible before comma"
+          comma = CommaCall
+          expressions.add(ex.address)
+          expressions.add(ex.arguments)
+        else:
+          if comma == NoComma: comma = CommaList
+          expressions.add(ex)
+        reset currentExprs
     of tkNewline:
       if waiting or closed:
         for tok in parser.nextTokens:
@@ -371,14 +364,6 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
         indent = parser.recordBlockLevel(indented = true)
         indentIsDo = false
         finish()
-        #[if currentExprs.len != 0:
-          var terms = reduceOperators(currentExprs)
-          var expression = terms.pop
-          while terms.len != 0:
-            expression = Expression(kind: Call, address: terms.pop, arguments: @[expression])
-          expressions.add(expression)
-          reset currentExprs
-        expressions.add(parser.recordBlockLevel(indented = true))]#
     elif (token.kind == tkSymbol and token.raw == "do"):
       waiting = false
       inc parser.pos, 2
@@ -387,7 +372,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
       finish()
     else:
       let ex = parser.recordSingle()
-      waiting = false #ex.kind == Symbol
+      waiting = false # symbols do not bypass this
       currentExprs.add(ex)
   finish()
 
@@ -405,8 +390,9 @@ proc parse*(str: string): Expression =
 when isMainModule:
   let tests = [
     readFile("concepts/test.ba"),
-    readFile("concepts/tag.ba"),
-    readFile("concepts/practical.ba"),
+    #readFile("concepts/tag.ba"),
+    #readFile("concepts/arguments.ba"),
+    #readFile("concepts/badspec.ba")
   ]
 
   for t in tests:

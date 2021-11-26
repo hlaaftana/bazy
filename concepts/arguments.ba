@@ -1,3 +1,4 @@
+# not real language
 Arguments = object(str: String, index: Int)
 
 arguments(str: String) = Arguments(str: str, index: 0)
@@ -11,7 +12,7 @@ next(args: Arguments) =
     args.index = args.str.size
     ""
   \else for result x = ""
-    quote = 0 as char
+    quote = 0 char # calling literal with type instead of type with literal
     done = escaped = false
     while args.index < args.str.size
       ch = args.str[args.index]
@@ -22,10 +23,9 @@ next(args: Arguments) =
       \else if not escaped and ch == quote
         quote = 0
         done = true
-      \else
-        escaped = false
-        if quote == 0 and ch is whitespace
-          # this is probably going to be ch.isWhitespace but you can have an is operator which calls a predicate on a value
+      \else escaped = false; do
+        if quote == 0 and ch ~ whitespace
+          # matches operator, just an idea
           done = true
         \else
           x += ch
