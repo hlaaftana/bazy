@@ -64,8 +64,9 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
     of tkNone, tkWhitespace, tkIndent, tkNewline: continue
     of tkSemicolon: discard
     of tkIndentBack:
-      assert indented, "should not receive indent back at top level"
-      break
+      if indented:
+        break
+      continue
     of tkComma, tkCloseBrack, tkCloseCurly, tkCloseParen:
       assert false, "wrong delim in block"
     elif token.kind == tkColon and result.statements.len > 0 and
@@ -395,9 +396,21 @@ when isMainModule:
     #readFile("concepts/badspec.ba")
   ]
 
-  for t in tests:
-    echo "input: ", t
-    echo "output: ", parse(t)
+  #for t in tests:
+  #  echo "input: ", t
+  #  echo "output: ", parse(t)
+
+  # issue
+  let s = """
+a = \b
+  c = \d
+    e = \f
+      g = \h
+  i = \j
+k
+"""
+  echo tokenize(s)
+  echo parse(s)
 
   when false:
     import os

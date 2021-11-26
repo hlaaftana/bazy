@@ -79,7 +79,7 @@ proc `$`*(ex: Expression): string =
   of Tuple: "(" & ex.elements.join(", ") & ")"
   of Array: "[" & ex.elements.join(", ") & "]"
   of Set: "{" & ex.elements.join(", ") & "}"
-  of Block, SemicolonBlock:
+  of Block:
     var s = "(\n"
     for i in 0 ..< ex.statements.len:
       let ss = $ex.statements[i]
@@ -87,4 +87,6 @@ proc `$`*(ex: Expression): string =
         s.add("  " & sl & "\n")
       if i < ex.statements.len - 1:
         s[^1 .. ^1] = ";\n"
-    s & ")"
+    s.add(")")
+    move s
+  of SemicolonBlock: "(" & ex.elements.join("; ") & ")"
