@@ -413,7 +413,8 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
     if recordingIndent and c != '\L':
       if c == '\t'.Rune: inc indent, 4; continue
       elif w: inc indent; continue
-      elif c != Rune('#'):
+      elif c == Rune('#'): indent = 0 # recordingIndent still true
+      else:
         let diff = indent - lastIndentSum
         if diff < 0:
           var d = -diff # 11
@@ -502,4 +503,10 @@ when isMainModule:
     let b = cpuTime()
     echo "took ", b - a
 
+  echo tokenize("""
+assert
+  3 == (binary_search [1, 2, 3, 4, 5, 6], 4)
+  3 == \binary_search [1, 2, 3, 4, 5, 6], 4 # inline line syntax, allows open calls with operators
+  # very pointless and inconsistent with other uses of \
+  binary_search([3, 5, 1, 4, 1], 1) == -1""").join("")
   #echo tokenize(readFile("concepts/v2.ksmt2"))

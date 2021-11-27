@@ -36,6 +36,12 @@ type
     of Block, SemicolonBlock:
       statements*: seq[Expression]
 
+const
+  OpenCallKinds* = {OpenCall, Infix, Prefix, Postfix}
+  PathCallKinds* = {PathCall, PathInfix, PathPrefix, PathPostfix}
+  CallKinds* = OpenCallKinds + PathCallKinds
+  IndentableCallKinds* = OpenCallKinds + {PathCall}
+
 proc makeInfix*(op, a, b: Expression): Expression =
   if op.kind == Symbol and op.identifier == ":":
     Expression(kind: Colon, left: a, right: b)
@@ -89,4 +95,4 @@ proc `$`*(ex: Expression): string =
         s[^1 .. ^1] = ";\n"
     s.add(")")
     move s
-  of SemicolonBlock: "(" & ex.elements.join("; ") & ")"
+  of SemicolonBlock: "(" & ex.statements.join("; ") & ")"

@@ -2,7 +2,14 @@ import tokenizer, expressions, operators
 
 type
   ParserOptions* = object
-    curlyBlocks*, operatorIndentMakesBlock*: bool
+    curlyBlocks*,
+      operatorIndentMakesBlock*,
+      backslashLine*,
+      backslashNestedPostArgument*,
+      colonPostArgument*,
+      weirdOperatorIndentUnwrap*,
+      makeOperatorInfixOnIndent*
+    : bool
 
   Parser* = object
     tokens*: seq[Token]
@@ -10,7 +17,13 @@ type
     options*: ParserOptions
 
 proc defaultOptions*(): ParserOptions =
-  ParserOptions(curlyBlocks: false, operatorIndentMakesBlock: true)
+  ParserOptions(curlyBlocks: false,
+    operatorIndentMakesBlock: true,
+    backslashLine: true, # should be false
+    backslashNestedPostArgument: true,
+    colonPostArgument: true,
+    weirdOperatorIndentUnwrap: true,
+    makeOperatorInfixOnIndent: true)
 
 iterator nextTokens*(p: var Parser): Token =
   while p.pos < p.tokens.len:
@@ -26,6 +39,7 @@ notes:
 * maybe make distinction between indent and normal argument, or `do` and indent, no idea
 * maybe postfix statements like if/for/while can end the line and record a new line for the RHS,
   or maybe some god operator like |-> to invoke these, dont know a not ugly operator though
+* maybe \ to make a () unwrapped
 
 ]#
 
@@ -38,8 +52,6 @@ proc recordWideLine*(parser: var Parser, closed = false): Expression =
     case t.kind
     of tkSemicolon:
       semicoloned = true
-      #inc i
-      #s.add(recordLine(p, true))
     of tkComma, tkCloseParen, tkCloseBrack, tkCloseCurly:
       dec parser.pos
       break
@@ -58,6 +70,8 @@ proc recordWideLine*(parser: var Parser, closed = false): Expression =
 
 proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
   result = Expression(kind: Block)
+  defer:
+    if result.statements.len == 1: result = result.statements[0]
   var backslashNames: seq[string]
   for token in parser.nextTokens:
     case token.kind
@@ -68,33 +82,35 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
         break
       continue
     of tkComma, tkCloseBrack, tkCloseCurly, tkCloseParen:
-      assert false, "wrong delim in block"
-    elif token.kind == tkColon and result.statements.len > 0 and
-      result.statements[^1].kind in {OpenCall, PathCall, Infix, Prefix, Postfix}:
+      assert indented, "extra delim " & $token.kind
+      dec parser.pos
+      break
+    elif token.kind == tkColon and 
+      parser.options.colonPostArgument and
+      result.statements.len > 0 and
+      result.statements[^1].kind in IndentableCallKinds:
       inc parser.pos
       result.statements[^1].arguments.add(parser.recordWideLine())
-      #[if tok.kind == tkWord:
-        inc parser.pos
-        result.statements[^1].arguments.add(Expression(kind: ExpressionKind.Colon,
-          left: Expression(kind: Name, identifier: tok.raw),
-          right: parser.recordWideLine()))]#
-    elif token.kind == tkBackslash and result.statements.len > 0 and
-      result.statements[^1].kind in {OpenCall, PathCall, Infix, Prefix, Postfix} and (
+    elif token.kind == tkBackslash and
+      parser.options.backslashNestedPostArgument and
+      result.statements.len > 0 and
+      result.statements[^1].kind in IndentableCallKinds and (
+        # epic abuse
         var lastEx = result.statements[^1]
         var valid = true
         for n in backslashNames:
           if n == "" and lastEx.arguments.len > 0 and
-            lastEx.arguments[^1].kind in {OpenCall, PathCall, Infix, Prefix, Postfix}:
+            lastEx.arguments[^1].kind in IndentableCallKinds:
             lastEx = lastEx.arguments[^1]
           elif n != "" and lastEx.arguments.len > 0 and
             lastEx.arguments[^1].kind == ExpressionKind.Colon and
             lastEx.arguments[^1].left.kind == Name and lastEx.arguments[^1].left.identifier == n and
-            lastEx.arguments[^1].right.kind in {OpenCall, PathCall, Infix, Prefix, Postfix}:
+            lastEx.arguments[^1].right.kind in IndentableCallKinds:
             lastEx = lastEx.arguments[^1].right
           else:
             valid = false
             break
-        valid): # epic abuse
+        valid):
       inc parser.pos
       let ex = lastEx
       let tok = parser.tokens[parser.pos]
@@ -110,13 +126,10 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
         if parser.tokens[parser.pos].kind == tkNewLine: inc parser.pos
         ex.arguments.add(parser.recordWideLine())
         backslashNames.add("")
-      #dec parser.pos
-      #^ why was this here? it broke everything
       continue
     else:
       result.statements.add(parser.recordWideLine())
     reset backslashNames
-  if result.statements.len == 1: result = result.statements[0]
 
 proc recordBrack*(parser: var Parser): Expression =
   var s: seq[Expression]
@@ -128,7 +141,7 @@ proc recordBrack*(parser: var Parser): Expression =
     of tkCloseCurly, tkCloseParen:
       assert false, "wrong delim for brack"
     else:
-      s.add(parser.recordWideLine(true))
+      s.add(parser.recordWideLine(closed = true))
   Expression(kind: Array, elements: s)
 
 proc recordParen*(parser: var Parser): Expression =
@@ -143,7 +156,7 @@ proc recordParen*(parser: var Parser): Expression =
     of tkCloseCurly, tkCloseBrack:
       assert false, "wrong delim for paren"
     else:
-      s.add(parser.recordWideLine(true))
+      s.add(parser.recordWideLine(closed = true))
   if not commad and s.len == 1: Expression(kind: Wrapped, wrapped: s[0])
   else: Expression(kind: Tuple, elements: s)
 
@@ -159,7 +172,7 @@ proc recordCurly*(parser: var Parser): Expression =
     of tkCloseBrack, tkCloseParen:
       assert false, "wrong delim for curly"
     else:
-      s.add(parser.recordWideLine(makeSet))
+      s.add(parser.recordWideLine(closed = makeSet))
   if makeSet: Expression(kind: Set, elements: s)
   else: Expression(kind: Block, statements: s)
 
@@ -173,7 +186,7 @@ proc recordSingle*(parser: var Parser): Expression =
   var lastWhitespace: bool
   var lastDot: bool
   defer:
-    dec parser.pos
+    dec parser.pos # paths will never terminate with delimiter
     let resultWasNil = result.isNil
     if not currentSymbol.isNil:
       if resultWasNil:
@@ -240,10 +253,13 @@ proc recordSingle*(parser: var Parser): Expression =
             result = Expression(kind: PathCall, address: result, arguments: move ex.elements)
         of Array: result = Expression(kind: Subscript, address: result, arguments: move ex.elements)
         of Set: result = Expression(kind: CurlySubscript, address: result, arguments: move ex.elements)
-        elif result.kind == Dot: # single expression
-          result = Expression(kind: PathCall, address: result.right, arguments: @[result.left, ex])
+        of Wrapped: # single expression
+          if result.kind == Dot:
+            result = Expression(kind: PathCall, address: result.right, arguments: @[result.left, ex.wrapped])
+          else:
+            result = Expression(kind: PathCall, address: result, arguments: @[ex.wrapped])
         else:
-          result = Expression(kind: PathCall, address: result, arguments: @[ex])
+          assert false, "should return one of tuple, array, set, wrapped"
       else:
         result = Expression(kind: PathInfix, address: currentSymbol, arguments: @[result, ex])
         currentSymbol = nil
@@ -252,8 +268,10 @@ proc recordSingle*(parser: var Parser): Expression =
     of tkDot:
       lastDot = true
       lastWhitespace = false
-    of tkSymbol:
-      let ex = Expression(kind: Symbol, identifier: token.raw)
+    of tkSymbol, tkBackslash:
+      let ex = Expression(kind: Symbol, identifier:
+        if token.kind == tkSymbol: token.raw
+        else: "\\")
       if lastDot:
         result = Expression(kind: Dot, left: result, right: ex)
       elif lastWhitespace:
@@ -264,7 +282,7 @@ proc recordSingle*(parser: var Parser): Expression =
           precedingSymbol = currentSymbol
       lastDot = false
       lastWhitespace = false
-    else: discard
+    #of tkBackslash: discard
 
 proc collectLineExpression*(exprs: seq[Expression]): Expression =
   if exprs.len == 0: return Expression(kind: ExpressionKind.None)
@@ -291,14 +309,30 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
   var indent: Expression
   var indentIsDo: bool
   defer: # rather defer than put this at the end and try to put `break` everywhere
-    dec parser.pos
     if currentExprs.len != 0:
       expressions.add(currentExprs.collectLineExpression())
       reset currentExprs
     if not indent.isNil:
       if (parser.options.operatorIndentMakesBlock or indentIsDo) and
-        expressions.len == 1 and expressions[0].kind in {Prefix, Infix, Postfix, OpenCall, PathCall}:
-        expressions[0].arguments.add(indent)
+        expressions.len == 1 and expressions[0].kind in IndentableCallKinds:
+        if parser.options.weirdOperatorIndentUnwrap and
+          (let expandKinds = if indentIsDo: {Prefix, Infix} else: {Infix};
+            expressions[0].kind in expandKinds):
+          var ex = expressions[0]
+          while ex.arguments[^1].kind in expandKinds:
+            ex = ex.arguments[^1]
+          if ex.arguments[^1].kind in IndentableCallKinds:
+            ex.arguments[^1].arguments.add(indent)
+          else:
+            ex.arguments[^1] = Expression(kind: OpenCall,
+              address: ex.arguments[^1], arguments: @[indent])
+        elif parser.options.makeOperatorInfixOnIndent and
+          expressions[0].kind in {Postfix, Prefix}:
+          expressions[0] = Expression(kind: Infix,
+            address: expressions[0].address,
+            arguments: move(expressions[0].arguments) & indent)
+        else:
+          expressions[0].arguments.add(indent)
       else:
         expressions.add(indent)
     if expressions.len == 0:
@@ -315,6 +349,8 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
     of tkNone, tkWhitespace: discard
     of tkComma:
       if closed:
+        # outside line scope
+        dec parser.pos
         finish()
       waiting = true
       if currentExprs.len != 0: # consider ,, typo as ,
@@ -335,6 +371,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
             dec parser.pos
             break
       else:
+        let originalPos = parser.pos
         for tok in parser.nextTokens:
           case tok.kind
           of tkNone, tkWhitespace, tkNewline: discard
@@ -342,19 +379,22 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
             if not waiting:
               inc parser.pos
               indent = parser.recordBlockLevel(indented = true)
+              # current position will be immediately after indentback
+              # and refer to token of new line 
+              dec parser.pos
               finish()
           else:
-            dec parser.pos
+            parser.pos = originalPos - 1 # ???
             finish()
       waiting = false
     of tkIndentBack:
       if not waiting or closed:
+        # outside line scope
+        dec parser.pos
         finish()
     of tkSemicolon, tkCloseBrack, tkCloseCurly, tkCloseParen:
-      finish()
-    of tkBackslash:
-      inc parser.pos
-      currentExprs.add(parser.recordLineLevel(closed))
+      # outside line scope
+      dec parser.pos
       finish()
     of tkColon:
       waiting = true
@@ -364,10 +404,18 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
         inc parser.pos
         indent = parser.recordBlockLevel(indented = true)
         indentIsDo = false
+        dec parser.pos # maybe should not be here
         finish()
-    elif (token.kind == tkSymbol and token.raw == "do"):
+    elif token.kind == tkBackslash and parser.options.backslashLine:
+      inc parser.pos
+      currentExprs.add(parser.recordLineLevel(closed))
+      finish()
+    elif token.kind == tkSymbol and token.raw == "do":
       waiting = false
-      inc parser.pos, 2
+      inc parser.pos # skip do
+      while parser.tokens[parser.pos].kind in {tkNewline, tkWhitespace}:
+        # skip newlines to not confuse line recorder
+        inc parser.pos
       indent = parser.recordWideLine()
       indentIsDo = true
       finish()
@@ -389,28 +437,33 @@ proc parse*(str: string): Expression =
   result = parser.recordBlockLevel(tokenizer.tokenize())
 
 when isMainModule:
-  let tests = [
-    readFile("concepts/test.ba"),
-    #readFile("concepts/tag.ba"),
-    #readFile("concepts/arguments.ba"),
-    #readFile("concepts/badspec.ba")
-  ]
+  when true:
+    let tests = [
+      readFile("concepts/test.ba"),
+      #readFile("concepts/tag.ba"),
+      readFile("concepts/arguments.ba"),
+      readFile("concepts/badspec.ba")
+    ]
 
-  #for t in tests:
-  #  echo "input: ", t
-  #  echo "output: ", parse(t)
+    for t in tests:
+      echo "input: ", t
+      echo "output: ", parse(t)
 
-  # issue
-  let s = """
-a = \b
-  c = \d
-    e = \f
-      g = \h
-  i = \j
-k
-"""
-  echo tokenize(s)
-  echo parse(s)
+  when false:
+    let s = """
+  a = \b
+    c = \d
+      e = \f
+        g = \h
+    i = \j
+  k
+  """
+    let s = """
+  a do b do (c)
+  d
+  """
+    echo tokenize(s)
+    echo parse(s)
 
   when false:
     import os

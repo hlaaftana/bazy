@@ -53,8 +53,47 @@ test "simple code":
     "0.00042e-4": "0.00042e-4",
     "a + b c + d e": "(a + (b (c + (d e))))",
     "a+b c+d e": "((a+b) ((c+d) e))",
-    "a + b c, d e + f g": "((a + (b c)), (d (e + (f g))))"
+    "a + b c, d e + f g": "((a + (b c)), (d (e + (f g))))",
+    "a do(b) do(c)": "(a ((b) (c)))",
+    """
+a = \b
+  c = \d
+    e = \f
+      g = \h
+  i = \j
+k""": """(
+  (a = (b (
+    (c = (d (e = (f (g = h)))));
+    (i = j)
+  )));
+  k
+)""",
+    """
+a do b do (c)
+d""": """(
+  (a (b (c)));
+  d
+)""",
+    """if a, b,
+else: (do
+  c
+  d)""": """(if a, b, else: ((
+  c;
+  d
+)))""",
+    "permutation(n: Int, r: Int) = product n - r + 1 .. n": # command syntax with infixes
+      "(permutation(n: Int, r: Int) = (product (((n - r) + 1) .. n)))",
+    "a =\n  b": "(a = b)" # postfix expansion
   }
 
   for inp, outp in tests.items:
     check $parse(inp) == outp
+
+test "parse files without crashing":
+  for f in [
+    "concepts/arguments.ba",
+    "concepts/badspec.ba",
+    "concepts/tag.ba",
+    "concepts/test.ba"
+  ]:
+    discard parse((when declared(read): read else: readFile)(f))
