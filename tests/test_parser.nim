@@ -97,3 +97,49 @@ test "parse files without crashing":
     "concepts/test.ba"
   ]:
     discard parse((when declared(read): read else: readFile)(f))
+
+test "equivalent syntax":
+  let equivalents = {
+    "combination(n: Int, r: Int) = do for result x = 1, each i in 0..<r do " &
+      "while i < r do x = x * (n - i) / (r - i)":
+        "combination(n: Int, r: Int) = for(result x = 1, each i in 0..<r) do " &
+          "while i < r, x = x * (n - i) / (r - i)"
+  }
+
+  proc equivalent(a, b: Expression): bool
+
+  proc equivalent(a, b: seq[Expression]): bool =
+    if a.len != b.len: return false
+    for i in 0 ..< a.len:
+      if not equivalent(a[i], b[i]):
+        return false
+    true
+
+  proc equivalent(a, b: Expression): bool =
+    const equivalentKinds = [
+      {Name, Symbol},
+      {OpenCall, Infix, Prefix, Postfix,
+        PathCall, PathInfix, PathPrefix, PathPostfix},
+      {Block, SemicolonBlock}
+    ]
+
+    var (a, b) = (a, b)
+    while a.kind == Wrapped: a = a.wrapped
+    while b.kind == Wrapped: b = b.wrapped
+
+    for ek in equivalentKinds:
+      if {a.kind, b.kind} <= ek:
+        if OpenCall in ek:
+          result = equivalent(a.address, b.address) and equivalent(a.arguments, b.arguments)
+        elif Name in ek:
+          result = a.identifier == b.identifier
+        elif Block in ek:
+          result = equivalent(a.statements, b.statements)
+        else:
+          echo "weird equivalent kinds set ", ek
+        return
+    
+    result = a == b
+
+  for a, b in equivalents.items:
+    check equivalent(parse(a), parse(b))

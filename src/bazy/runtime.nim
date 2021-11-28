@@ -3,7 +3,9 @@ import tables
 # would super prefer not to use a different runtime
 # the transition from prototyped to real application code should be as smooth as possible
 
-# type system + well integrated contracts pattern matching whatever runtime checks
+# type system should exist for both static and runtime overloads
+# meaning it can also be used for general pattern matching
+# runtime-only types should only be subtypes of static-only types
 
 type
   ValueKind* = enum
@@ -17,12 +19,13 @@ type
     vkNominalTyped # value with an attached nominal type, unfortunately this is pointer to save memory
 
   Value* {.acyclic.} = object
+    # entire thing can be pointer tagged, but would need GC hooks
     case kind*: ValueKind
     of vkNone: discard
     of vkInteger:
-      integerValue*: int
+      integerValue*: int64
     of vkUnsigned:
-      unsignedValue*: uint
+      unsignedValue*: uint64
     of vkFloat:
       floatValue*: float
     of vkFunction:
@@ -42,6 +45,21 @@ type
     of vkNominalTyped:
       nominalValue*: ref NominalTypedValue
 
+  TypeKind* = enum
+    # concrete
+    tyNone,
+    tyInteger, tyUnsigned, tyFloat,
+    tyFunction, tyTuple,
+    tyReference,
+    tyString, tySeq,
+    tyComposite,
+    tyRuntimeNominal,
+    # static information
+    tyStaticNominal,
+    # typeclass
+    tyAny, tyUnion, tyIntersection, tyNot,
+    tyBaseType, tyCustomMatcher
+
   NominalTypeKind* = enum
     ntDistinct, ntEnum, ntObject
 
@@ -53,3 +71,29 @@ type
   NominalTypedValue* = object
     nominalType*: NominalType
     value*: Value
+  
+  Type* = ref object
+    case kind*: TypeKind
+    of tyNone, tyInteger, tyUnsigned, tyFloat,
+      tyString, tyAny:
+      discard
+    of tyFunction:
+      arguments*: seq[Type]
+      returnType*: Type
+    of tyTuple:
+      elements*: seq[Type]
+    of tySeq, tyReference:
+      elementType*: Type
+    of tyComposite:
+      fields*: Table[string, type]
+    of tyRuntimeNominal, tyStaticNominal:
+      nominal*: NominalType
+    of tyUnion, tyIntersection:
+      operands*: seq[Type]
+    of tyNot:
+      notType*: Type
+    of tyBaseType:
+      baseKind*: TypeKind
+    of tyCustomMatcher:
+      check*: proc (t: Type): bool
+      compare*: proc (t, other: Type): bool

@@ -36,6 +36,23 @@ type
     of Block, SemicolonBlock:
       statements*: seq[Expression]
 
+proc `==`*(a, b: Expression): bool =
+  if a.isNil and b.isNil: return true
+  if (a.isNil xor b.isNil) or (a.kind != b.kind): return false
+  result = case a.kind
+  of None: true
+  of Number: a.number == b.number
+  of String: a.str == b.str
+  of Name, Symbol: a.identifier == b.identifier
+  of Wrapped: a.wrapped == b.wrapped
+  of OpenCall, Infix, Prefix, Postfix,
+    PathCall, PathInfix, PathPrefix, PathPostfix,
+    Subscript, CurlySubscript:
+    a.address == b.address and a.arguments == b.arguments
+  of Dot, Colon: a.left == b.left and a.right == b.right
+  of Tuple, Array, Set: a.elements == b.elements
+  of Block, SemicolonBlock: a.statements == b.statements
+
 const
   OpenCallKinds* = {OpenCall, Infix, Prefix, Postfix}
   PathCallKinds* = {PathCall, PathInfix, PathPrefix, PathPostfix}
