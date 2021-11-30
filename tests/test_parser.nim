@@ -93,35 +93,6 @@ else: (do
   for inp, outp in tests.items:
     check $parse(inp) == outp
 
-import bazy/tokenizer
-
-when not defined(nimscript) and defined(testsBenchmark):
-  import std/monotimes, strutils
-
-test "parse files without crashing":
-  template echoTime(name, body) =
-    when declared(getMonoTime):
-      let a = getMonoTime()
-      body
-      let b = getMonoTime()
-      let time = formatFloat((b.ticks - a.ticks).float / 1_000_000, precision = 2)
-      echo name, " took ", time, " ms"
-    else:
-      body
-  for f in [
-    "concepts/arguments.ba",
-    "concepts/badspec.ba",
-    "concepts/tag.ba",
-    "concepts/test.ba"
-  ]:
-    when defined(testsBenchmark): echo "file ", f
-    echoTime("loading file"):
-      let s = when declared(read): read(f) else: readFile(f)
-    echoTime("tokenizing"):
-      let ts = tokenize(s)
-    echoTime("parsing"):
-      let _ = parse(ts)
-
 test "equivalent syntax":
   let equivalents = {
     "combination(n: Int, r: Int) = do for result x = 1, each i in 0..<r do " &
@@ -167,3 +138,41 @@ test "equivalent syntax":
     checkpoint "a: " & $a
     checkpoint "b: " & $b
     check a == b
+
+import bazy/tokenizer
+
+when not defined(nimscript) and defined(testsBenchmark):
+  import std/monotimes, strutils
+  template bench(name, body) =
+    let a = getMonoTime()
+    body
+    let b = getMonoTime()
+    let time = formatFloat((b.ticks - a.ticks).float / 1_000_000, precision = 2)
+    echo name, " took ", time, " ms"
+else:
+  template bench(name, body) = body
+
+test "parse files without crashing":
+  for f in [
+    "concepts/arguments.ba",
+    "concepts/badspec.ba",
+    "concepts/tag.ba",
+    "concepts/test.ba"
+  ]:
+    when defined(testsBenchmark): echo "file ", f
+    bench("loading file"):
+      let s = when declared(read): read(f) else: readFile(f)
+    bench("tokenizing"):
+      let ts = tokenize(s)
+    bench("parsing"):
+      let _ = parse(ts)
+
+when defined(testsBenchmark):
+  test "200x size file":
+    let f = "concepts/badspec.ba"
+    bench("loading file"):
+      let s = repeat(when declared(read): read(f) else: readFile(f), 200)
+    bench("tokenizing"):
+      let ts = tokenize(s)
+    bench("parsing"):
+      let _ = parse(ts)

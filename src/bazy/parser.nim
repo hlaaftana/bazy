@@ -6,6 +6,7 @@ notes:
 
 * probably a lot of indent bugs when you indent in parentheses or with variable spaces
 * some kind of delimiter counter/stack on parser object would stop infinite loops from errors
+* maybe add "ignored indent" counter
 * maybe make distinction between indent and normal argument, or `do` and indent, no idea
 * maybe postfix statements like if/for/while can end the line and record a new line for the RHS,
   or maybe some god operator like |-> to invoke these, dont know a not ugly operator though
@@ -402,7 +403,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
       dec parser.pos
       finish()
     of tkColon:
-      waiting = true
+      waiting = true # should change this
       singleExprs.add(Expression(kind: Symbol, identifier: ":"))
     of tkIndent:
       if not waiting:
