@@ -24,7 +24,12 @@ task docs, "build docs for all modules":
 
 task tests, "run tests for multiple backends":
   when declared(runTests):
-    runTests(backends = {c, js, nims}, optionCombos = @["", "--gc:arc"])
+    runTests(backends = {c, js, nims}, optionCombos = @[
+      "",
+      #"--gc:arc -d:danger",
+      #"-d:bazyUseUnicode=false",
+      #"-d:bazyDoLineColumn=false"
+    ])
   else:
     echo "tests task not implemented, need nimbleutils"
 

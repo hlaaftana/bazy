@@ -81,22 +81,46 @@ else: (do
   c;
   d
 )))""",
-    "permutation(n: Int, r: Int) = product n - r + 1 .. n": # command syntax with infixes
+    "permutation(n: Int, r: Int) = product n - r + 1 .. n":
+      # command syntax with infixes
       "(permutation(n: Int, r: Int) = (product (((n - r) + 1) .. n)))",
+    "factorial(n: Int) = permutation n, n":
+      # consequence
+      "((factorial(n: Int) = (permutation n)), n)",
     "a =\n  b": "(a = b)" # postfix expansion
   }
 
   for inp, outp in tests.items:
     check $parse(inp) == outp
 
+import bazy/tokenizer
+
+when not defined(nimscript) and defined(testsBenchmark):
+  import std/monotimes, strutils
+
 test "parse files without crashing":
+  template echoTime(name, body) =
+    when declared(getMonoTime):
+      let a = getMonoTime()
+      body
+      let b = getMonoTime()
+      let time = formatFloat((b.ticks - a.ticks).float / 1_000_000, precision = 2)
+      echo name, " took ", time, " ms"
+    else:
+      body
   for f in [
     "concepts/arguments.ba",
     "concepts/badspec.ba",
     "concepts/tag.ba",
     "concepts/test.ba"
   ]:
-    discard parse((when declared(read): read else: readFile)(f))
+    when defined(testsBenchmark): echo "file ", f
+    echoTime("loading file"):
+      let s = when declared(read): read(f) else: readFile(f)
+    echoTime("tokenizing"):
+      let ts = tokenize(s)
+    echoTime("parsing"):
+      let _ = parse(ts)
 
 test "equivalent syntax":
   let equivalents = {
@@ -106,16 +130,14 @@ test "equivalent syntax":
           "while i < r, x = x * (n - i) / (r - i)"
   }
 
-  proc equivalent(a, b: Expression): bool
+  proc reduced(a: Expression): Expression
 
-  proc equivalent(a, b: seq[Expression]): bool =
-    if a.len != b.len: return false
+  proc reduced(a: seq[Expression]): seq[Expression] =
+    result.newSeq(a.len)
     for i in 0 ..< a.len:
-      if not equivalent(a[i], b[i]):
-        return false
-    true
+      result[i] = a[i].reduced
 
-  proc equivalent(a, b: Expression): bool =
+  proc reduced(a: Expression): Expression =
     const equivalentKinds = [
       {Name, Symbol},
       {OpenCall, Infix, Prefix, Postfix,
@@ -123,23 +145,25 @@ test "equivalent syntax":
       {Block, SemicolonBlock}
     ]
 
-    var (a, b) = (a, b)
-    while a.kind == Wrapped: a = a.wrapped
-    while b.kind == Wrapped: b = b.wrapped
+    result = a
+    while result.kind == Wrapped: result = result.wrapped
 
     for ek in equivalentKinds:
-      if {a.kind, b.kind} <= ek:
+      if result.kind in ek:
         if OpenCall in ek:
-          result = equivalent(a.address, b.address) and equivalent(a.arguments, b.arguments)
+          result = Expression(kind: PathCall, address: result.address.reduced,
+            arguments: result.arguments.reduced)
         elif Name in ek:
-          result = a.identifier == b.identifier
+          result = Expression(kind: Name, identifier: result.identifier)
         elif Block in ek:
-          result = equivalent(a.statements, b.statements)
+          result = Expression(kind: Block, statements: result.statements.reduced)
         else:
           echo "weird equivalent kinds set ", ek
         return
-    
-    result = a == b
 
   for a, b in equivalents.items:
-    check equivalent(parse(a), parse(b))
+    let a = reduced(parse(a))
+    let b = reduced(parse(b))
+    checkpoint "a: " & $a
+    checkpoint "b: " & $b
+    check a == b

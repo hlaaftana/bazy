@@ -113,3 +113,72 @@ proc `$`*(ex: Expression): string =
     s.add(")")
     move s
   of SemicolonBlock: "(" & ex.statements.join("; ") & ")"
+
+import unicode
+
+proc unescape*(s: string): string =
+  var
+    escaped = false
+    uBase: int
+    uNum = 0
+    startedU = -1
+  result = newStringOfCap(s.len)
+  var i = 0
+  while i < s.len:
+    let c = s[i]
+    if startedU != -1:
+      case c
+      of '_': discard
+      # could change these to revert if the base is wrong
+      of '0'..'9': uNum = uNum * uBase + int(c.byte - '0'.byte)
+      of 'a'..'f': uNum = uNum * uBase + 10 + int(c.byte - 'a'.byte)
+      of 'A'..'F': uNum = uNum * uBase + 10 + int(c.byte - 'A'.byte)
+      else:
+        result.add(if c == '}': $Rune(uNum) else: s[startedU..i])
+        uNum = 0
+        startedU = -1
+    elif escaped:
+      if c in {'u', 'U'}:
+        if i + 1 < s.len and s[i + 1] == '{':
+          uBase = 16
+          startedU = i - 1
+        elif i + 2 < s.len and s[i + 1] in {'x', 'o', 'd', 'b',
+          'X', 'O', 'D', 'B'} and s[i + 2] == '{':
+          uBase = case s[i + 1]
+          of 'x', 'X': 16
+          of 'o', 'O': 8
+          of 'd', 'D': 10
+          of 'b', 'B': 2
+          else: -1 # unreachable
+          startedU = i - 1
+        elif i + 4 < s.len and {s[i + 1], s[i + 2],
+          s[i + 3], s[i + 4]} <= HexDigits:
+          # can change parseHexInt to something more optimized but doesnt matter
+          result.add($Rune(parseHexInt(s[i + 1 .. i + 4])))
+        else:
+          result.add('\\')
+          result.add(c)
+      elif c in {'x', 'X'} and {s[i + 1], s[i + 2]} <= HexDigits:
+        result.add(char(parseHexInt(s[i + 1 .. i + 2])))
+      else:
+        let ch = case c
+        of 't': '\t'
+        of '"': '"'
+        of '\'': '\''
+        of '`': '`'
+        of '\\': '\\'
+        of 'r': '\r'
+        of 'n': '\n'
+        of 'f': '\f'
+        of 'v': '\v'
+        of 'a': '\a'
+        of 'b': '\b'
+        of 'e': '\e'
+        else:
+          result.add('\\')
+          c
+        result.add(ch)
+      escaped = false
+    elif c == '\\': escaped = true
+    else: result.add(c)
+    inc i

@@ -75,79 +75,81 @@ proc precedence*(symbol: string): Precedence =
     else: Misc
 
 proc reduceOperators*(exprs: seq[Expression], lowestKind = low(Precedence)): seq[Expression] =
+  # linked list should improve performance
   result = exprs
-  if exprs.len <= 1 or lowestKind == Precedence.None: return
-  template isOperator(e: Expression): bool = e.kind == Symbol and e.identifier.precedence == lowestKind
-  let assoc = Associativities[lowestKind]
-  var mustPrefix = true
-  var prefixStack: seq[Expression]
-  var i = 0
-  while i < result.len:
-    var e = result[i]
-    if e.isOperator:
-      if mustPrefix:
-        prefixStack.add(e)
-      mustPrefix = true
-    else:
-      let psl = prefixStack.len
-      while prefixStack.len != 0:
-        e = Expression(kind: Prefix, address: prefixStack.pop, arguments: @[e])
-      result[i - psl .. i] = [e]
-      i -= psl
-      mustPrefix = false
-    inc i
-  if mustPrefix:
-    let startIndex = if prefixStack.len + 1 == result.len: 0 else: result.len - prefixStack.len - 2
-    var e = result[startIndex]
-    for i in startIndex + 1 ..< result.len:
-      e = Expression(kind: Postfix, address: result[i], arguments: @[e])
-    result[startIndex .. ^1] = [e]
-  # left associative:
-  case assoc
-  of Left:
-    var lhsStart, i = 0
-    var lhs, op: Expression
-    while i < result.len:
-      var e = result[i]
-      if e.isOperator:
-        op = e
-      elif op.isNil:
-        lhs = e
-        lhsStart = i
-      else:
-        lhs = makeInfix(op, lhs, e)
-        result[lhsStart .. i] = [lhs]
-        i = lhsStart
-        op = nil
-      inc i
-  of Right:
-    var rhsStart, i = result.high
-    var rhs, op: Expression
-    while i >= 0:
-      var e = result[i]
-      if e.isOperator:
-        op = e
-      elif op.isNil:
-        rhs = e
-        rhsStart = i
-      else:
-        rhs = makeInfix(op, e, rhs)
-        result[i .. rhsStart] = [rhs]
-        i = rhsStart - 1
-        op = nil
-      dec i
-  of Unary:
-    var stack: seq[Expression]
+  if exprs.len <= 1: return
+  var prec = lowestKind
+  while prec != Precedence.None:
+    template isOperator(e: Expression): bool = e.kind == Symbol and e.identifier.precedence == prec
+    let assoc = Associativities[prec]
+    var mustPrefix = true
+    var prefixStack: seq[Expression]
     var i = 0
     while i < result.len:
       var e = result[i]
       if e.isOperator:
-        stack.add(e)
+        if mustPrefix:
+          prefixStack.add(e)
+        mustPrefix = true
       else:
-        let sl = stack.len
-        while stack.len != 0:
-          e = Expression(kind: Prefix, address: stack.pop, arguments: @[e])
-        result[i - sl .. i] = [e]
-        i -= sl
+        let psl = prefixStack.len
+        while prefixStack.len != 0:
+          e = Expression(kind: Prefix, address: prefixStack.pop, arguments: @[e])
+        result[i - psl .. i] = [e]
+        i -= psl
+        mustPrefix = false
       inc i
-  result = reduceOperators(result, succ(lowestKind))
+    if mustPrefix:
+      let startIndex = if prefixStack.len + 1 == result.len: 0 else: result.len - prefixStack.len - 2
+      var e = result[startIndex]
+      for i in startIndex + 1 ..< result.len:
+        e = Expression(kind: Postfix, address: result[i], arguments: @[e])
+      result[startIndex .. ^1] = [e]
+    case assoc
+    of Left:
+      var lhsStart, i = 0
+      var lhs, op: Expression
+      while i < result.len:
+        var e = result[i]
+        if e.isOperator:
+          op = e
+        elif op.isNil:
+          lhs = e
+          lhsStart = i
+        else:
+          lhs = makeInfix(op, lhs, e)
+          result[lhsStart .. i] = [lhs]
+          i = lhsStart
+          op = nil
+        inc i
+    of Right:
+      var rhsStart, i = result.high
+      var rhs, op: Expression
+      while i >= 0:
+        var e = result[i]
+        if e.isOperator:
+          op = e
+        elif op.isNil:
+          rhs = e
+          rhsStart = i
+        else:
+          rhs = makeInfix(op, e, rhs)
+          result[i .. rhsStart] = [rhs]
+          i = rhsStart - 1
+          op = nil
+        dec i
+    of Unary:
+      var stack: seq[Expression]
+      var i = 0
+      while i < result.len:
+        var e = result[i]
+        if e.isOperator:
+          stack.add(e)
+        else:
+          let sl = stack.len
+          while stack.len != 0:
+            e = Expression(kind: Prefix, address: stack.pop, arguments: @[e])
+          result[i - sl .. i] = [e]
+          i -= sl
+        inc i
+    inc prec

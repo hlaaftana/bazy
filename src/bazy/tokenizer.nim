@@ -1,4 +1,28 @@
-import strutils, unicode
+const
+  # options for testing performance
+  # if using unicode in JS, turn bound checks off
+  useUnicode = block: (const bazyUseUnicode {.booldefine.} = true; bazyUseUnicode)
+  doLineColumn = block: (const bazyDoLineColumn {.booldefine.} = true; bazyDoLineColumn)
+  refToken = block: (const bazyRefToken {.booldefine.} = defined(js); bazyRefToken)
+
+import strutils
+
+when useUnicode:
+  import unicode
+
+type
+  NumberKind* = enum Integer Floating Unsigned
+
+  NumberTokenObj* = object
+    base*: seq[byte]
+    kind*: NumberKind
+    negative*: bool
+    exp*, bits*: int
+
+when defined(js):
+  type NumberToken* = ref NumberTokenObj
+else:
+  type NumberToken* = NumberTokenObj
 
 type
   TokenKind* = enum
@@ -9,16 +33,10 @@ type
   
   SpecialCharacterKind* = range[tkBackslash..tkCloseCurly]
 
-  NumberKind* = enum Integer Floating Unsigned
-
-  NumberToken* = object
-    base*: seq[byte]
-    kind*: NumberKind
-    negative*: bool
-    exp*, bits*: int
-
-  Token* = object
-    line*, column*: int
+  # ref to not copy on JS, not sure if improves performance on C
+  TokenObj* = object
+    when doLineColumn:
+      line*, column*: int
     case kind*: TokenKind
     of tkString:
       content*: string
@@ -27,9 +45,12 @@ type
     of tkWord, tkSymbol:
       raw*: string
       quoted*: bool
-    #of tkNewLine:
-    #  ampersand*: bool
     else: discard
+
+when refToken:
+  type Token* = ref TokenObj
+else:
+  type Token* = TokenObj
 
 const
   SpecialCharacters*: array[SpecialCharacterKind, char] = [
@@ -95,170 +116,135 @@ proc `$`*(tokens: seq[Token]): string =
         result.add(' ')
     else: result.add($t)
 
+when NumberToken is ref:
+  proc `==`*(n1, n2: NumberToken): bool =
+    n1.isNil and n2.isNil or (n1.isNil == n2.isNil and n1[] == n2[])
+
 proc `==`*(tok1, tok2: Token): bool =
-  if tok1.kind != tok2.kind: return
+  when Token is ref:
+    if tok1.isNil and tok2.isNil: return true
+    if tok1.isNil xor tok2.isNil: return false
+  if tok1.kind != tok2.kind: return false
   case tok1.kind
   of tkString: tok1.content == tok2.content
   of tkNumber: tok1.num == tok2.num
   of tkWord, tkSymbol: tok1.raw  == tok2.raw
-  #of tkNewline: not (tok1.ampersand xor tok2.ampersand)
   else: true
 
-iterator rev[T](a: openArray[T]): T {.inline.} =
-  var i = a.len
-  while i > 0:
-    dec(i)
-    yield a[i]
+when useUnicode:
+  template asChar(r: Rune): char =
+    char(r.int and 0xFF)
+  
+  template isChar(r: Rune): bool =
+    r.int32 < 128i32
 
-type Tokenizer* = object
-  str*: string
-  symbolWords*: seq[string]
-  pos*: int
-  ln*, cl*: int
+  proc contains(s: set[char], r: Rune): bool {.inline.} =
+    r.isChar and r.char in s
 
-template getChar*(tz: Tokenizer, offset: int = 0): char = tz.str[tz.pos + offset]
+  proc `==`(s: char, r: Rune): bool {.inline.} =
+    r.isChar and r.char == s
 
-template getStr*(tz: Tokenizer, length: int, offset: int = 0): char = tz.str[tz.pos + offset ..< tz.pos + offset + length]
+  template `==`(r: Rune, s: char): bool = s == r
+else:
+  type Rune = char
+  
+  template asChar(r: Rune): char = r
 
-template matchNext*(tz: Tokenizer, pat: char, offset: int = 0): bool =
-  tz.pos + offset < len(tz.str) and tz.getChar(offset) == pat
+  template isChar(r: Rune): bool = true
 
-template matchNext*(tz: Tokenizer, pat: set[char], offset: int = 0): bool =
-  tz.pos + offset < len(tz.str) and tz.getChar(offset) in pat
+  template isAlpha(r: Rune): bool = r.isAlphaAscii
 
-template matchNext*(tz: Tokenizer, pat: string, offset: int = 0): bool =
-  tz.pos + offset + pat.len <= len(tz.str) and (block:
-    var res = true
-    for i in 0..<pat.len:
-      if tz.getChar(i + offset) != pat[i]:
-        res = false
-        break
-    res) # getStr copies, maybe unroll this loop for static[string]
+type
+  TokenizerOptions* = object
+    symbolWords*: seq[string]
+    stringBackslashEscape*, stringQuoteEscape*: bool
 
-template matchNextSkip*(tz: var Tokenizer, pat: char): bool =
-  tz.pos < len(tz.str) and tz.getChar == pat and (inc tz.pos; true)
+  Tokenizer* = ref object
+    options*: TokenizerOptions
+    str*: string
+    currentRune*: Rune
+    pos*, previousPos*: int
+    when doLineColumn:
+      ln*, cl*, previousCol*: int
 
-template matchNextSkip*(tz: var Tokenizer, pat: set[char]): bool =
-  tz.pos < len(tz.str) and tz.getChar in pat and (inc tz.pos; true)
+proc newTokenizer*(): Tokenizer =
+  Tokenizer(options: TokenizerOptions(
+    symbolWords: @[],
+    stringBackslashEscape: true,
+    stringQuoteEscape: true))
 
-template matchNextSkip*(tz: var Tokenizer, pat: string): bool =
-  tz.pos + pat.len <= len(tz.str) and (block:
-    var res = true
-    for i in 0..<pat.len:
-      if tz.getChar(i) != pat[i]:
-        res = false
-        break
-    res) and (tz.pos += pat.len; true)
+proc resetPos*(tz: var Tokenizer) =
+  assert tz.previousPos != -1, "no previous position to reset to"
+  tz.pos = tz.previousPos
+  tz.previousPos = -1
+  when doLineColumn:
+    tz.cl = tz.previousCol
+    if tz.currentRune == '\n':
+      dec tz.ln
 
-iterator chars*(tz: var Tokenizer, offset: int = 0): char =
-  while tz.pos + offset < len(tz.str):
-    yield tz.getChar(offset)
-    inc tz.pos
+proc nextRune*(tz: var Tokenizer) =
+  tz.previousPos = tz.pos
+  when doLineColumn:
+    tz.previousCol = tz.cl
+  if tz.pos + 1 < len(tz.str) and
+    tz.str[tz.pos .. tz.pos + 1] == "\r\n":
+    tz.currentRune = Rune '\n'
+    tz.pos += 2
+    when doLineColumn:
+      tz.ln += 1
+      tz.cl = 0
+  else:
+    when useUnicode:
+      fastRuneAt(tz.str, tz.pos, tz.currentRune, true)
+    else:
+      tz.currentRune = tz.str[tz.pos]
+      inc tz.pos
+    when doLineColumn:
+      if tz.currentRune == '\n':
+        tz.ln += 1
+        tz.cl = 0
+      else:
+        tz.cl += 1
 
 iterator runes*(tz: var Tokenizer): Rune =
-  var
-    result: Rune
   while tz.pos < len(tz.str):
-    if tz.matchNextSkip("\c\L"):
-      yield Rune '\L'
-    else:
-      fastRuneAt(tz.str, tz.pos, result, true)
-      yield result
-
-proc contains*(s: set[char], r: Rune): bool {.inline.} =
-  r.int32 < 128i32 and r.char in s
-
-proc `==`*(s: char, r: Rune): bool {.inline.} =
-  r.int32 < 128i32 and r.char == s
-
-template `==`*(r: Rune, s: char): bool = s == r
+    tz.nextRune()
+    yield tz.currentRune
 
 proc recordString*(tz: var Tokenizer, quote: char): string =
-  var
-    escaped = false
-    recordU = false
-    uLevel = 16
-    uNum = 0
-    startedU = -1
-  for c in tz.chars:
-    if startedU != -1:
-      if recordU:
-        case c
-        of '}':
-          recordU = false
-          result.add($Rune(uNum))
-          uNum = 0
-          uLevel = 16
-          startedU = -1
-        of '_':
-          discard
-        of '0'..'9':
-          uNum = uNum * uLevel + int(c.byte - '0'.byte)
-        of 'a'..'f':
-          uNum = uNum * uLevel + 10 + int(c.byte - 'a'.byte)
-        of 'A'..'F':
-          uNum = uNum * uLevel + 10 + int(c.byte - 'A'.byte)
-        else:
-          dec tz.pos
-          result.add(tz.str[startedU..tz.pos])
-          recordU = false
-          uNum = 0
-          uLevel = 16
-          startedU = -1
-      else:
-        case c
-        of 'x', 'X': uLevel = 16
-        of 'o', 'O': uLevel = 8
-        of 'd', 'D': uLevel = 10
-        of 'b', 'B': uLevel = 2
-        of '{': recordU = true
-        else:
-          recordU = false
-          startedU = -1
-          result.add('\\')
-          result.add('u')
-          result.add(c)
-    elif escaped:
-      if c == 'u':
-        startedU = tz.pos - 1
-      else:
-        let ch = case c
-          of 't': '\t'
-          of '"': '"'
-          of '\'': '\''
-          of '`': '`'
-          of '\\': '\\'
-          of 'r': '\r'
-          of 'n': '\l'
-          of 'f': '\f'
-          of 'v': '\v'
-          of 'a': '\a'
-          of 'b': '\b'
-          of 'e': '\e'
-          else:
-            result.add('\\')
-            c
-        result.add(ch)
+  var escaped = false
+  for c in tz.runes:
+    if escaped:
+      if c notin {'\\', quote}:
+        result.add('\\')
+      result.add(c)
       escaped = false
-    else:
-      if c == quote:
-        inc tz.pos
-        return
-      elif c == '\\':
-        escaped = true
-      else:
+    elif tz.options.stringBackslashEscape and c == '\\':
+      escaped = true
+    elif c == quote:
+      if tz.options.stringQuoteEscape and tz.pos + 1 < tz.str.len and
+        tz.str[tz.pos + 1] == quote:
+        tz.nextRune()
         result.add(c)
+      else:
+        return
+    else:
+      result.add(c)
 
 proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
   type Stage = enum
     inBase, inDecimalStart, inDecimal, inExpStart, inExp, inExpNeg, inBits
+
+  result = NumberToken(negative: negative)
 
   var
     stage = inBase
     lastZeros: Natural = 0
     recordedExp = 0
   
-  result.negative = negative
+  var prevPos2: int
+  when doLineColumn:
+    var prevCol2: int
   
   defer:
     result.exp += recordedExp
@@ -270,11 +256,10 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
         result.exp = 0
         result.base.setLen(result.base.len + result.exp)
 
-  dec tz.pos
-  for c in tz.chars:
+  for c in tz.runes:
     case stage
     of inBase:
-      case c
+      case c.asChar
       of '0'..'9':
         if c == '0':
           inc lastZeros
@@ -284,8 +269,14 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
       of '.':
         result.kind = Floating
         stage = inDecimalStart
+        prevPos2 = tz.previousPos
+        when doLineColumn:
+          prevCol2 = tz.previousCol
       of 'e', 'E':
         stage = inExpStart
+        prevPos2 = tz.previousPos
+        when doLineColumn:
+          prevCol2 = tz.previousCol
       of 'i', 'I':
         result.kind = Integer
         stage = inBits
@@ -296,18 +287,21 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
         result.kind = Floating
         stage = inBits
       else:
+        tz.resetPos()
         return
     of inDecimalStart:
-      case c
+      tz.resetPos()
+      case c.asChar
       of '0'..'9':
         stage = inDecimal
-        dec tz.pos
       else:
-        dec tz.pos
         result.kind = Integer
+        tz.pos = prevPos2
+        when doLineColumn:
+          tz.cl = prevCol2
         return
     of inDecimal:
-      case c
+      case c.asChar
       of '0'..'9':
         if c == '0':
           inc lastZeros
@@ -317,22 +311,29 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
         dec result.exp
       of 'e', 'E':
         stage = inExpStart
+        prevPos2 = tz.previousPos
+        when doLineColumn:
+          prevCol2 = tz.previousCol
       else:
+        tz.resetPos()
         return
     of inExpStart:
-      case c
+      case c.asChar
       of '+':
         stage = inExp
       of '-':
         stage = inExpNeg
       of '0'..'9':
         stage = inExp
-        dec tz.pos
+        tz.resetPos()
       else:
-        dec tz.pos
+        tz.resetPos()
+        tz.pos = prevPos2
+        when doLineColumn:
+          tz.cl = prevCol2
         return
     of inExp, inExpNeg:
-      case c
+      case c.asChar
       of '0'..'9':
         let val = (c.byte - '0'.byte).int
         recordedExp = recordedExp * 10 + (if stage == inExpNeg: -val else: val)
@@ -345,56 +346,60 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberToken =
       of 'f', 'F':
         result.kind = Floating
         stage = inBits
-      else: return
+      else:
+        tz.resetPos()
+        return
     of inBits:
-      case c
+      case c.asChar
       of '0'..'9':
         result.bits = (result.bits * 10) + (c.byte - '0'.byte).int
       else:
-        dec tz.pos
+        tz.resetPos()
         return
 
 proc recordWord*(tz: var Tokenizer): string =
-  dec tz.pos
-  for c in runes(tz):
-    if c == Rune('_') or (c.int < 128 and c.char.isDigit) or c.isAlpha:
+  for c in tz.runes:
+    if c == Rune('_') or (c.isChar and c.char.isDigit) or c.isAlpha:
       result.add(c)
     else:
-      dec tz.pos
+      tz.resetPos()
       return
 
+const NonSymbolChars = Whitespace + Digits + SpecialCharacterSet + {'_', '\'', '"', '`', '#'}
+
 proc recordSymbol*(tz: var Tokenizer): string =
-  dec tz.pos
-  for c in runes(tz):
-    if c notin (Whitespace + Digits + SpecialCharacterSet + {'_', '\'', '"', '`', '#'}) and not c.isAlpha:
+  for c in tz.runes:
+    if c notin NonSymbolChars and not c.isAlpha:
       result.add(c)
     else:
-      dec tz.pos
+      tz.resetPos()
       return
 
 proc recordSymbolPlus*(tz: var Tokenizer, extra: char): string =
-  dec tz.pos
-  for c in runes(tz):
-    if c == extra or (c notin (Whitespace + Digits + SpecialCharacterSet + {'_', '\'', '"', '`', '#'}) and not c.isAlpha):
+  for c in tz.runes:
+    if c == extra or (c notin NonSymbolChars and not c.isAlpha):
       result.add(c)
     else:
-      dec tz.pos
+      tz.resetPos()
       return
 
 proc tokenize*(tz: var Tokenizer): seq[Token] =
   result = newSeq[Token]()
   var
-    #currentLineBars: int
     lastKind: TokenKind
     lastIndents: seq[int]
     lastIndentSum, indent: int
     recordingIndent, comment: bool
 
   template addToken(t: Token) =
-    result.add(t)
-    lastKind = t.kind
+    var tok = t
+    when doLineColumn:
+      tok.line = ln
+      tok.column = cl
+    result.add(tok)
+    lastKind = tok.kind
 
-  template dropLast =
+  template dropLast() =
     let l1 = result.len - 1
     result.setLen(l1)
     lastKind = if unlikely(l1 == 0): tkNone else: result[l1 - 1].kind
@@ -402,24 +407,29 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
   template addTokenOf(tt: TokenKind) =
     addToken(Token(kind: tt))
 
-  for c in runes(tz):
+  for c in tz.runes:
+    when doLineColumn:
+      let (ln, cl) = (tz.ln, tz.cl)
     if comment:
-      if c == Rune('\L'):
+      if c == Rune('\n'):
         comment = false
       else: continue
 
     let w = c in Whitespace
 
-    if recordingIndent and c != '\L':
+    if recordingIndent and c != '\n':
       if c == '\t'.Rune: inc indent, 4; continue
       elif w: inc indent; continue
       elif c == Rune('#'): indent = 0 # recordingIndent still true
       else:
         let diff = indent - lastIndentSum
         if diff < 0:
-          var d = -diff # 11
-          for indt in lastIndents.rev:
-            dec d, indt # -2
+          var d = -diff
+          var i = lastIndents.len
+          while i > 0:
+            dec i
+            let indt = lastIndents[i]
+            dec d, indt
             dec lastIndentSum, indt
             addTokenOf(tkIndentBack)
             if d < 0:
@@ -437,9 +447,7 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
         recordingIndent = false
 
     if w:
-      if c == '\L':
-        #if c == '\c' and str.len > i + 1 and str[i + 1] == '\L':
-        #  inc i
+      if c == '\n': # \r\n -> \n in runes iterator
         let r = high(result)
         for xi in countdown(r, 0):
           if result[xi].kind == tkWhitespace:
@@ -453,12 +461,14 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
       elif lastKind != tkWhitespace:
         addTokenOf(tkWhitespace)
     elif c.isAlpha or c == Rune('_'):
+      tz.resetPos()
       let word = recordWord(tz)
-      if word in tz.symbolWords:
+      if word in tz.options.symbolWords:
         addToken(Token(kind: tkSymbol, raw: word))
       else:
         addToken(Token(kind: tkWord, raw: word))
     elif c.int32 > 127:
+      tz.resetPos()
       addToken(Token(kind: tkSymbol, raw: recordSymbol(tz)))
     else:
       let ch = c.char
@@ -468,6 +478,7 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
         let kind = TokenKind(low(SpecialCharacterKind).ord + find(SpecialCharacters, ch))
         if kind in {tkDot, tkColon, #[tkSemicolon]#} and lastKind == kind:
           dropLast()
+          tz.resetPos()
           addToken(Token(kind: tkSymbol, raw: ch & recordSymbolPlus(tz, ch)))
         else:
           addTokenOf(kind)
@@ -478,21 +489,27 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
         else:
           addToken(Token(kind: tkString, content: s))
       of '0'..'9':
+        tz.resetPos()
         let n = recordNumber(tz)
         addToken(Token(kind: tkNumber, num: n))
       of '+', '-':
-        if tz.matchNextSkip({'0'..'9'}):
+        if tz.pos < tz.str.len and tz.str[tz.pos] in {'0'..'9'}:
           addToken(Token(kind: tkNumber, num: recordNumber(tz, ch == '-')))
         else:
+          tz.resetPos()
           addToken(Token(kind: tkSymbol, raw: recordSymbol(tz)))
       elif lastKind in {tkDot, tkColon}:
         let ch = SpecialCharacters[lastKind]
         dropLast()
+        tz.resetPos()
         addToken(Token(kind: tkSymbol, raw: ch & recordSymbol(tz)))
-      else: addToken(Token(kind: tkSymbol, raw: recordSymbol(tz)))
+      else:
+        tz.resetPos()
+        addToken(Token(kind: tkSymbol, raw: recordSymbol(tz)))
 
 proc tokenize*(str: string): seq[Token] =
-  var tokenizer = Tokenizer(str: str, pos: 0)
+  var tokenizer = newTokenizer()
+  tokenizer.str = str
   tokenize(tokenizer)
 
 when isMainModule:
@@ -502,11 +519,3 @@ when isMainModule:
     for i in 1..10000000: body
     let b = cpuTime()
     echo "took ", b - a
-
-  echo tokenize("""
-assert
-  3 == (binary_search [1, 2, 3, 4, 5, 6], 4)
-  3 == \binary_search [1, 2, 3, 4, 5, 6], 4 # inline line syntax, allows open calls with operators
-  # very pointless and inconsistent with other uses of \
-  binary_search([3, 5, 1, 4, 1], 1) == -1""").join("")
-  #echo tokenize(readFile("concepts/v2.ksmt2"))
