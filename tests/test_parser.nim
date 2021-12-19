@@ -87,7 +87,8 @@ else: (do
     "factorial(n: Int) = permutation n, n":
       # consequence
       "((factorial(n: Int) = (permutation n)), n)",
-    "a =\n  b": "(a = b)" # postfix expansion
+    "a =\n  b": "(a = b)", # postfix expansion
+    "\\(foo a, b)": "(foo a, b)"
   }
 
   for inp, outp in tests.items:

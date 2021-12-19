@@ -1,7 +1,7 @@
 # `do` for indented block, inferred in indents outside parens etc.
 # `foo(a, b)`, `foo.(a, b)`, `a.foo(b)`, `foo a, b`
 # `(a.foo b)`, `(a.foo)(b)` for calling `a.foo`
-# `(foo a, b)` => `(foo(a, b))`, `a, b` => `(a, b)`
+# `(foo a, b)` => `((foo a), b)`, `a, b` => `(a, b)`
 # operators exist, in the usual case `foo a = b` is `foo(a = b)`
 # operators can be words, `is`, `div`, `and`
 # foo bar a, b parses as foo(bar(a), b) not foo(bar(a, b)) conflicted on this

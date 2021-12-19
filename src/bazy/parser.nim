@@ -22,7 +22,8 @@ type
       backslashNestedPostArgument*,
       colonPostArgument*,
       weirdOperatorIndentUnwrap*,
-      makeOperatorInfixOnIndent*
+      makeOperatorInfixOnIndent*,
+      backslashParenLine*
     : bool
 
   Parser* = ref object
@@ -38,7 +39,8 @@ proc newParser*(): Parser =
     backslashNestedPostArgument: true,
     colonPostArgument: true,
     weirdOperatorIndentUnwrap: true,
-    makeOperatorInfixOnIndent: true))
+    makeOperatorInfixOnIndent: true,
+    backslashParenLine: true))
 
 iterator nextTokens*(p: var Parser): Token =
   while p.pos < p.tokens.len:
@@ -177,7 +179,8 @@ proc recordCurly*(parser: var Parser): Expression =
     of tkCloseBrack, tkCloseParen:
       assert false, "wrong delim for curly"
     else:
-      s.add(parser.recordWideLine(closed = makeSet))
+      # closed always true, otherwise {1, 2, 3} => {(1, 2, 3)}
+      s.add(parser.recordWideLine(closed = true))
   if makeSet: Expression(kind: Set, elements: s)
   else: Expression(kind: Block, statements: s)
 
@@ -287,7 +290,6 @@ proc recordSingle*(parser: var Parser): Expression =
           precedingSymbol = currentSymbol
       lastDot = false
       lastWhitespace = false
-    #of tkBackslash: discard
 
 proc collectLineExpression*(exprs: seq[Expression]): Expression =
   if exprs.len == 0: return Expression(kind: ExpressionKind.None)
@@ -394,7 +396,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
             finish()
       waiting = false
     of tkIndentBack:
-      if not waiting or closed:
+      if not waiting:
         # outside line scope
         dec parser.pos
         finish()
@@ -412,6 +414,13 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
         indentIsDo = false
         dec parser.pos # maybe should not be here
         finish()
+    elif token.kind == tkBackslash and parser.options.backslashParenLine and
+      parser.pos + 1 < parser.tokens.len and
+      parser.tokens[parser.pos + 1].kind == tkOpenParen:
+      inc parser.pos, 2
+      singleExprs.add(parser.recordLineLevel(closed = false))
+      inc parser.pos
+      assert parser.tokens[parser.pos].kind == tkCloseParen, "wrong delimiter for backslash paren line"
     elif token.kind == tkBackslash and parser.options.backslashLine:
       inc parser.pos
       singleExprs.add(parser.recordLineLevel(closed))
@@ -445,7 +454,7 @@ proc parse*(str: string): Expression =
   result = parser.parse(tokenizer.tokenize())
 
 when isMainModule:
-  when true:
+  when false:
     let tests = [
       readFile("concepts/test.ba"),
       #readFile("concepts/tag.ba"),
@@ -470,10 +479,36 @@ when isMainModule:
   a do b do (c)
   d
   """
+    let s = """
+do
+  if a,
+    b,
+        c,
+  d
+
+  if a,
+    do
+      b
+  \else c
+"""
+    let s = """
+try (do
+  a
+  b),
+(catch c do
+  d
+  e),
+(catch f do
+  g),
+(finally do
+  e)
+"""
+  when false:
+    let s = "[a b, c]; (a b, c)"
     echo tokenize(s)
     echo parse(s)
 
-  when false:
+  when true:
     import os
 
     for (k, p) in walkDir("concepts"):
