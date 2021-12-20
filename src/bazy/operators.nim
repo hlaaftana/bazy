@@ -12,7 +12,7 @@ type
     Comparison, Not, And, Or
     Misc
     Accusative # ? @ etc
-    Separation # julia uses this for => pairings, no idea what to use for here
+    Separation # , maybe
     Assignment
     Lambda
     Statement # postfix if/for
@@ -43,6 +43,7 @@ const Associativities*: array[Precedence, Associativity] = [
 ]
 
 proc precedence*(symbol: string): Precedence =
+  # computation is pretty simple so no cache
   if symbol.len == 0: return None
   case symbol
   of "": None
@@ -71,23 +72,28 @@ proc precedence*(symbol: string): Precedence =
         Access
     of '<', '>', '!', '=': Comparison
     of '@', '?', ':': Accusative
+    of ',', ';': Separation
     elif symbol[^1] == '=': Assignment
     else: Misc
 
-proc reduceOperators*(exprs: seq[Expression], lowestKind = low(Precedence)): seq[Expression] =
-  # linked list should improve performance
-  result = exprs
-  if exprs.len <= 1: return
+proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence)): seq[Expression] =
+  # use nils to delete expressions
+  if exprs.len <= 1: return exprs
   var prec = lowestKind
+  var deleted = 0
+  template delete(foo) =
+    foo = nil
+    inc deleted
   while prec != Precedence.None:
     template isOperator(e: Expression): bool = e.kind == Symbol and e.identifier.precedence == prec
     let assoc = Associativities[prec]
     var mustPrefix = true
     var prefixStack: seq[Expression]
     var i = 0
-    while i < result.len:
-      var e = result[i]
-      if e.isOperator:
+    while i < exprs.len:
+      var e = exprs[i]
+      if e.isNil: discard
+      elif e.kind == Symbol:
         if mustPrefix:
           prefixStack.add(e)
         mustPrefix = true
@@ -95,61 +101,73 @@ proc reduceOperators*(exprs: seq[Expression], lowestKind = low(Precedence)): seq
         let psl = prefixStack.len
         while prefixStack.len != 0:
           e = Expression(kind: Prefix, address: prefixStack.pop, arguments: @[e])
-        result[i - psl .. i] = [e]
-        i -= psl
+        for j in i - psl ..< i:
+          delete exprs[j]
+        exprs[i] = e
         mustPrefix = false
       inc i
     if mustPrefix:
-      let startIndex = if prefixStack.len + 1 == result.len: 0 else: result.len - prefixStack.len - 2
-      var e = result[startIndex]
-      for i in startIndex + 1 ..< result.len:
-        e = Expression(kind: Postfix, address: result[i], arguments: @[e])
-      result[startIndex .. ^1] = [e]
+      let startIndex = if prefixStack.len + 1 == exprs.len: 0 else: exprs.len - prefixStack.len - 2
+      var e = exprs[startIndex]
+      for i in startIndex + 1 ..< exprs.len:
+        e = Expression(kind: Postfix, address: exprs[i], arguments: @[e])
+        delete exprs[i]
+      exprs[startIndex] = e
     case assoc
     of Left:
       var lhsStart, i = 0
       var lhs, op: Expression
-      while i < result.len:
-        var e = result[i]
-        if e.isOperator:
+      while i < exprs.len:
+        var e = exprs[i]
+        if e.isNil: discard
+        elif e.isOperator:
           op = e
         elif op.isNil:
           lhs = e
           lhsStart = i
         else:
           lhs = makeInfix(op, lhs, e)
-          result[lhsStart .. i] = [lhs]
-          i = lhsStart
+          for j in lhsStart ..< i:
+            delete exprs[j]
+          exprs[i] = lhs
           op = nil
         inc i
     of Right:
-      var rhsStart, i = result.high
+      var rhsStart, i = exprs.high
       var rhs, op: Expression
       while i >= 0:
-        var e = result[i]
-        if e.isOperator:
+        var e = exprs[i]
+        if e.isNil: discard
+        elif e.isOperator:
           op = e
         elif op.isNil:
           rhs = e
           rhsStart = i
         else:
           rhs = makeInfix(op, e, rhs)
-          result[i .. rhsStart] = [rhs]
-          i = rhsStart - 1
+          for j in i ..< rhsStart:
+            delete exprs[j]
+          exprs[rhsStart] = rhs
           op = nil
         dec i
     of Unary:
       var stack: seq[Expression]
       var i = 0
-      while i < result.len:
-        var e = result[i]
-        if e.isOperator:
+      while i < exprs.len:
+        var e = exprs[i]
+        if e.isNil: discard
+        elif e.isOperator:
           stack.add(e)
         else:
           let sl = stack.len
           while stack.len != 0:
             e = Expression(kind: Prefix, address: stack.pop, arguments: @[e])
-          result[i - sl .. i] = [e]
-          i -= sl
+          for j in i - sl ..< i:
+            delete exprs[j]
+          exprs[i] = e
         inc i
     inc prec
+  result = newSeqOfCap[Expression](exprs.len - deleted)
+  for e in exprs:
+    if not e.isNil:
+      result.add(e)

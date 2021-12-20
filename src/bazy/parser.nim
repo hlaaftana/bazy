@@ -6,11 +6,10 @@ notes:
 
 * probably a lot of indent bugs when you indent in parentheses or with variable spaces
 * some kind of delimiter counter/stack on parser object would stop infinite loops from errors
-* maybe add "ignored indent" counter
+* keep track of indents with a counter
 * maybe make distinction between indent and normal argument, or `do` and indent, no idea
 * maybe postfix statements like if/for/while can end the line and record a new line for the RHS,
   or maybe some god operator like |-> to invoke these, dont know a not ugly operator though
-* maybe \ to make a () unwrapped
 
 ]#
 
@@ -47,7 +46,7 @@ iterator nextTokens*(p: var Parser): Token =
     yield p.tokens[p.pos]
     inc p.pos
 
-proc makeStringExpression*(s: string): Expression {.inline.} =
+proc makeStringExpression*(s: sink string): Expression {.inline.} =
   Expression(kind: String, str: unescape(s))
 
 proc recordLineLevel*(parser: var Parser, closed = false): Expression
@@ -188,11 +187,11 @@ proc recordSingle*(parser: var Parser): Expression =
   # +a is a path
   # a.b[c] is a path
   # a+b/c is a path and implies (a + b) / c
-  var precedingSymbol: Expression
-  var precedingDot = false
-  var currentSymbol: Expression
-  var lastWhitespace: bool
-  var lastDot: bool
+  var
+    precedingSymbol: Expression
+    precedingDot = false
+    currentSymbol: Expression
+    lastWhitespace, lastDot = false
   defer:
     dec parser.pos # paths will never terminate with delimiter
     let resultWasNil = result.isNil
@@ -220,8 +219,14 @@ proc recordSingle*(parser: var Parser): Expression =
        tkCloseCurly, tkCloseBrack, tkColon:
       finish()
     of tkString, tkNumber, tkWord:
+      if lastWhitespace and not lastDot:
+        finish()
       let ex = case token.kind
-        of tkString: makeStringExpression(token.content)
+        of tkString:
+          if lastDot:
+            Expression(kind: String, str: unescape(token.content))
+          else:
+            Expression(kind: String, str: token.content)
         of tkNumber: Expression(kind: Number, number: token.num)
         of tkWord: Expression(kind: Name, identifier: token.raw)
         else: nil
@@ -234,11 +239,11 @@ proc recordSingle*(parser: var Parser): Expression =
           currentSymbol = nil
       elif lastDot:
         result = Expression(kind: Dot, left: result, right: ex)
-      elif not currentSymbol.isNil:
+      elif currentSymbol.isNil:
+        result = Expression(kind: PathPrefix, address: result, arguments: @[ex])
+      else:
         result = Expression(kind: PathInfix, address: currentSymbol, arguments: @[result, ex])
         currentSymbol = nil
-      else: # lastWhitespace
-        finish()
       lastWhitespace = false
       lastDot = false
     of tkOpenBrack, tkOpenCurly, tkOpenParen:
@@ -277,13 +282,13 @@ proc recordSingle*(parser: var Parser): Expression =
       lastDot = true
       lastWhitespace = false
     of tkSymbol, tkBackslash:
+      if lastWhitespace and not lastDot:
+        finish()
       let ex = Expression(kind: Symbol, identifier:
         if token.kind == tkSymbol: token.raw
         else: "\\")
       if lastDot:
         result = Expression(kind: Dot, left: result, right: ex)
-      elif lastWhitespace:
-        finish()
       else:
         currentSymbol = ex
         if result.isNil:
@@ -291,7 +296,7 @@ proc recordSingle*(parser: var Parser): Expression =
       lastDot = false
       lastWhitespace = false
 
-proc collectLineExpression*(exprs: seq[Expression]): Expression =
+proc collectLineExpression*(exprs: sink seq[Expression]): Expression =
   if exprs.len == 0: return Expression(kind: ExpressionKind.None)
   var terms = reduceOperators(exprs)
   result = terms.pop
@@ -318,8 +323,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
     indentIsDo: bool
   defer: # rather defer than put this at the end and try to put `break` everywhere
     if singleExprs.len != 0:
-      lineExprs.add(singleExprs.collectLineExpression())
-      reset singleExprs
+      lineExprs.add(collectLineExpression(move singleExprs))
     if not indent.isNil:
       if (parser.options.operatorIndentMakesBlock or indentIsDo) and
         lineExprs.len == 1 and lineExprs[0].kind in IndentableCallKinds:
@@ -362,7 +366,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
         finish()
       waiting = true
       if singleExprs.len != 0: # consider ,, typo as ,
-        let ex = collectLineExpression(singleExprs)
+        let ex = collectLineExpression(move singleExprs)
         if comma == NoComma and ex.kind == OpenCall:
           assert ex.arguments.len == 1, "opencall with more than 1 argument should be impossible before comma"
           comma = CommaCall
@@ -371,7 +375,6 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
         else:
           if comma == NoComma: comma = CommaList
           lineExprs.add(ex)
-        reset singleExprs
     of tkNewline:
       if waiting or closed:
         for tok in parser.nextTokens:
@@ -504,11 +507,15 @@ try (do
   e)
 """
   when false:
-    let s = "[a b, c]; (a b, c)"
+    let s = """
+if (a,
+  b)
+  c
+"""
     echo tokenize(s)
     echo parse(s)
 
-  when true:
+  when false:
     import os
 
     for (k, p) in walkDir("concepts"):

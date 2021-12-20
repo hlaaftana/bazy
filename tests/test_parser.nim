@@ -44,8 +44,8 @@ test "simple code":
     h = \i j)""": "(a = ((b = (c (d (e = (f (g (h = (i j))))))))))",
     "\"abc\"": "\"abc\"",
     "1..20": "(1..20)",
-    "1a": "(1 a)",
-    "1ea": "(1 ea)",
+    "1a": "(1a)",
+    "1ea": "(1ea)",
     "+3.0 / -2.0": "(3.0 / -2.0)",
     "3e-2000 / 2e1400": "(3e-2000 / 2e1400)",
     "+3.1419e2 / -27.828e-1": "(314.19 / -2.7828)",
@@ -92,7 +92,8 @@ else: (do
   }
 
   for inp, outp in tests.items:
-    check $parse(inp) == outp
+    let parsed = parse(inp)
+    check $parsed == outp
 
 test "equivalent syntax":
   let equivalents = {

@@ -41,6 +41,8 @@ type
       seqValue*: ref seq[Value]
     of vkComposite:
       # supposed to be represented more efficiently
+      # short string instead of string
+      # compare composite keys by hashing keys and caching it
       compositeValue*: ref Table[string, Value]
     of vkNominalTyped:
       nominalValue*: ref NominalTypedValue
@@ -85,7 +87,7 @@ type
     of tySeq, tyReference:
       elementType*: Type
     of tyComposite:
-      fields*: Table[string, type]
+      fields*: Table[string, Type]
     of tyRuntimeNominal, tyStaticNominal:
       nominal*: NominalType
     of tyUnion, tyIntersection:

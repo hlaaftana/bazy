@@ -116,15 +116,23 @@ proc `$`*(ex: Expression): string =
 
 import unicode
 
-proc unescape*(s: string): string =
+proc unescape*(s: sink string): string =
+  # result.len <= s.len
+  # if result.len == s.len, result == s
   var
+    everEscaped = false
     escaped = false
     uBase: int
     uNum = 0
     startedU = -1
-  result = newStringOfCap(s.len)
+  result = move s
   var i = 0
   while i < s.len:
+    template addEscaped(term) =
+      if not everEscaped:
+        everEscaped = true
+        result.setLen(i)
+      result.add(term)
     let c = s[i]
     if startedU != -1:
       case c
@@ -134,7 +142,10 @@ proc unescape*(s: string): string =
       of 'a'..'f': uNum = uNum * uBase + 10 + int(c.byte - 'a'.byte)
       of 'A'..'F': uNum = uNum * uBase + 10 + int(c.byte - 'A'.byte)
       else:
-        result.add(if c == '}': $Rune(uNum) else: s[startedU..i])
+        if c == '}':
+          addEscaped($Rune(uNum))
+        elif everEscaped:
+          result.add(s[startedU..i])
         uNum = 0
         startedU = -1
     elif escaped:
@@ -151,11 +162,15 @@ proc unescape*(s: string): string =
           of 'b', 'B': 2
           else: -1 # unreachable
           startedU = i - 1
+          inc i, 2
+          continue
         elif i + 4 < s.len and {s[i + 1], s[i + 2],
           s[i + 3], s[i + 4]} <= HexDigits:
           # can change parseHexInt to something more optimized but doesnt matter
-          result.add($Rune(parseHexInt(s[i + 1 .. i + 4])))
-        else:
+          addEscaped($Rune(parseHexInt(s[i + 1 .. i + 4])))
+          inc i, 5
+          continue
+        elif everEscaped:
           result.add('\\')
           result.add(c)
       elif c in {'x', 'X'} and {s[i + 1], s[i + 2]} <= HexDigits:
@@ -163,9 +178,7 @@ proc unescape*(s: string): string =
       else:
         let ch = case c
         of 't': '\t'
-        of '"': '"'
         of '\'': '\''
-        of '`': '`'
         of '\\': '\\'
         of 'r': '\r'
         of 'n': '\n'
@@ -175,10 +188,15 @@ proc unescape*(s: string): string =
         of 'b': '\b'
         of 'e': '\e'
         else:
-          result.add('\\')
-          c
-        result.add(ch)
+          if everEscaped:
+            result.add('\\')
+            result.add(c)
+          inc i
+          continue
+        addEscaped(ch)
       escaped = false
-    elif c == '\\': escaped = true
-    else: result.add(c)
+    elif c == '\\':
+      escaped = true
+    elif everEscaped:
+      result.add(c)
     inc i
