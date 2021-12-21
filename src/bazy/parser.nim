@@ -506,12 +506,13 @@ try (do
 (finally do
   e)
 """
-  when false:
     let s = """
-if (a,
+if (a, \
   b)
   c
 """
+  when true:
+    let s = "a:b:c + 1"
     echo tokenize(s)
     echo parse(s)
 

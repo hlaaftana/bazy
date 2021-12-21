@@ -82,8 +82,10 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
   var prec = lowestKind
   var deleted = 0
   template delete(foo) =
-    foo = nil
-    inc deleted
+    var old: Expression
+    swap old, foo
+    if not old.isNil:
+      inc deleted
   while prec != Precedence.None:
     template isOperator(e: Expression): bool = e.kind == Symbol and e.identifier.precedence == prec
     let assoc = Associativities[prec]

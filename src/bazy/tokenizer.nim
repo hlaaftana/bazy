@@ -158,6 +158,7 @@ type
   TokenizerOptions* = object
     symbolWords*: seq[string]
     stringBackslashEscape*, stringQuoteEscape*: bool
+    backslashBreakNewline*, commaIgnoreIndent*: bool
 
   Tokenizer* = ref object
     options*: TokenizerOptions
@@ -171,7 +172,9 @@ proc newTokenizer*(): Tokenizer =
   Tokenizer(options: TokenizerOptions(
     symbolWords: @[],
     stringBackslashEscape: true,
-    stringQuoteEscape: true))
+    stringQuoteEscape: true,
+    backslashBreakNewline: true,
+    commaIgnoreIndent: true))
 
 proc resetPos*(tz: var Tokenizer) =
   assert tz.previousPos != -1, "no previous position to reset to"
@@ -449,15 +452,23 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
     if w:
       if c == '\n': # \r\n -> \n in runes iterator
         let r = high(result)
+        var breakIndent = false
         for xi in countdown(r, 0):
-          if result[xi].kind == tkWhitespace:
+          case result[xi].kind
+          of tkWhitespace:
             continue
-          elif result[xi].kind == tkBackslash:
-            result.del(xi)
+          of tkBackslash:
+            if tz.options.backslashBreakNewline:
+              result.del(xi)
+              breakIndent = true
+          of tkColon:
+            if tz.options.commaIgnoreIndent:
+              breakIndent = true
+          else: discard
           break
         if r == high(result):
           addTokenOf(tkNewLine)
-        recordingIndent = true
+        recordingIndent = not breakIndent
       elif lastKind != tkWhitespace:
         addTokenOf(tkWhitespace)
     elif c.isAlpha or c == Rune('_'):
