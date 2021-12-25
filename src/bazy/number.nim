@@ -10,20 +10,32 @@ type
 when defined(js):
   type NumberRepr* = ref NumberReprObj
   proc `==`*(n1, n2: NumberRepr): bool =
-    n1.isNil and n2.isNil or (n1.isNil == n2.isNil and n1[] == n2[])
+    system.`==`(n1, n2) or (n1.isNil == n2.isNil and n1[] == n2[])
 else:
   type NumberRepr* = NumberReprObj
 
 proc `$`*(number: NumberRepr): string =
-  result = newStringOfCap(number.digits.len + 10)
+  var exponent: string
+  let dotIndex =
+    if number.kind == Floating and number.exp < 0 and -number.exp < number.digits.len:
+      number.digits.len + number.exp - 1
+    elif number.exp != 0:
+      exponent = $(number.exp + number.digits.len - 1)
+      if number.digits.len > 1:
+        0
+      else:
+        -1
+    else:
+      -2
+  result = newStringOfCap(number.negative.ord +
+    number.digits.len +
+    (dotIndex >= 0).ord +
+    (if exponent.len != 0: exponent.len + 1 else: 0)) # exact length
   if number.negative:
     result.add('-')
-  for d in number.digits:
+  for i, d in number.digits:
     result.add(char('0'.byte + d))
-  if number.kind == Floating and number.exp < 0 and -number.exp < number.digits.len:
-    result.insert(".", number.negative.ord + number.digits.len + number.exp)
-  elif number.exp != 0:
-    if number.digits.len > 1:
-      result.insert(".", number.negative.ord + 1)
+    if i == dotIndex: result.add('.') 
+  if exponent.len != 0:
     result.add('e')
-    result.add($(number.exp + number.digits.len - 1))
+    result.add(exponent)

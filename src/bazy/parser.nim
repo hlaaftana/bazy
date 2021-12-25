@@ -25,6 +25,7 @@ type
       makeOperatorInfixOnIndent*,
       backslashParenLine*
     : bool
+    defaultBackslashNames*: seq[string] # performance hazard
 
   Parser* = ref object
     tokens*: seq[Token]
@@ -42,7 +43,8 @@ proc defaultOptions*(): ParserOptions =
     colonPostArgument: true,
     weirdOperatorIndentUnwrap: true,
     makeOperatorInfixOnIndent: true,
-    backslashParenLine: true)
+    backslashParenLine: true,
+    defaultBackslashNames: @[#["else", "finally"]#])
 
 proc newParser*(tokens: sink seq[Token] = @[], options = defaultOptions()): Parser =
   Parser(tokens: tokens, options: options)
@@ -107,8 +109,10 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
       result.statements[^1].kind in IndentableCallKinds:
       inc parser.pos
       result.statements[^1].arguments.add(parser.recordWideLine())
-    elif token.kind == tkBackslash and
-      parser.options.backslashNestedPostArgument and
+    elif
+      ((parser.options.backslashNestedPostArgument and token.kind == tkBackslash) or
+        (parser.options.defaultBackslashNames.len != 0 and token.kind == tkWord and
+          token.raw in parser.options.defaultBackslashNames)) and
       result.statements.len > 0 and
       result.statements[^1].kind in IndentableCallKinds and (
         # epic abuse
@@ -127,7 +131,8 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
             valid = false
             break
         valid):
-      inc parser.pos
+      if token.kind == tkBackslash:
+        inc parser.pos
       let ex = lastEx
       let tok = parser.tokens[parser.pos]
       if tok.kind == tkWord:
@@ -373,7 +378,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
     if lineExprs.len == 0:
       result = Expression(kind: ExpressionKind.None)
     elif comma == CommaList:
-      result = Expression(kind: Tuple, elements: lineExprs)
+      result = Expression(kind: Comma, elements: lineExprs)
     elif lineExprs.len == 1:
       result = lineExprs[0]
     else:
