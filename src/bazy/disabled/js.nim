@@ -1,5 +1,5 @@
 # not real module
-import expressions, tokenizer
+import ".."/[expressions, number]
 from strutils import toHex
 
 proc mangle*(s: string): string =
@@ -32,7 +32,7 @@ proc mangle*(s: string): string =
       of 'A'..'Z', 'a'..'z', '_', '0'..'9':
         result.add c
       else:
-        result.add("HEX" & toHex(ord(c), 2))
+        result.add("$x" & toHex(ord(c), 2))
 
 proc toJs*(ex: Expression): string =
   case ex.kind
@@ -43,7 +43,7 @@ proc toJs*(ex: Expression): string =
       result.addEscapedChar(c)
   of Name, Symbol: result = mangle(ex.identifier)
   of Wrapped: result = "(" & toJs(ex.wrapped) & ")"
-  of OpenCall, PathCall, Infix, Prefix, Postfix:
+  of CallKinds:
     discard
   of Subscript, CurlySubscript:
     result = "(" & toJs(ex.address) & ")[" & ex.arguments[0].toJs & "]"

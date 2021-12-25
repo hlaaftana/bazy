@@ -1,4 +1,4 @@
-import tokenizer, expressions, operators
+import tokens, expressions, operators
 
 #[
 
@@ -16,6 +16,7 @@ notes:
 type
   ParserOptions* = object
     curlyBlocks*,
+      pathOperators*,
       operatorIndentMakesBlock*,
       backslashLine*,
       backslashNestedPostArgument*,
@@ -28,18 +29,23 @@ type
   Parser* = ref object
     tokens*: seq[Token]
     pos*: int
+    fakeIndents*: int
     options*: ParserOptions
 
-proc newParser*(): Parser =
-  Parser(pos: 0, options: ParserOptions(
+proc defaultOptions*(): ParserOptions =
+  ParserOptions(
     curlyBlocks: false,
+    pathOperators: true,
     operatorIndentMakesBlock: true,
     backslashLine: true, # should be false
     backslashNestedPostArgument: true,
     colonPostArgument: true,
     weirdOperatorIndentUnwrap: true,
     makeOperatorInfixOnIndent: true,
-    backslashParenLine: true))
+    backslashParenLine: true)
+
+proc newParser*(tokens: sink seq[Token] = @[], options = defaultOptions()): Parser =
+  Parser(tokens: tokens, options: options)
 
 iterator nextTokens*(p: var Parser): Token =
   while p.pos < p.tokens.len:
@@ -66,7 +72,9 @@ proc recordWideLine*(parser: var Parser, closed = false): Expression =
         dec parser.pos
         break
     of tkIndentBack:
-      if not closed:
+      if closed:
+        dec parser.fakeIndents
+      else:
         break
     else:
       s.add(parser.recordLineLevel(closed))
@@ -81,12 +89,14 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
   var backslashNames: seq[string]
   for token in parser.nextTokens:
     case token.kind
-    of tkNone, tkWhitespace, tkIndent, tkNewline: continue
+    of tkNone, tkWhitespace, tkNewline: continue
     of tkSemicolon: discard
     of tkIndentBack:
       if indented:
         break
-      continue
+      else:
+        dec parser.fakeIndents
+        continue
     of tkComma, tkCloseBrack, tkCloseCurly, tkCloseParen:
       assert indented, "extra delim " & $token.kind
       dec parser.pos
@@ -177,9 +187,11 @@ proc recordCurly*(parser: var Parser): Expression =
       break
     of tkCloseBrack, tkCloseParen:
       assert false, "wrong delim for curly"
+    # funny behavior
+    elif t.kind == tkSemicolon and parser.options.curlyBlocks:
+      makeSet = false
     else:
-      # closed always true, otherwise {1, 2, 3} => {(1, 2, 3)}
-      s.add(parser.recordWideLine(closed = true))
+      s.add(parser.recordWideLine(closed = makeSet))
   if makeSet: Expression(kind: Set, elements: s)
   else: Expression(kind: Block, statements: s)
 
@@ -188,24 +200,26 @@ proc recordSingle*(parser: var Parser): Expression =
   # a.b[c] is a path
   # a+b/c is a path and implies (a + b) / c
   var
-    precedingSymbol: Expression
-    precedingDot = false
-    currentSymbol: Expression
-    lastWhitespace, lastDot = false
+    precedingSymbol, currentSymbol: Expression = nil
+    precedingDot, lastWhitespace, lastDot = false
   defer:
     dec parser.pos # paths will never terminate with delimiter
     let resultWasNil = result.isNil
     if not currentSymbol.isNil:
+      if not parser.options.pathOperators:
+        assert false, "currentSymbol should not exist when path operators are off"
       if resultWasNil:
         result = currentSymbol
       else:
         result = Expression(kind: PathPostfix, address: currentSymbol, arguments: @[result])
     if not precedingSymbol.isNil and not resultWasNil:
+      if not parser.options.pathOperators:
+        assert false, "precedingSymbol should not exist when path operators are off"
       result = Expression(kind: PathPrefix, address: precedingSymbol, arguments: @[result])
     if precedingDot:
-      result = Expression(kind: Dot,
-        left: Expression(kind: ExpressionKind.None),
-        right: result)
+      result = Expression(kind: PathPrefix,
+        address: Expression(kind: Symbol, identifier: "."),
+        arguments: @[result])
   template finish = return
   for token in parser.nextTokens:
     case token.kind
@@ -214,6 +228,7 @@ proc recordSingle*(parser: var Parser): Expression =
       if not currentSymbol.isNil:
         finish()
       lastWhitespace = true
+      continue
     of tkIndent, tkIndentBack, tkNewLine,
        tkComma, tkSemicolon, tkCloseParen,
        tkCloseCurly, tkCloseBrack, tkColon:
@@ -239,13 +254,11 @@ proc recordSingle*(parser: var Parser): Expression =
           currentSymbol = nil
       elif lastDot:
         result = Expression(kind: Dot, left: result, right: ex)
-      elif currentSymbol.isNil:
-        result = Expression(kind: PathPrefix, address: result, arguments: @[ex])
-      else:
+      elif not currentSymbol.isNil:
         result = Expression(kind: PathInfix, address: currentSymbol, arguments: @[result, ex])
         currentSymbol = nil
-      lastWhitespace = false
-      lastDot = false
+      else:
+        result = Expression(kind: PathPrefix, address: result, arguments: @[ex])
     of tkOpenBrack, tkOpenCurly, tkOpenParen:
       if lastWhitespace and not lastDot:
         finish()
@@ -257,7 +270,11 @@ proc recordSingle*(parser: var Parser): Expression =
         else: nil
       if result.isNil:
         result = ex
-      elif currentSymbol.isNil:
+        if lastDot: precedingDot = true
+      elif not currentSymbol.isNil:
+        result = Expression(kind: PathInfix, address: currentSymbol, arguments: @[result, ex])
+        currentSymbol = nil
+      else:
         case ex.kind
         of Tuple:
           if result.kind == Dot:
@@ -267,34 +284,38 @@ proc recordSingle*(parser: var Parser): Expression =
         of Array: result = Expression(kind: Subscript, address: result, arguments: move ex.elements)
         of Set: result = Expression(kind: CurlySubscript, address: result, arguments: move ex.elements)
         of Wrapped: # single expression
-          if result.kind == Dot:
+          if result.kind == Dot and not lastDot:
             result = Expression(kind: PathCall, address: result.right, arguments: @[result.left, ex.wrapped])
           else:
             result = Expression(kind: PathCall, address: result, arguments: @[ex.wrapped])
         else:
           assert false, "should return one of tuple, array, set, wrapped"
-      else:
-        result = Expression(kind: PathInfix, address: currentSymbol, arguments: @[result, ex])
-        currentSymbol = nil
-      lastDot = false
-      lastWhitespace = false
     of tkDot:
       lastDot = true
       lastWhitespace = false
+      continue
     of tkSymbol, tkBackslash:
       if lastWhitespace and not lastDot:
         finish()
       let ex = Expression(kind: Symbol, identifier:
         if token.kind == tkSymbol: token.raw
         else: "\\")
-      if lastDot:
+      if result.isNil:
+        if lastDot: precedingDot = true
+        if parser.options.pathOperators:
+          currentSymbol = ex
+          precedingSymbol = currentSymbol
+        else:
+          result = ex
+      elif lastDot:
         result = Expression(kind: Dot, left: result, right: ex)
       else:
-        currentSymbol = ex
-        if result.isNil:
-          precedingSymbol = currentSymbol
-      lastDot = false
-      lastWhitespace = false
+        if parser.options.pathOperators:
+          currentSymbol = ex
+        else:
+          finish()
+    lastDot = false
+    lastWhitespace = false
 
 proc collectLineExpression*(exprs: sink seq[Expression]): Expression =
   if exprs.len == 0: return Expression(kind: ExpressionKind.None)
@@ -328,7 +349,9 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
       if (parser.options.operatorIndentMakesBlock or indentIsDo) and
         lineExprs.len == 1 and lineExprs[0].kind in IndentableCallKinds:
         if parser.options.weirdOperatorIndentUnwrap and
-          (let expandKinds = if indentIsDo: {Prefix, Infix} else: {Infix};
+          (let expandKinds =
+            if indentIsDo: {Prefix, Infix, ExpressionKind.Colon}
+            else: {Infix, ExpressionKind.Colon};
             lineExprs[0].kind in expandKinds):
           var ex = lineExprs[0]
           while ex.arguments[^1].kind in expandKinds:
@@ -367,7 +390,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
       waiting = true
       if singleExprs.len != 0: # consider ,, typo as ,
         let ex = collectLineExpression(move singleExprs)
-        if comma == NoComma and ex.kind == OpenCall:
+        if not closed and comma == NoComma and ex.kind == OpenCall:
           assert ex.arguments.len == 1, "opencall with more than 1 argument should be impossible before comma"
           comma = CommaCall
           lineExprs.add(ex.address)
@@ -443,20 +466,13 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
       singleExprs.add(ex)
   finish()
 
-proc parse*(tokens: seq[Token]): Expression =
-  var parser = newParser()
-  parser.tokens = tokens
+proc parse*(tokens: sink seq[Token]): Expression =
+  var parser = newParser(tokens)
   result = parser.recordBlockLevel()
 
-proc parse*(str: string): Expression =
-  var tokenizer = newTokenizer()
-  tokenizer.options.symbolWords = @[
-    "do", "and", "or", "is", "as", "not", "in", "div", "mod", "xor"
-  ]
-  tokenizer.str = str
-  result = parser.parse(tokenizer.tokenize())
-
 when isMainModule:
+  import tokenizer
+
   when false:
     let tests = [
       readFile("concepts/test.ba"),
@@ -467,10 +483,15 @@ when isMainModule:
 
     for t in tests:
       echo "input: ", t
-      echo "output: ", parse(t)
+      echo "output: ", parse(tokenize(t))
 
+  template tp(ss: string) =
+    let s = ss
+    let t = tokenize(s)
+    echo t
+    echo parse(t)
   when false:
-    let s = """
+    tp """
   a = \b
     c = \d
       e = \f
@@ -478,11 +499,11 @@ when isMainModule:
     i = \j
   k
   """
-    let s = """
+    tp """
   a do b do (c)
   d
   """
-    let s = """
+    tp """
 do
   if a,
     b,
@@ -494,7 +515,7 @@ do
       b
   \else c
 """
-    let s = """
+    tp """
 try (do
   a
   b),
@@ -506,15 +527,16 @@ try (do
 (finally do
   e)
 """
-    let s = """
+    tp """
 if (a, \
   b)
   c
 """
-  when true:
-    let s = "a:b:c + 1"
-    echo tokenize(s)
-    echo parse(s)
+    tp "combination(n: Int, r: Int) = \\for result x = 1, each i in 0..<r do while i < r do x = x * (n - i) / (r - i)"
+    tp "`for` a = b, c = d do e = f"
+    tp "a := b + c * 4"
+  else:
+    tp "a:b:c + 1"
 
   when false:
     import os

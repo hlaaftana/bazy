@@ -77,7 +77,7 @@ proc precedence*(symbol: string): Precedence =
     else: Misc
 
 proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence)): seq[Expression] =
-  # use nils to delete expressions
+  # use nils to delete expressions instead of reordering the seq
   if exprs.len <= 1: return exprs
   var prec = lowestKind
   var deleted = 0
@@ -109,7 +109,7 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
         mustPrefix = false
       inc i
     if mustPrefix:
-      let startIndex = if prefixStack.len + 1 == exprs.len: 0 else: exprs.len - prefixStack.len - 2
+      let startIndex = max(0, exprs.len - prefixStack.len - 2)
       var e = exprs[startIndex]
       for i in startIndex + 1 ..< exprs.len:
         e = Expression(kind: Postfix, address: exprs[i], arguments: @[e])

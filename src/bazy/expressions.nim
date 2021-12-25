@@ -1,4 +1,4 @@
-import tokenizer
+import number
 
 type
   ExpressionKind* = enum
@@ -9,14 +9,14 @@ type
     OpenCall, Infix, Prefix, Postfix
     PathCall, PathInfix, PathPrefix, PathPostfix
     Subscript, CurlySubscript
-    Dot, Colon
+    Dot, Colon, Comma
     Tuple, Array, Set
     Block, SemicolonBlock
   Expression* {.acyclic.} = ref object
     case kind*: ExpressionKind
     of None: discard
     of Number:
-      number*: NumberToken
+      number*: NumberRepr
     of String:
       str*: string
     of Name, Symbol:
@@ -30,14 +30,14 @@ type
       arguments*: seq[Expression]
     of Dot, Colon:
       left*, right*: Expression
-    of Tuple, Array, Set:
+    of Comma, Tuple, Array, Set:
       # these can be colon expressions
       elements*: seq[Expression]
     of Block, SemicolonBlock:
       statements*: seq[Expression]
 
 proc `==`*(a, b: Expression): bool =
-  if a.isNil and b.isNil: return true
+  if system.`==`(a, b): return true
   if (a.isNil xor b.isNil) or (a.kind != b.kind): return false
   result = case a.kind
   of None: true
@@ -50,7 +50,7 @@ proc `==`*(a, b: Expression): bool =
     Subscript, CurlySubscript:
     a.address == b.address and a.arguments == b.arguments
   of Dot, Colon: a.left == b.left and a.right == b.right
-  of Tuple, Array, Set: a.elements == b.elements
+  of Comma, Tuple, Array, Set: a.elements == b.elements
   of Block, SemicolonBlock: a.statements == b.statements
 
 const
@@ -75,31 +75,21 @@ proc `$`*(ex: Expression): string =
   of String: "\"" & ex.str & "\""
   of Name, Symbol: ex.identifier
   of Wrapped: "(" & $ex.wrapped & ")"
-  of OpenCall: "(" & $ex.address & " " & ex.arguments.join(", ") & ")"
-  of Infix:
+  of Infix, PathInfix:
     "(" & $ex.arguments[0] & " " & $ex.address & " " & $ex.arguments[1] & ")" &
       (if ex.arguments.len > 2: " {" & ex.arguments[2..^1].join(", ") & "}" else: "")
-  of Postfix:
+  of Postfix, PathPostfix:
     "(" & $ex.arguments[0] & " " & $ex.address & ")" &
       (if ex.arguments.len > 1: " {" & ex.arguments[1..^1].join(", ") & "}" else: "")
-  of Prefix:
+  of Prefix, PathPrefix:
     "(" & $ex.address & " " & $ex.arguments[0] & ")" &
       (if ex.arguments.len > 1: " {" & ex.arguments[1..^1].join(", ") & "}" else: "")
-  of PathCall: $ex.address & "(" & ex.arguments.join(", ") & ")"
-  of PathInfix:
-    "(" & $ex.arguments[0] & $ex.address & $ex.arguments[1] & ")" &
-      (if ex.arguments.len > 2: " {" & ex.arguments[2..^1].join(", ") & "}" else: "")
-  of PathPostfix:
-    "(" & $ex.arguments[0] & $ex.address & ")" &
-      (if ex.arguments.len > 1: " {" & ex.arguments[1..^1].join(", ") & "}" else: "")
-  of PathPrefix:
-    "(" & $ex.address & $ex.arguments[0] & ")" &
-      (if ex.arguments.len > 1: " {" & ex.arguments[1..^1].join(", ") & "}" else: "")
+  of OpenCall, PathCall: $ex.address & "(" & ex.arguments.join(", ") & ")"
   of Subscript: $ex.address & "[" & ex.arguments.join(", ") & "]"
   of CurlySubscript: $ex.address & "{" & ex.arguments.join(", ") & "}"
   of Dot: $ex.left & "." & $ex.right
-  of Colon: $ex.left & ": " & $ex.right
-  of Tuple: "(" & ex.elements.join(", ") & ")"
+  of Colon: "(" & $ex.left & ": " & $ex.right & ")"
+  of Comma, Tuple: "(" & ex.elements.join(", ") & ")"
   of Array: "[" & ex.elements.join(", ") & "]"
   of Set: "{" & ex.elements.join(", ") & "}"
   of Block:
@@ -120,8 +110,7 @@ proc unescape*(s: sink string): string =
   # result.len <= s.len
   # if result.len == s.len, result == s
   var
-    everEscaped = false
-    escaped = false
+    escaped, everEscaped = false
     uBase: int
     uNum = 0
     startedU = -1
@@ -137,7 +126,7 @@ proc unescape*(s: sink string): string =
     if startedU != -1:
       case c
       of '_': discard
-      # could change these to revert if the base is wrong
+      # could change these to revert if digits don't match base
       of '0'..'9': uNum = uNum * uBase + int(c.byte - '0'.byte)
       of 'a'..'f': uNum = uNum * uBase + 10 + int(c.byte - 'a'.byte)
       of 'A'..'F': uNum = uNum * uBase + 10 + int(c.byte - 'A'.byte)
@@ -200,3 +189,51 @@ proc unescape*(s: sink string): string =
     elif everEscaped:
       result.add(c)
     inc i
+
+proc binary*(ex: Expression): string =
+  result.add(ex.kind.char)
+  case ex.kind
+  of None: discard
+  of Number:
+    result.add(ex.number.kind.char)
+    result.add(ex.number.bits.char)
+    let str = $ex.number
+    result.add(str.len.char)
+    result.add(str)
+  of String:
+    let s = ex.str
+    result.add(char (s.len shr 24) and 0xFF)
+    result.add(char (s.len shr 16) and 0xFF)
+    result.add(char (s.len shr 8) and 0xFF)
+    result.add(char s.len and 0xFF)
+    result.add(s)
+  of Name, Symbol:
+    let s = ex.identifier
+    result.add(char (s.len shr 8) and 0xFF)
+    result.add(char s.len and 0xFF)
+    result.add(s)
+  of Wrapped:
+    result.add(binary(ex.wrapped))
+  of Dot, Colon:
+    result.add(binary(ex.left))
+    result.add(binary(ex.right))
+  of OpenCall, Infix, Prefix, Postfix,
+      PathCall, PathInfix, PathPrefix, PathPostfix,
+      Subscript, CurlySubscript,
+      Comma, Tuple, Array, Set, Block, SemicolonBlock:
+    let exprs =
+      case ex.kind
+      of OpenCall, Infix, Prefix, Postfix,
+          PathCall, PathInfix, PathPrefix, PathPostfix,
+          Subscript, CurlySubscript:
+        let args = ex.arguments
+        @[ex.address] & args
+      of Dot, Colon: @[ex.left, ex.right]
+      of Comma, Tuple, Array, Set: ex.elements
+      of Block: ex.statements
+      else: @[]
+    result.add(char (exprs.len shr 24) and 0xFF)
+    result.add(char (exprs.len shr 16) and 0xFF)
+    result.add(char (exprs.len shr 8) and 0xFF)
+    result.add(char exprs.len and 0xFF)
+    for e in exprs: result.add(binary(e))

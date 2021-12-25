@@ -3,58 +3,58 @@ when (compiles do: import nimbleutils/bridge):
 else:
   import unittest
 
-import bazy/[parser, expressions]
+import bazy
 
 test "simple code":
   let tests = {
     "a": "a",
     "a.b": "a.b",
-    "a+b": "(a+b)",
+    "a+b": "(a + b)",
     "a + b": "(a + b)",
-    "a +b": "(a (+b))",
-    "a+ b": "((a+) b)",
-    "a.b+c/2": "((a.b+c)/2)",
+    "a +b": "a((+ b))",
+    "a+ b": "(a +)(b)",
+    "a.b+c/2": "((a.b + c) / 2)",
     "a(b, c)": "a(b, c)",
     "a * b / c ^ d ^ e << f | g + h < i as j":
       "((((a * b) / (c ^ (d ^ e))) << ((f | g) + h)) < (i as j))",
-    "a do\n  b": "(a b)",
+    "a do\n  b": "a(b)",
     "a\n  b\n  c\nd\ne\n  f\n    g\nh": """(
-  (a (
+  a((
     b;
     c
   ));
   d;
-  (e (f g));
+  e(f(g));
   h
 )""",
-    "a b, c": "(a b, c)",
-    "a b c, d e, f": "(a (b c), (d e), f)",
-    "a b\n\\c\n  d\n  e": """(a b, c: (
+    "a b, c": "a(b, c)",
+    "a b c, d e, f": "a(b(c), d(e), f)",
+    "a b\n\\c\n  d\n  e": """a(b, (c: (
   d;
   e
-))""",
+)))""",
     "a = \\b c\na = \\b c\n  a = \\b c\na = \\b c": """(
-  (a = (b c));
-  (a = (b c, (a = (b c))));
-  (a = (b c))
+  (a = b(c));
+  (a = b(c, (a = b(c))));
+  (a = b(c))
 )""",
     """
     a = (b = \c d
       e = \f g
-    h = \i j)""": "(a = ((b = (c (d (e = (f (g (h = (i j))))))))))",
+    h = \i j)""": "(a = ((b = c(d((e = f(g((h = i(j))))))))))",
     "\"abc\"": "\"abc\"",
-    "1..20": "(1..20)",
-    "1a": "(1a)",
-    "1ea": "(1ea)",
+    "1..20": "(1 .. 20)",
+    "1a": "(1 a)",
+    "1ea": "(1 ea)",
     "+3.0 / -2.0": "(3.0 / -2.0)",
     "3e-2000 / 2e1400": "(3e-2000 / 2e1400)",
     "+3.1419e2 / -27.828e-1": "(314.19 / -2.7828)",
     "0.03": "0.03",
     "0.00042e-4": "0.00042e-4",
-    "a + b c + d e": "(a + (b (c + (d e))))",
-    "a+b c+d e": "((a+b) ((c+d) e))",
-    "a + b c, d e + f g": "((a + (b c)), (d (e + (f g))))",
-    "a do(b) do(c)": "(a ((b) (c)))",
+    "a + b c + d e": "(a + b((c + d(e))))",
+    "a+b c+d e": "(a + b)((c + d)(e))",
+    "a + b c, d e + f g": "((a + b(c)), d((e + f(g))))",
+    "a do(b) do(c)": "a((b)((c)))",
     """
 a = \b
   c = \d
@@ -62,8 +62,8 @@ a = \b
       g = \h
   i = \j
 k""": """(
-  (a = (b (
-    (c = (d (e = (f (g = h)))));
+  (a = b((
+    (c = d((e = f((g = h)))));
     (i = j)
   )));
   k
@@ -71,24 +71,24 @@ k""": """(
     """
 a do b do (c)
 d""": """(
-  (a (b (c)));
+  a(b((c)));
   d
 )""",
     """if a, b,
 else: (do
   c
-  d)""": """(if a, b, else: ((
+  d)""": """if(a, b, (else: ((
   c;
   d
-)))""",
+))))""",
     "permutation(n: Int, r: Int) = product n - r + 1 .. n":
       # command syntax with infixes
-      "(permutation(n: Int, r: Int) = (product (((n - r) + 1) .. n)))",
+      "(permutation((n: Int), (r: Int)) = product((((n - r) + 1) .. n)))",
     "factorial(n: Int) = permutation n, n":
       # consequence
-      "((factorial(n: Int) = (permutation n)), n)",
+      "((factorial((n: Int)) = permutation(n)), n)",
     "a =\n  b": "(a = b)", # postfix expansion
-    "\\(foo a, b)": "(foo a, b)"
+    "\\(foo a, b)": "foo(a, b)"
   }
 
   for inp, outp in tests.items:
@@ -140,8 +140,6 @@ test "equivalent syntax":
     checkpoint "a: " & $a
     checkpoint "b: " & $b
     check a == b
-
-import bazy/tokenizer
 
 when not defined(nimscript) and defined(testsBenchmark):
   import std/monotimes, strutils
