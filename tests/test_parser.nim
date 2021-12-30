@@ -137,8 +137,8 @@ test "equivalent syntax":
   for a, b in equivalents.items:
     let a = reduced(parse(a))
     let b = reduced(parse(b))
-    checkpoint "a: " & $a
-    checkpoint "b: " & $b
+    checkpoint "a: " & a.repr
+    checkpoint "b: " & b.repr
     check a == b
 
 when not defined(nimscript) and defined(testsBenchmark):

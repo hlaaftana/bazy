@@ -1,4 +1,4 @@
-import number
+import number, util/objects
 
 type
   ExpressionKind* = enum
@@ -36,22 +36,7 @@ type
     of Block, SemicolonBlock:
       statements*: seq[Expression]
 
-proc `==`*(a, b: Expression): bool =
-  if system.`==`(a, b): return true
-  if (a.isNil xor b.isNil) or (a.kind != b.kind): return false
-  result = case a.kind
-  of None: true
-  of Number: a.number == b.number
-  of String: a.str == b.str
-  of Name, Symbol: a.identifier == b.identifier
-  of Wrapped: a.wrapped == b.wrapped
-  of OpenCall, Infix, Prefix, Postfix,
-    PathCall, PathInfix, PathPrefix, PathPostfix,
-    Subscript, CurlySubscript:
-    a.address == b.address and a.arguments == b.arguments
-  of Dot, Colon: a.left == b.left and a.right == b.right
-  of Comma, Tuple, Array, Set: a.elements == b.elements
-  of Block, SemicolonBlock: a.statements == b.statements
+defineEquality Expression
 
 const
   OpenCallKinds* = {OpenCall, Infix, Prefix, Postfix}
@@ -103,6 +88,27 @@ proc `$`*(ex: Expression): string =
     s.add(")")
     move s
   of SemicolonBlock: "(" & ex.statements.join("; ") & ")"
+
+proc repr*(ex: Expression): string =
+  if ex.isNil: return "nil"
+  proc joinRepr(exs: seq[Expression]): string =
+    for e in exs:
+      if result.len != 0:
+        result.add(", ")
+      result.add(e.repr)
+  case ex.kind
+  of None: "None"
+  of Number: "Number " & $ex.number
+  of String: "String \"" & ex.str & "\""
+  of Name, Symbol: $ex.kind & " " & ex.identifier
+  of Wrapped: "Wrapped(" & ex.wrapped.repr & ")"
+  of Infix, PathInfix, Postfix, PathPostfix, Prefix, PathPrefix,
+    OpenCall, PathCall, Subscript, CurlySubscript:
+    $ex.kind & "(" & ex.address.repr & ", " & ex.arguments.joinRepr & ")"
+  of Dot, Colon: $ex.kind & "(" & ex.left.repr & ", " & ex.right.repr & ")"
+  of Comma, Tuple, Array, Set: $ex.kind & "(" & ex.elements.joinRepr & ")"
+  of Block, SemicolonBlock:
+    $ex.kind & "(" & ex.statements.joinRepr & ")"
 
 import unicode
 

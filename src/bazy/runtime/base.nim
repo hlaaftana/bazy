@@ -22,16 +22,18 @@ type
       ## reference (pointer) to value
     vkUniqueReference
       ## reference to value identified by its address (singleton)
-    vkString
-      ## general byte sequence type
     vkSeq
       ## both seq and string are references to save memory
+    vkString
+      ## general byte sequence type
     vkComposite
       ## like tuple, but fields are tied to names and unordered
       ## (really the names define the order and the names can at least be shortstrings)
     vkPropertyReference
       ## references with some type properties attached at runtime
       ## which are also runtime values
+    vkType
+      ## type value
 
   UniqueReference* = distinct ref Value
 
@@ -55,10 +57,10 @@ type
       referenceValue*: ref Value
     of vkUniqueReference:
       uniqueReferenceValue*: UniqueReference
-    of vkString:
-      stringValue*: ref string
     of vkSeq:
       seqValue*: ref seq[Value]
+    of vkString:
+      stringValue*: ref string
     of vkComposite:
       # supposed to be represented more efficiently
       # short string instead of string
@@ -66,6 +68,8 @@ type
       compositeValue*: ref Table[string, Value]
     of vkPropertyReference:
       propertyRefValue*: ref RuntimePropertyObj
+    of vkType:
+      typeValue*: ref Type
 
   RuntimePropertyObj* = object
     properties*: HashSet[Value]
@@ -77,11 +81,13 @@ type
     tyInteger, tyUnsigned, tyFloat,
     tyFunction, tyTuple,
     tyReference,
-    tyString, tySeq,
+    tySeq,
+    tyString,
     tyComposite,
+    tyType,
     # typeclass
     tyAny, tyNone, tyUnion, tyIntersection, tyNot,
-    tyBaseType, tyWithProperty,
+    tyBaseType, tyContainingProperty,
     # matcher
     tyCustomMatcher
   
@@ -96,37 +102,69 @@ type
       returnType*: ref Type
     of tyTuple:
       elements*: seq[Type]
-    of tySeq, tyReference:
+    of tyReference, tySeq:
       elementType*: ref Type
     of tyComposite:
       fields*: Table[string, Type]
+    of tyType:
+      typeValue*: ref Type
     of tyUnion, tyIntersection:
       operands*: seq[Type]
     of tyNot:
       notType*: ref Type
     of tyBaseType:
       baseKind*: TypeKind
-    of tyWithProperty:
-      withProperty*: Value
+    of tyContainingProperty:
+      containingProperty*: Value
     of tyCustomMatcher:
-      matcher*: proc (t: Type): bool
+      typeMatcher*: proc (t: Type): bool
+      valueMatcher*: proc (v: Value): bool
       #compare*: proc (otherMatcher, t: Type): bool
         # if closer to `t` than `otherMatcher`, return true
 
 {.pop.} # acyclic
 
-include includes/runtimeequalsboilerplate
+import util/objects
+
+template mix(x) =
+  result = result !& hash(x)
+
+proc hash(r: ref): Hash =
+  mix hash(r[])
+  result = !$ result
+
+proc hash*(p: UniqueReference): Hash =
+  mix cast[pointer]((ref Value)(p))
+  result = !$ result
+
+proc hash*(v: Value | Type): Hash =
+  for f in fields(v):
+    mix f
+  result = !$ result
+
+proc `==`*(a, b: Value): bool
+proc `==`*(a, b: Type): bool
+  
+defineRefEquality Value
+defineRefEquality Type
+
+template `==`*(p1, p2: UniqueReference): bool =
+  system.`==`((ref Value)(p1), (ref Value)(p2))
+
+defineEquality Value
+defineEquality Type
 
 const
-  concreteTypeKinds* = {tyNoneValue..tyComposite}
-  typeclassTypeKinds* = {tyAny..tyWithProperty}
+  allTypeKinds* = {low(TypeKind)..high(TypeKind)}
+  concreteTypeKinds* = {tyNoneValue..tyType}
+  typeclassTypeKinds* = {tyAny..tyContainingProperty}
   matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
 
 type TypeMatchKind* = enum
   # in order of strength
   tmNone, tmFalse, tmTrue, tmEqual
 
-template boolToMatch*(b: bool): TypeMatchKind =
+template boolMatch*(b: bool): TypeMatchKind =
   if b: tmTrue else: tmFalse
 
 proc match*(matchType, t: Type): TypeMatchKind =
@@ -144,36 +182,32 @@ proc match*(matchType, t: Type): TypeMatchKind =
   if matchType == t: return tmEqual
   result = case matchType.kind
   of concreteTypeKinds:
-    if matchType.kind == t.kind:
-      case matchType.kind
-      of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyString:
-        tmEqual
-      of tyReference, tySeq:
-        match(matchType.elementType[], t.elementType[])
-      of tyTuple:
-        reduceMatch(matchType.elements, t.elements)
-      of tyFunction:
-        let rm = match(matchType.returnType[], t.returnType[])
-        if rm in {tmNone, tmFalse}:
-          rm
-        else:
-          let am = reduceMatch(matchType.arguments, t.arguments)
-          if am == tmEqual and rm == tmTrue:
-            tmTrue
-          else:
-            am
-      of tyComposite:
-        proc tableMatch[T](t1, t2: Table[T, Type]): TypeMatchKind =
-          if t1.len != t2.len: return low(TypeMatchKind)
-          for k, v1 in t1:
-            if k notin t2: return low(TypeMatchKind)
-            let m = match(v1, t2[k])
-            if m == low(TypeMatchKind): return m
-            elif m < result: result = m
-        tableMatch(matchType.fields, t.fields)
-      of matcherTypeKinds: tmNone
-    else:
-      tmNone
+    if matchType.kind != t.kind: return tmNone
+    case matchType.kind
+    of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyString:
+      tmEqual
+    of tyReference, tySeq:
+      match(matchType.elementType[], t.elementType[])
+    of tyTuple:
+      reduceMatch(matchType.elements, t.elements)
+    of tyFunction:
+      let rm = match(matchType.returnType[], t.returnType[])
+      if rm in {tmNone, tmFalse}:
+        return rm
+      let am = reduceMatch(matchType.arguments, t.arguments)
+      min(am, rm)
+    of tyComposite:
+      proc tableMatch[T](t1, t2: Table[T, Type]): TypeMatchKind =
+        if t1.len != t2.len: return low(TypeMatchKind)
+        for k, v1 in t1:
+          if k notin t2: return low(TypeMatchKind)
+          let m = match(v1, t2[k])
+          if m == low(TypeMatchKind): return m
+          elif m < result: result = m
+      tableMatch(matchType.fields, t.fields)
+    of tyType:
+      match(matchType.typeValue[], t.typeValue[])
+    of allTypeKinds - concreteTypeKinds: tmNone # unreachable
   of tyAny: tmTrue
   of tyNone: tmFalse
   of tyUnion:
@@ -187,11 +221,11 @@ proc match*(matchType, t: Type): TypeMatchKind =
         return tmFalse
     tmTrue
   of tyBaseType:
-    boolToMatch t.kind == matchType.baseKind
+    boolMatch t.kind == matchType.baseKind
   of tyCustomMatcher:
-    boolToMatch matchType.matcher(t)
-  of tyWithProperty:
-    boolToMatch matchType.withProperty in t.properties
+    boolMatch matchType.typeMatcher(t)
+  of tyContainingProperty:
+    boolMatch matchType.containingProperty in t.properties
   of tyNot:
     const mapping = [
       tmNone: tmTrue,

@@ -1,5 +1,5 @@
-import bazy/[parser, tokenizer, expressions, runtime]
-export parser, tokenizer, expressions, runtime
+import bazy/[parser, tokenizer, expressions]
+export parser, tokenizer, expressions
 
 proc parse*(str: string): Expression =
   var tokenizer = newTokenizer(str)
