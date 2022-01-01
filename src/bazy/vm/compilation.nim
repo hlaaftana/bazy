@@ -7,11 +7,19 @@ type
     staticValue*: Value
     stackIndex*: int
 
+  Context* {.acyclic.} = ref object
+    ## current module or function
+    imports*: seq[Context]
+    stackSize*: int
+  
   Scope* {.acyclic.} = ref object
+    ## restricted subset of variables in a context
     imports*: seq[Scope]
-    parent*, codeStart*: Scope
+    parent*: Scope
+    context*: Context
     variables*: seq[Variable]
-    totalStackSize, accumStackSize*: int
+    accumStackSize*: int
+      ## the stack size from before the start of this scope
 
 type TypeMatchKind* = enum
   # in order of strength
