@@ -13,7 +13,10 @@ type
       ## size is implementation detail
       ## same as pointer size for now but may be 32 or 48 bits
       ## if values use pointer packing
-    vkFunction
+    vkSeq
+      ## both seq and string are references to save memory
+    vkString
+      ## general byte sequence type
     vkTuple
       ## like java array but typed like TS, not necessarily hetero or homogenously typed
       ## caps out at 255 size so it can be a single pointer that points to a length
@@ -22,10 +25,6 @@ type
       ## reference (pointer) to value
     vkUniqueReference
       ## reference to value identified by its address (singleton)
-    vkSeq
-      ## both seq and string are references to save memory
-    vkString
-      ## general byte sequence type
     vkComposite
       ## like tuple, but fields are tied to names and unordered
       ## (really the names define the order and the names can at least be shortstrings)
@@ -34,8 +33,18 @@ type
       ## which are also runtime values
     vkType
       ## type value
+    vkNativeFunction
+    vkFunction
 
   UniqueReference* = distinct ref Value
+
+  Tuple* = seq[Value]
+    # supposed to be just length and pointer like openarray
+    # probably will be a pointer with length at 0th byte
+
+  RuntimePropertyObj* = object
+    properties*: HashSet[Value]
+    value*: Value
 
   Value* = object
     # entire thing can be pointer tagged, but would need GC hooks
@@ -47,20 +56,16 @@ type
       unsignedValue*: uint64
     of vkFloat:
       floatValue*: float
-    of vkFunction:
-      functionValue*: proc (args: sink seq[Value]): Value
-    of vkTuple:
-      # supposed to be just length and pointer, might do 16 bits length 48 bits pointer
-      # or like shortstring
-      tupleValue*: ref seq[Value]
-    of vkReference:
-      referenceValue*: ref Value
-    of vkUniqueReference:
-      uniqueReferenceValue*: UniqueReference
     of vkSeq:
       seqValue*: ref seq[Value]
     of vkString:
       stringValue*: ref string
+    of vkTuple:
+      tupleValue*: ref Tuple
+    of vkReference:
+      referenceValue*: ref Value
+    of vkUniqueReference:
+      uniqueReferenceValue*: UniqueReference
     of vkComposite:
       # supposed to be represented more efficiently
       # short string instead of string
@@ -70,10 +75,59 @@ type
       propertyRefValue*: ref RuntimePropertyObj
     of vkType:
       typeValue*: ref Type
+    of vkFunction:
+      functionValue*: Function
+    of vkNativeFunction:
+      nativeFunctionValue*: proc (args: openarray[Value]): Value {.nimcall.}
+      # replace with single value argument?
 
-  RuntimePropertyObj* = object
-    properties*: HashSet[Value]
-    value*: Value
+  Stack* = Tuple
+
+  Function* = ref object
+    imports*: seq[Stack]
+    stackSize*: int
+    instruction*: Instruction
+
+  InstructionKind* = enum
+    Constant
+    FunctionCall
+    Sequence
+    # stack
+    VariableGet
+    VariableSet
+    # goto
+    If
+    While
+    DoUntil
+    # effect, can emulate goto
+    EmitEffect
+    HandleEffect
+
+  Instruction* = ref object
+    case kind*: InstructionKind
+    of Constant:
+      constantValue*: Value
+    of FunctionCall:
+      function*: Instruction # evaluates to Function or native function
+      arguments*: seq[Instruction]
+    of Sequence:
+      sequence*: seq[Instruction]
+    of VariableGet:
+      variableGetIndex*: int
+    of VariableSet:
+      variableSetIndex*: int
+      variableSetValue*: Instruction
+    of If:
+      ifCondition, ifTrue, ifFalse: Instruction
+    of While:
+      whileCondition, whileTrue: Instruction
+    of DoUntil:
+      doUntilCondition, doUntilTrue: Instruction
+    of EmitEffect:
+      effect*: Instruction
+    of HandleEffect:
+      effectHandler*: proc (effect: Value): bool
+      effectEmitter*: Instruction
 
   TypeKind* = enum
     # concrete
@@ -124,6 +178,12 @@ type
 
 {.pop.} # acyclic
 
+const
+  allTypeKinds* = {low(TypeKind)..high(TypeKind)}
+  concreteTypeKinds* = {tyNoneValue..tyType}
+  typeclassTypeKinds* = {tyAny..tyContainingProperty}
+  matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
+
 import util/objects
 
 template mix(x) =
@@ -153,83 +213,3 @@ template `==`*(p1, p2: UniqueReference): bool =
 
 defineEquality Value
 defineEquality Type
-
-const
-  allTypeKinds* = {low(TypeKind)..high(TypeKind)}
-  concreteTypeKinds* = {tyNoneValue..tyType}
-  typeclassTypeKinds* = {tyAny..tyContainingProperty}
-  matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
-
-type TypeMatchKind* = enum
-  # in order of strength
-  tmNone, tmFalse, tmTrue, tmEqual
-
-template boolMatch*(b: bool): TypeMatchKind =
-  if b: tmTrue else: tmFalse
-
-proc match*(matchType, t: Type): TypeMatchKind =
-  # commutativity rules:
-  # must be commutative when equal
-  # otherwise either order can give none, in which the non-none result matters
-  # otherwise generally should be anticommutative, but this is not necessary
-  proc reduceMatch(s1, s2: seq[Type]): TypeMatchKind =
-    if s1.len != s2.len: return low(TypeMatchKind)
-    result = high(TypeMatchKind)
-    for i in 0 ..< s1.len:
-      let m = match(s1[i], s2[i])
-      if m == low(TypeMatchKind): return m
-      elif m < result: result = m
-  if matchType == t: return tmEqual
-  result = case matchType.kind
-  of concreteTypeKinds:
-    if matchType.kind != t.kind: return tmNone
-    case matchType.kind
-    of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyString:
-      tmEqual
-    of tyReference, tySeq:
-      match(matchType.elementType[], t.elementType[])
-    of tyTuple:
-      reduceMatch(matchType.elements, t.elements)
-    of tyFunction:
-      let rm = match(matchType.returnType[], t.returnType[])
-      if rm in {tmNone, tmFalse}:
-        return rm
-      let am = reduceMatch(matchType.arguments, t.arguments)
-      min(am, rm)
-    of tyComposite:
-      proc tableMatch[T](t1, t2: Table[T, Type]): TypeMatchKind =
-        if t1.len != t2.len: return low(TypeMatchKind)
-        for k, v1 in t1:
-          if k notin t2: return low(TypeMatchKind)
-          let m = match(v1, t2[k])
-          if m == low(TypeMatchKind): return m
-          elif m < result: result = m
-      tableMatch(matchType.fields, t.fields)
-    of tyType:
-      match(matchType.typeValue[], t.typeValue[])
-    of allTypeKinds - concreteTypeKinds: tmNone # unreachable
-  of tyAny: tmTrue
-  of tyNone: tmFalse
-  of tyUnion:
-    for a in matchType.operands:
-      if match(a, t) >= tmTrue:
-        return tmTrue
-    tmFalse
-  of tyIntersection:
-    for a in matchType.operands:
-      if match(a, t) <= tmFalse:
-        return tmFalse
-    tmTrue
-  of tyBaseType:
-    boolMatch t.kind == matchType.baseKind
-  of tyCustomMatcher:
-    boolMatch matchType.typeMatcher(t)
-  of tyContainingProperty:
-    boolMatch matchType.containingProperty in t.properties
-  of tyNot:
-    const mapping = [
-      tmNone: tmTrue,
-      tmFalse: tmTrue,
-      tmTrue: tmFalse,
-      tmEqual: tmFalse]
-    mapping[match(matchType.notType[], t)]

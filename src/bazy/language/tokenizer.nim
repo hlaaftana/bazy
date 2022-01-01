@@ -1,4 +1,4 @@
-import number, tokens, defines, std/strutils
+import number, tokens, ../defines, std/strutils
 
 when useUnicode:
   import std/unicode

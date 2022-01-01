@@ -1,4 +1,4 @@
-import number, util/objects
+import number, ../util/objects
 
 type
   ExpressionKind* = enum

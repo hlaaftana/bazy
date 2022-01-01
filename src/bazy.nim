@@ -1,4 +1,4 @@
-import bazy/[parser, tokenizer, expressions]
+import bazy/language/[parser, tokenizer, expressions]
 export parser, tokenizer, expressions
 
 proc parse*(str: string): Expression =

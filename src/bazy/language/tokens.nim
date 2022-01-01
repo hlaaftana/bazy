@@ -1,4 +1,4 @@
-import number, defines
+import number, ../defines
 
 type
   TokenKind* = enum
