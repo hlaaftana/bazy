@@ -51,7 +51,11 @@ proc newParser*(tokens: sink seq[Token] = @[], options = defaultOptions()): Pars
 
 iterator nextTokens*(p: var Parser): Token =
   while p.pos < p.tokens.len:
-    yield p.tokens[p.pos]
+    let t = p.tokens[p.pos]
+    if t.kind == tkIndentBack and p.fakeIndents > 0:
+      dec p.fakeIndents
+    else:
+      yield t
     inc p.pos
 
 proc makeStringExpression*(s: sink string): Expression {.inline.} =
@@ -494,7 +498,10 @@ when isMainModule:
     let s = ss
     let t = tokenize(s)
     echo t
-    echo parse(t)
+    let p = parse(t)
+    echo p
+    echo p.repr
+
   when false:
     tp """
   a = \b
@@ -540,8 +547,9 @@ if (a, \
     tp "combination(n: Int, r: Int) = \\for result x = 1, each i in 0..<r do while i < r do x = x * (n - i) / (r - i)"
     tp "`for` a = b, c = d do e = f"
     tp "a := b + c * 4"
-  else:
     tp "a:b:c + 1"
+  else:
+    tp "{:}"
 
   when false:
     import os

@@ -13,7 +13,7 @@ type
       ## size is implementation detail
       ## same as pointer size for now but may be 32 or 48 bits
       ## if values use pointer packing
-    vkSeq
+    vkList
       ## both seq and string are references to save memory
     vkString
       ## general byte sequence type
@@ -40,9 +40,11 @@ type
       ## function
     vkEffect
       ## embedded effect value for exceptions/return/yield/whatever
+    vkSet
+    vkTable
     # sets/tables/bigints can be added
 
-  UniqueReference* = distinct ref Value
+  UniqueReference*[T] = distinct ref T
 
   RuntimePropertyObj* = object
     properties*: HashSet[Value]
@@ -58,8 +60,8 @@ type
       unsignedValue*: BiggestUInt
     of vkFloat:
       floatValue*: float
-    of vkSeq:
-      seqValue*: ref seq[Value]
+    of vkList:
+      listValue*: ref seq[Value]
     of vkString:
       stringValue*: ref string
     of vkTuple:
@@ -69,7 +71,7 @@ type
     of vkReference:
       referenceValue*: ref Value
     of vkUniqueReference:
-      uniqueReferenceValue*: UniqueReference
+      uniqueReferenceValue*: UniqueReference[Value]
     of vkComposite:
       # supposed to be represented more efficiently
       # short string instead of string
@@ -86,6 +88,10 @@ type
       # replace with single value argument?
     of vkEffect:
       effectValue*: ref Value
+    of vkSet:
+      setValue*: ref HashSet[Value]
+    of vkTable:
+      tableValue*: ref Table[Value, Value]
   
   PointerTaggedValue* = distinct (
     when pointerTaggable:
@@ -102,9 +108,12 @@ type
     tyInteger, tyUnsigned, tyFloat,
     tyFunction, tyTuple,
     tyReference,
-    tySeq,
+    tyList,
     tyString,
+    tySet,
+    tyTable,
     tyComposite,
+    tyUnique, # erased distinct type
     tyType,
     # typeclass
     tyAny, tyNone, tyUnion, tyIntersection, tyNot,
@@ -123,10 +132,15 @@ type
       returnType*: ref Type
     of tyTuple:
       elements*: seq[Type]
-    of tyReference, tySeq:
+    of tyReference, tyList, tySet:
       elementType*: ref Type
+    of tyTable:
+      keyType*, valueType*: ref Type
     of tyComposite:
       fields*: Table[string, Type]
+    of tyUnique:
+      name*: string
+      uniqueType*: ref UniqueReference[Type]
     of tyType:
       typeValue*: ref Type
     of tyUnion, tyIntersection:
@@ -153,6 +167,7 @@ type
     instruction*: Instruction
 
   InstructionKind* = enum
+    NoOp
     Constant
     FunctionCall
     Sequence
@@ -167,16 +182,22 @@ type
     # effect, can emulate goto
     EmitEffect
     HandleEffect
+    # collection
+    BuildTuple
+    BuildList
+    BuildSet
+    BuildTable
 
   Instruction* = ref object
     case kind*: InstructionKind
+    of NoOp: discard
     of Constant:
       constantValue*: Value
     of FunctionCall:
       function*: Instruction # evaluates to Function or native function
-      arguments*: seq[Instruction]
+      arguments*: Array[Instruction]
     of Sequence:
-      sequence*: seq[Instruction]
+      sequence*: Array[Instruction]
     of VariableGet:
       variableGetIndex*: int
     of VariableSet:
@@ -195,6 +216,10 @@ type
       effect*: Instruction
     of HandleEffect:
       effectHandler*, effectEmitter*: Instruction
+    of BuildTuple, BuildList, BuildSet:
+      elements*: Array[Instruction]
+    of BuildTable:
+      entries*: Array[tuple[key, value: Instruction]]
 
 {.pop.} # acyclic
 
@@ -203,6 +228,28 @@ const
   concreteTypeKinds* = {tyNoneValue..tyType}
   typeclassTypeKinds* = {tyAny..tyContainingProperty}
   matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
+
+template withkind(k, val): Value =
+  Value(kind: `vk k`, `k Value`: val)
+template withkindrefv(vk, kv, val) =
+  result = Value(kind: `vk`)
+  new(result.`kv`)
+  result.`kv`[] = val
+template withkindref(k, val) =
+  withkindrefv(`vk k`, `k Value`, val)
+
+proc toValue*(x: int): Value = withkind(integer, x)
+proc toValue*(x: uint): Value = withkind(unsigned, x)
+proc toValue*(x: float): Value = withkind(float, x)
+proc toValue*(x: sink seq[Value]): Value = withkindref(list, x)
+proc toValue*(x: sink string): Value = withkindref(string, x)
+proc toValue*(x: sink Array[Value]): Value = withkindrefv(vkTuple, tupleValue, x)
+proc toValue*(x: sink ShortArray[Value]): Value = withkind(shortTuple, x)
+proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
+proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
+proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
+proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkind(nativeFunction, x)
+proc toValue*(x: Function): Value = withkind(function, x)
 
 import util/objects
 
@@ -213,26 +260,31 @@ proc hash(r: ref): Hash =
   mix hash(r[])
   result = !$ result
 
-proc hash*(p: UniqueReference): Hash =
-  mix cast[pointer]((ref Value)(p))
+type InstructionObj = typeof(Instruction()[])
+
+proc hash*[T](p: UniqueReference[T]): Hash =
+  mix cast[pointer]((ref T)(p))
   result = !$ result
 
-proc hash*(v: Value | Type): Hash =
+proc hash*(v: Value | Type | InstructionObj): Hash =
   for f in fields(v):
     mix f
   result = !$ result
 
 proc `==`*(a, b: Value): bool
 proc `==`*(a, b: Type): bool
+proc `==`*(a, b: InstructionObj): bool
   
 defineRefEquality Value
 defineRefEquality Type
+defineRefEquality InstructionObj
 
-template `==`*(p1, p2: UniqueReference): bool =
-  system.`==`((ref Value)(p1), (ref Value)(p2))
+template `==`*[T](p1, p2: UniqueReference[T]): bool =
+  system.`==`((ref T)(p1), (ref T)(p2))
 
 defineEquality Value
 defineEquality Type
+defineEquality InstructionObj
 
 static:
   doAssert sizeof(Value) <= 2 * sizeof(int)
@@ -245,7 +297,7 @@ proc fromValueObj*(v: ValueObj): PointerTaggedValue =
       of vkInteger: (v.kind.uint64 shl 48) or int32(v.integerValue).uint64
       of vkUnsigned: (v.kind.uint64 shl 48) or int32(v.integerValue).uint64
       of vkFloat: (v.kind.uint64 shl 48) or int32(v.integerValue).uint64
-      of vkSeq: cast[pointer](v.seqValue).tagPointer(v.kind.uint16)
+      of vkList: cast[pointer](v.listValue).tagPointer(v.kind.uint16)
       of vkString: cast[pointer](v.stringValue).tagPointer(v.kind.uint16)
       of vkTuple: cast[pointer](v.tupleValue).tagPointer(v.kind.uint16)
       of vkShortTuple: cast[pointer](v.shortTupleValue).tagPointer(v.kind.uint16)
@@ -257,6 +309,8 @@ proc fromValueObj*(v: ValueObj): PointerTaggedValue =
       of vkNativeFunction: cast[pointer](v.nativeFunctionValue).tagPointer(v.kind.uint16)
       of vkFunction: cast[pointer](v.functionValue).tagPointer(v.kind.uint16)
       of vkEffect: cast[pointer](v.effectValue).tagPointer(v.kind.uint16)
+      of vkSet: cast[pointer](v.setValue).tagPointer(v.kind.uint16)
+      of vkTable: cast[pointer](v.tableValue).tagPointer(v.kind.uint16)
   else:
     v.PointerTaggedValue
 
@@ -269,7 +323,7 @@ proc toValueObj*(p: PointerTaggedValue): ValueObj =
     of vkInteger: result.integerValue = (val and high(uint32).uint64).int32.int
     of vkUnsigned: result.unsignedValue = (val and high(uint32).uint64).uint
     of vkFloat: result.floatValue = (val and high(uint32).uint64).float32.float
-    of vkSeq: result.seqValue = cast[typeof(result.seqValue)](untagPointer(val))
+    of vkList: result.listValue = cast[typeof(result.listValue)](untagPointer(val))
     of vkString: result.stringValue = cast[typeof(result.stringValue)](untagPointer(val))
     of vkTuple: result.tupleValue = cast[typeof(result.tupleValue)](untagPointer(val))
     of vkShortTuple: result.shortTupleValue = cast[typeof(result.shortTupleValue)](untagPointer(val))
@@ -281,5 +335,7 @@ proc toValueObj*(p: PointerTaggedValue): ValueObj =
     of vkNativeFunction: result.nativeFunctionValue = cast[typeof(result.nativeFunctionValue)](untagPointer(val))
     of vkFunction: result.functionValue = cast[typeof(result.functionValue)](untagPointer(val))
     of vkEffect: result.effectValue = cast[typeof(result.effectValue)](untagPointer(val))
+    of vkSet: result.setValue = cast[typeof(result.setValue)](untagPointer(val))
+    of vkTable: result.tableValue = cast[typeof(result.tableValue)](untagPointer(val))
   else:
     p.ValueObj

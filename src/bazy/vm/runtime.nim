@@ -1,4 +1,53 @@
-import primitives, arrays
+import "."/[primitives, compilation, arrays], std/[sets, tables]
+
+proc toInstruction*(st: Statement): Instruction =
+  template map(s: Statement): Instruction =
+    s.toInstruction
+  template map(s: (Statement, Statement)): (Instruction, Instruction) =
+    (s[0].toInstruction, s[1].toInstruction)
+  template map(s: seq): Array =
+    var arr = newArray[typeof map s[0]](s.len)
+    for i in 0 ..< arr.len:
+      arr[i] = map s[i]
+    arr
+  case st.kind
+  of skNone: Instruction(kind: NoOp)
+  of skConstant: Instruction(kind: Constant, constantValue: st.constant)
+  of skFunctionCall:
+    Instruction(kind: FunctionCall, function: map st.callee,
+      arguments: map st.arguments)
+  of skSequence: Instruction(kind: Sequence, sequence: map st.sequence)
+  of skVariableGet:
+    Instruction(kind: VariableGet, variableGetIndex: st.variableGetIndex)
+  of skVariableSet:
+    Instruction(kind: VariableSet, variableSetIndex: st.variableSetIndex,
+      variableSetValue: map st.variableSetValue)
+  of skFromImportedStack:
+    Instruction(kind: FromImportedStack,
+      importedStackIndex: st.importedStackIndex,
+      importedStackInstruction: map st.importedStackStatement)
+  of skIf:
+    Instruction(kind: If, ifCondition: map st.ifCond,
+      ifTrue: map st.ifTrue, ifFalse: map st.ifFalse)
+  of skWhile:
+    Instruction(kind: While, whileCondition: map st.whileCond,
+      whileTrue: map st.whileBody)
+  of skDoUntil:
+    Instruction(kind: DoUntil, doUntilCondition: map st.doUntilCond,
+      doUntilTrue: map st.doUntilBody)
+  of skEmitEffect:
+    Instruction(kind: EmitEffect, effect: map st.effect)
+  of skHandleEffect:
+    Instruction(kind: HandleEffect, effectHandler: map st.effectHandler,
+      effectEmitter: map st.effectBody)
+  of skTuple:
+    Instruction(kind: BuildTuple, elements: map st.elements)
+  of skList:
+    Instruction(kind: BuildList, elements: map st.elements)
+  of skSet:
+    Instruction(kind: BuildSet, elements: map st.elements)
+  of skTable:
+    Instruction(kind: BuildTable, entries: map st.entries)
 
 type EffectHandler* = proc (effect: Value): bool
 
@@ -26,6 +75,8 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: proc (effect: Valu
   template run(instr; stack = stack; effectHandler = effectHandler): untyped =
     run(instr, stack, effectHandler)
   case ins.kind
+  of NoOp:
+    result = Value(kind: vkNone)
   of Constant:
     result = ins.constantValue
   of FunctionCall:
@@ -87,3 +138,29 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: proc (effect: Valu
     else:
       discard
     result = run(ins.effectEmitter, stack, handler)
+  of BuildTuple:
+    if ins.elements.len <= 255:
+      var arr = newShortArray[Value](ins.elements.len)
+      for i in 0 ..< arr.len:
+        arr[i] = run ins.elements[i]
+      result = toValue(arr)
+    else:
+      var arr = newArray[Value](ins.elements.len)
+      for i in 0 ..< arr.len:
+        arr[i] = run ins.elements[i]
+      result = toValue(arr)
+  of BuildList:
+    var arr = newSeq[Value](ins.elements.len)
+    for i in 0 ..< arr.len:
+      arr[i] = run ins.elements[i]
+    result = toValue(arr)
+  of BuildSet:
+    var arr = initHashSet[Value](ins.elements.len)
+    for e in ins.elements:
+      arr.incl(run e)
+    result = toValue(arr)
+  of BuildTable:
+    var arr = initTable[Value, Value](ins.entries.len)
+    for k, v in ins.entries.items:
+      arr[run k] = run v
+    result = toValue(arr)
