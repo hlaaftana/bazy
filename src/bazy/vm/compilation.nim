@@ -1,4 +1,4 @@
-import primitives, language/[expressions, number], std/[tables, sets, strutils]
+import primitives, ../language/[expressions, number], std/[tables, sets, strutils]
 
 type
   Variable* = ref object
@@ -14,9 +14,17 @@ type
     stack*: Stack
     variables*: seq[Variable]
   
+  VariableAddress* = object
+    ## address of variable relative to scope
+    indices*: seq[int]
+
+  VariableReference* = object
+    variable*: Variable
+    address*: VariableAddress
+  
   Scope* {.acyclic.} = ref object
     ## restricted subset of variables in a context
-    imports*: seq[Scope]
+    #imports*: seq[Scope]
     parent*: Scope
     context*: Context
     variables*: seq[Variable]
@@ -47,6 +55,7 @@ type
 
   Statement* = ref object
     ## typed/compiled expression
+    cachedType*: Type
     case kind*: StatementKind
     of skNone: discard
     of skConstant:
@@ -79,24 +88,39 @@ type
     of skTable:
       entries*: seq[tuple[key, value: Statement]]
 
-type TypeMatchKind* = enum
+type TypeMatch* = enum
   # in order of strength
   tmNone, tmFalse, tmTrue, tmEqual
 
-template boolMatch*(b: bool): TypeMatchKind =
+static: assert ord(high(TypeMatch)) mod 2 == 1, "type match enum must be even"
+
+const
+  highestNonMatching* = tmFalse
+  lowestMatching* = tmTrue
+
+static: assert lowestMatching == succ(highestNonMatching)
+
+proc invert*(tm: TypeMatch): TypeMatch =
+  if tm in {tmNone, tmEqual}: return tm
+  TypeMatch(ord(high(TypeMatch)) - ord(tm))
+
+proc matches*(tm: TypeMatch): bool =
+  tm >= lowestMatching
+
+template boolMatch*(b: bool): TypeMatch =
   if b: tmTrue else: tmFalse
 
-proc match*(matchType, t: Type): TypeMatchKind =
+proc match*(matchType, t: Type): TypeMatch =
   # commutativity rules:
   # must be commutative when equal
   # otherwise either order can give none, in which the non-none result matters
   # otherwise generally should be anticommutative, but this is not necessary
-  proc reduceMatch(s1, s2: seq[Type]): TypeMatchKind =
-    if s1.len != s2.len: return low(TypeMatchKind)
-    result = high(TypeMatchKind)
+  proc reduceMatch(s1, s2: seq[Type]): TypeMatch =
+    if s1.len != s2.len: return low(TypeMatch)
+    result = high(TypeMatch)
     for i in 0 ..< s1.len:
       let m = match(s1[i], s2[i])
-      if m == low(TypeMatchKind): return m
+      if m == low(TypeMatch): return m
       elif m < result: result = m
   if matchType == t: return tmEqual
   result = case matchType.kind
@@ -108,24 +132,24 @@ proc match*(matchType, t: Type): TypeMatchKind =
     of tyReference, tyList, tySet:
       match(matchType.elementType[], t.elementType[])
     of tyTuple:
-      reduceMatch(matchType.elements, t.elements)
+      reduceMatch(matchType.elements[], t.elements[])
     of tyFunction:
       let rm = match(matchType.returnType[], t.returnType[])
       #if rm in {tmNone, tmFalse}:
       #  return rm
-      let am = reduceMatch(matchType.arguments, t.arguments)
+      let am = reduceMatch(matchType.arguments[], t.arguments[])
       min(am, rm)
     of tyTable:
       min(
         match(matchType.keyType[], t.keyType[]),
         match(matchType.valueType[], t.valueType[]))
     of tyComposite:
-      proc tableMatch[T](t1, t2: Table[T, Type]): TypeMatchKind =
-        if t1.len != t2.len: return low(TypeMatchKind)
+      proc tableMatch[T](t1, t2: Table[T, Type]): TypeMatch =
+        if t1.len != t2.len: return low(TypeMatch)
         for k, v1 in t1:
-          if k notin t2: return low(TypeMatchKind)
+          if k notin t2: return low(TypeMatch)
           let m = match(v1, t2[k])
-          if m == low(TypeMatchKind): return m
+          if m == low(TypeMatch): return m
           elif m < result: result = m
       tableMatch(matchType.fields, t.fields)
     of tyUnique:
@@ -136,13 +160,13 @@ proc match*(matchType, t: Type): TypeMatchKind =
   of tyAny: tmTrue
   of tyNone: tmFalse
   of tyUnion:
-    for a in matchType.operands:
-      if match(a, t) >= tmTrue:
+    for a in matchType.operands[]:
+      if match(a, t).matches:
         return tmTrue
     tmFalse
   of tyIntersection:
-    for a in matchType.operands:
-      if match(a, t) <= tmFalse:
+    for a in matchType.operands[]:
+      if not match(a, t).matches:
         return tmFalse
     tmTrue
   of tyBaseType:
@@ -186,46 +210,142 @@ proc compare*(t1, t2: Type): int =
   else: discard # unreachable
   assert false, "unreachable, match kinds " & $m1 & " " & $m2
 
-proc getType*(st: Statement): Type = discard
+template `<`*(a, b: Type): bool = compare(a, b) < 0
+template `<=`*(a, b: Type): bool = compare(a, b) <= 0
+template `>`*(a, b: Type): bool = compare(a, b) > 0
+template `>=`*(a, b: Type): bool = compare(a, b) >= 0
 
-proc compile*(scope: Scope, ex: Expression, bound: (Type, TypeMatchKind)): Statement =
-  proc matchBound(b: (Type, TypeMatchKind), t: Type): bool =
-    if b[1] <= tmFalse:
-      b[0].match(t) <= b[1]
-    else:
-      b[0].match(t) >= b[1]
-  template assertType(t: Type) =
-    assert bound.matchBound(t), "bound " & $bound & " does not match type " & $t
-  template map(ex: Expression, bound = (Type(kind: tyAny), tmTrue)): Statement =
+type
+  TypeBound* = object
+    boundType*: Type
+    variance*: TypeMatch
+  
+  CompileError* = object of CatchableError
+
+  TypeBoundMatchError* = object of CompileError
+    bound*: TypeBound
+    `type`*: Type
+  
+  NoOverloadFoundError* = object of CompileError
+    bound*: TypeBound
+    expression*: Expression
+    scope*: Scope
+
+proc matchBound*(b: TypeBound, t: Type): bool =
+  if b.variance.matches:
+    b.boundType.match(t) >= b.variance
+  else:
+    b.boundType.match(t) <= b.variance
+
+proc symbols*(scope: Scope | Context, name: string, bound: TypeBound, doImports = true): seq[VariableReference] =
+  if doImports:
+    for i, im in (when scope is Scope: scope.context else: scope).imports:
+      let addrs = symbols(im, name, bound)
+      for a in addrs:
+        var b = a
+        b.address.indices.add(i)
+        result.add(b)
+  when scope is Scope:
+    result.add(symbols(scope.parent, name, bound, doImports = false))
+  for i, v in scope.variables:
+    if name == v.name and bound.matchBound(v.type):
+      result.add(VariableReference(variable: v, address: VariableAddress(indices: @[v.stackIndex])))
+
+import algorithm
+
+proc overloads*(scope: Scope | Context, name: string, bound: TypeBound): seq[VariableReference] =
+  result = symbols(scope, name, bound)
+  # sort must be stable
+  result.sort(
+    cmp = proc (a, b: VariableReference): int =
+      compare(a.variable.type, b.variable.type),
+    order = if bound.variance.matches: Descending else: Ascending)
+  result.reverse()
+
+proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
+  let defaultBound {.global.} = TypeBound(boundType: Type(kind: tyAny), variance: tmTrue)
+  template map(ex: Expression, bound = defaultBound): Statement =
     compile(scope, ex, bound)
   case ex.kind
-  of None: result = Statement(kind: skNone)
+  of None: result = Statement(kind: skNone, cachedType: Type(kind: tyNone))
   of Number:
     let s = $ex.number
-    result = Statement(kind: skConstant, constant:
-      case ex.number.kind
-      of Integer:
-        assertType Type(kind: tyInteger)
-        toValue(parseInt(s))
-      of Floating:
-        assertType Type(kind: tyFloat)
-        toValue(parseFloat(s))
-      of Unsigned:
-        assertType Type(kind: tyUnsigned)
-        toValue(parseUInt(s)))
+    result = Statement(kind: skConstant)
+    case ex.number.kind
+    of Integer:
+      let val = parseInt(s)
+      if bound.boundType.kind == tyFloat:
+        result.constant = toValue(val.float)
+        result.cachedType = Type(kind: tyFloat)
+      elif val >= 0 and bound.boundType.kind == tyUnsigned:
+        result.constant = toValue(val.uint)
+        result.cachedType = Type(kind: tyUnsigned)
+      else:
+        result.constant = toValue(val)
+        result.cachedType = Type(kind: tyInteger)
+    of Floating:
+      result.constant = toValue(parseFloat(s))
+      result.cachedType = Type(kind: tyFloat)
+    of Unsigned:
+      result.constant = toValue(parseUInt(s))
+      result.cachedType = Type(kind: tyUnsigned)
   of String:
-    assertType Type(kind: tyString)
-    result = Statement(kind: skConstant, constant: toValue(ex.str))
+    result = Statement(kind: skConstant, constant: toValue(ex.str), cachedType: Type(kind: tyString))
   of Wrapped:
     result = map(ex.wrapped, bound)
   of Name, Symbol:
-    discard
+    let overloads = overloads(scope, ex.identifier, bound)
+    if overloads.len == 0:
+      let exc = newException(NoOverloadFoundError, "no overloads with bound " & $bound & " for " & $ex)
+      exc.bound = bound
+      exc.expression = ex
+      raise exc
+    let r = overloads[0]
+    let t = r.variable.type
+    result = Statement(kind: skVariableGet,
+      variableGetIndex: r.address.indices[0],
+      cachedType: t)
+    for i in 1 ..< r.address.indices.len:
+      result = Statement(kind: skFromImportedStack,
+        importedStackIndex: r.address.indices[i],
+        importedStackStatement: result,
+        cachedType: t)
   of Dot:
-    discard
+    var compiled = false
+    if ex.right.kind == Name:
+      let lhs = map ex.left
+      let name = ex.right.identifier
+      if lhs.cachedType.kind == tyComposite and lhs.cachedType.fields.hasKey(name):
+        result = Statement(kind: skFunctionCall,
+          cachedType: lhs.cachedType.fields[name],
+          callee: Statement(kind: skConstant,
+            constant: Value(kind: vkNativeFunction, nativeFunctionValue: proc (args: openarray[Value]): Value {.nimcall.} =
+              args[0].compositeValue[args[1].stringValue[]])),
+          arguments: @[lhs, Statement(kind: skConstant, constant: Value(kind: vkString, stringValue: toRef(name)))])
+      else:
+        try:
+          result = map(Expression(kind: PathCall,
+            address: Expression(kind: Symbol, identifier: "." & name),
+            arguments: @[ex.left]), bound)
+          compiled = true
+        except CompileError: discard
+    if not compiled:
+      result = map(Expression(kind: PathCall,
+        address: Expression(kind: Symbol, identifier: "."),
+        arguments: @[ex.left, ex.right]), bound)
   of OpenCall, Infix, Prefix, Postfix, PathCall, PathInfix, PathPrefix, PathPostfix:
-    discard
+    discard # todo:
+    # template (expression -> expression),
+    # typechecker (expression -> statement),
+    # typedtemplate (statement -> statement),
+    # instructor (instruction -> value),
+    # function (value -> value)
+    # find a comfortable way to attach these to signatures of normal functions
   of Subscript:
-    discard
+    # generics specialization here maybe
+    result = map(Expression(kind: PathCall,
+      address: Expression(kind: Symbol, identifier: "[]"),
+      arguments: @[ex.address] & ex.arguments), bound)
   of CurlySubscript:
     result = map(Expression(kind: PathCall,
       address: Expression(kind: Symbol, identifier: "{}"),
@@ -234,33 +354,75 @@ proc compile*(scope: Scope, ex: Expression, bound: (Type, TypeMatchKind)): State
     assert false, "cannot compile lone colon expression"
   of Comma, Tuple:
     # todo use bound
-    result = Statement(kind: skTuple)
-    for e in ex.elements:
-      result.elements.add(map e)
+    if bound.boundType.kind == tyTuple and bound.variance.matches:
+      assert bound.boundType.elements[].len == ex.elements.len, "tuple bound type lengths do not match"
+    result = Statement(kind: skTuple, cachedType:
+      Type(kind: tyTuple, elements: toRef(newSeqOfCap[Type](ex.elements.len))))
+    for i, e in ex.elements:
+      let element = if bound.boundType.kind == tyTuple and bound.variance.matches:
+        map(e, TypeBound(boundType: bound.boundType.elements[][i], variance: bound.variance))
+      else:
+        map e
+      result.elements.add(element)
+      result.cachedType.elements[].add(element.cachedType)
   of Array:
     # todo use bound
-    result = Statement(kind: skList)
+    result = Statement(kind: skList, cachedType: Type(kind: tyList))
+    let b =
+      if bound.boundType.kind == tyList and bound.variance.matches:
+        TypeBound(boundType: bound.boundType.elementType[], variance: bound.variance)
+      else:
+        defaultBound
     for e in ex.elements:
-      result.elements.add(map e)
+      let element = map(e, b)
+      result.elements.add(element)
+      if result.cachedType.elementType.isNil or result.cachedType.elementType[] < element.cachedType:
+        result.cachedType.elementType = toRef(element.cachedType)
   of Set:
     # todo use bound
     proc isSingleColon(e: Expression): bool =
       e.kind == Symbol and e.identifier == ":"
     if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
       ex.elements[0].isSingleColon):
-      result = Statement(kind: skTable)
+      result = Statement(kind: skTable, cachedType: Type(kind: tyTable))
+      let (bk, bv) =
+        if bound.boundType.kind == tyTable and bound.variance.matches:
+          (TypeBound(boundType: bound.boundType.keyType[], variance: bound.variance),
+            TypeBound(boundType: bound.boundType.valueType[], variance: bound.variance))
+        else:
+          (defaultBound, defaultBound)
       for e in ex.elements:
         if e.isSingleColon: continue
         assert e.kind == Colon, "table literal must only have colon expressions"
-        result.entries.add((key: map e.left, value: map e.right))
+        let k = map(e.left, bk)
+        let v = map(e.right, bv)
+        result.entries.add((key: k, value: v))
+        if result.cachedType.keyType.isNil or result.cachedType.keyType[] < k.cachedType:
+          result.cachedType.keyType = toRef(k.cachedType)
+        if result.cachedType.valueType.isNil or result.cachedType.valueType[] < v.cachedType:
+          result.cachedType.valueType = toRef(v.cachedType)
     else:
-      result = Statement(kind: skSet)
+      result = Statement(kind: skSet, cachedType: Type(kind: tySet))
+      let b =
+        if bound.boundType.kind == tySet and bound.variance.matches:
+          TypeBound(boundType: bound.boundType.elementType[], variance: bound.variance)
+        else:
+          defaultBound
       for e in ex.elements:
-        result.elements.add(map e)
+        let element = map(e, b)
+        result.elements.add(element)
+        if result.cachedType.elementType.isNil or result.cachedType.elementType[] < element.cachedType:
+          result.cachedType.elementType = toRef(element.cachedType)
   of Block, SemicolonBlock:
     result = Statement(kind: skSequence)
     for i, e in ex.statements:
+      let b = if i == ex.statements.high: bound else: defaultBound
+      let element = map(e, bound = b)
+      result.sequence.add(element)
       if i == ex.statements.high:
-        result.sequence.add(map(e, bound = bound))
-      else:
-        result.sequence.add(map e)
+        result.cachedType = element.cachedType
+  if not bound.matchBound(result.cachedType):
+    let ex = newException(TypeBoundMatchError, "bound " & $bound & " does not match type " & $result.cachedType)
+    ex.bound = bound
+    ex.type = result.cachedType
+    raise ex

@@ -50,6 +50,7 @@ proc toInstruction*(st: Statement): Instruction =
     Instruction(kind: BuildTable, entries: map st.entries)
 
 type EffectHandler* = proc (effect: Value): bool
+  ## returns true to continue execution
 
 template toNegatedBool*(val: Value): bool =
   val.integerValue == 0
@@ -61,7 +62,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler): Va
 
 template run(instr: Instruction, stack, effectHandler): Value =
   let val = evaluate(instr, stack, effectHandler)
-  if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
+  if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val.effectValue[])):
     return val
   val
 

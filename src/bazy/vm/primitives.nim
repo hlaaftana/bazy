@@ -128,10 +128,11 @@ type
       tyString, tyAny, tyNone:
       discard
     of tyFunction:
-      arguments*: seq[Type]
+      arguments*: ref seq[Type]
+      # having multiple non-ref seq fields makes the compiler abort compilation for some reason
       returnType*: ref Type
     of tyTuple:
-      elements*: seq[Type]
+      elements*: ref seq[Type]
     of tyReference, tyList, tySet:
       elementType*: ref Type
     of tyTable:
@@ -140,11 +141,11 @@ type
       fields*: Table[string, Type]
     of tyUnique:
       name*: string
-      uniqueType*: ref UniqueReference[Type]
+      uniqueType*: UniqueReference[Type]
     of tyType:
       typeValue*: ref Type
     of tyUnion, tyIntersection:
-      operands*: seq[Type]
+      operands*: ref seq[Type]
     of tyNot:
       notType*: ref Type
     of tyBaseType:
@@ -221,6 +222,8 @@ type
     of BuildTable:
       entries*: Array[tuple[key, value: Instruction]]
 
+  InstructionObj = typeof(Instruction()[])
+
 {.pop.} # acyclic
 
 const
@@ -251,7 +254,59 @@ proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
 proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkind(nativeFunction, x)
 proc toValue*(x: Function): Value = withkind(function, x)
 
-import util/objects
+template toRef*[T](x: T): ref T =
+  var res: ref T
+  new(res)
+  res[] = x
+  res
+
+proc toType*(x: Value): Type =
+  case x.kind
+  of vkNone: result = Type(kind: tyNone)
+  of vkInteger: result = Type(kind: tyInteger)
+  of vkUnsigned: result = Type(kind: tyUnsigned)
+  of vkFloat: result = Type(kind: tyFloat)
+  of vkList: result = Type(kind: tyList, elementType: toRef(x.listValue[][0].toType))
+  of vkString: result = Type(kind: tyString)
+  of vkTuple:
+    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.tupleValue[].len)))
+    for i in 0 ..< x.tupleValue[].len:
+      result.elements[][i] = x.tupleValue[][i].toType
+  of vkShortTuple:
+    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.shortTupleValue.len)))
+    for i in 0 ..< x.shortTupleValue.len:
+      result.elements[][i] = x.shortTupleValue[i].toType
+  of vkReference:
+    result = Type(kind: tyReference, elementType: toRef(x.referenceValue[].toType))
+  of vkUniqueReference:
+    result = Type(kind: tyReference, elementType: toRef((ref Value)(x.uniqueReferenceValue)[].toType))
+  of vkComposite:
+    result = Type(kind: tyComposite, fields: initTable[string, Type](x.compositeValue[].len))
+    for k, v in x.compositeValue[]:
+      result.fields[k] = v.toType
+  of vkPropertyReference:
+    discard
+  of vkType:
+    result = Type(kind: tyType, typeValue: x.typeValue)
+  of vkFunction:
+    discard
+  of vkNativeFunction:
+    discard
+  of vkEffect:
+    discard
+  of vkSet:
+    result = Type(kind: tySet)
+    for v in x.setValue[]:
+      result.elementType = toRef(v.toType)
+      break
+  of vkTable:
+    result = Type(kind: tyTable)
+    for k, v in x.tableValue[]:
+      result.keyType = toRef(k.toType)
+      result.valueType = toRef(v.toType)
+      break
+
+import ../util/objects
 
 template mix(x) =
   result = result !& hash(x)
@@ -260,21 +315,29 @@ proc hash(r: ref): Hash =
   mix hash(r[])
   result = !$ result
 
-type InstructionObj = typeof(Instruction()[])
-
 proc hash*[T](p: UniqueReference[T]): Hash =
   mix cast[pointer]((ref T)(p))
   result = !$ result
 
-proc hash*(v: Value | Type | InstructionObj): Hash =
+proc hash*(v: Value): Hash =
   for f in fields(v):
     mix f
   result = !$ result
 
-proc `==`*(a, b: Value): bool
-proc `==`*(a, b: Type): bool
-proc `==`*(a, b: InstructionObj): bool
-  
+proc hash*(v: Type): Hash =
+  for f in fields(v):
+    mix f
+  result = !$ result
+
+proc hash*(v: InstructionObj): Hash =
+  for f in fields(v):
+    mix f
+  result = !$ result
+
+proc `==`*(a, b: Value): bool {.noSideEffect.}
+proc `==`*(a, b: Type): bool {.noSideEffect.}
+proc `==`*(a, b: InstructionObj): bool {.noSideEffect.}
+
 defineRefEquality Value
 defineRefEquality Type
 defineRefEquality InstructionObj
