@@ -20,7 +20,7 @@ proc `[]`*[T](x: Array[T], i: int): lent T {.inline.} =
 proc `[]`*[T](x: var Array[T], i: int): var T {.inline.} =
   x.data[i]
 
-proc `[]=`*[T](x: var Array[T], i: int, val: T) {.inline.} =
+proc `[]=`*[T](x: var Array[T], i: int, val: sink T) {.inline.} =
   x.data[i] = val
 
 proc `[]`*[L, T](x: LengthEmbeddedArray[L, T], i: int): lent T {.inline.} =
@@ -29,7 +29,7 @@ proc `[]`*[L, T](x: LengthEmbeddedArray[L, T], i: int): lent T {.inline.} =
 proc `[]`*[L, T](x: var LengthEmbeddedArray[L, T], i: int): var T {.inline.} =
   cast[ptr UncheckedArray[T]](cast[uint](x.data) + sizeof(L).uint)[i]
 
-proc `[]=`*[L, T](x: var LengthEmbeddedArray[L, T], i: int, val: T) {.inline.} =
+proc `[]=`*[L, T](x: var LengthEmbeddedArray[L, T], i: int, val: sink T) {.inline.} =
   cast[ptr UncheckedArray[T]](cast[uint](x.data) + sizeof(L).uint)[i] = val
 
 iterator items*[T](x: Array[T]): T =

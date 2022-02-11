@@ -6,10 +6,14 @@ notes:
 
 * probably a lot of indent bugs when you indent in parentheses or with variable spaces
 * some kind of delimiter counter/stack on parser object would stop infinite loops from errors
-* keep track of indents with a counter
+* keep track of indents with a counter (maybe not)
 * maybe make distinction between indent and normal argument, or `do` and indent, no idea
-* maybe postfix statements like if/for/while can end the line and record a new line for the RHS,
-  or maybe some god operator like |-> to invoke these, dont know a not ugly operator though
+* maybe operators like <| or god versions like <-| accept commands with commas on left hand side
+  (commands-after-operators already works on the right hand side but without commas)
+* maybe make commas and semicolons operators, this would depend on
+  command-after-operator transformation for `a b, c d`
+  these would not be infixes, they would be one list of expressions
+* maybe command-after-operator also works with commas
 
 ]#
 
@@ -287,11 +291,11 @@ proc recordSingle*(parser: var Parser): Expression =
         case ex.kind
         of Tuple:
           if result.kind == Dot:
-            result = Expression(kind: PathCall, address: result.right, arguments: @[result.left] & move ex.elements)
+            result = Expression(kind: PathCall, address: result.right, arguments: @[result.left] & ex.elements)
           else:
-            result = Expression(kind: PathCall, address: result, arguments: move ex.elements)
-        of Array: result = Expression(kind: Subscript, address: result, arguments: move ex.elements)
-        of Set: result = Expression(kind: CurlySubscript, address: result, arguments: move ex.elements)
+            result = Expression(kind: PathCall, address: result, arguments: ex.elements)
+        of Array: result = Expression(kind: Subscript, address: result, arguments: ex.elements)
+        of Set: result = Expression(kind: CurlySubscript, address: result, arguments: ex.elements)
         of Wrapped: # single expression
           if result.kind == Dot and not lastDot:
             result = Expression(kind: PathCall, address: result.right, arguments: @[result.left, ex.wrapped])
@@ -333,6 +337,7 @@ proc collectLineExpression*(exprs: sink seq[Expression]): Expression =
   while terms.len != 0:
     let callee = terms.pop
     if callee.kind in {Prefix, Infix}: # postfix should not be possible
+      # command-after-operator support
       var deepest = callee
       while deepest.arguments[^1].kind in {Prefix, Infix}:
         deepest = deepest.arguments[^1]
@@ -353,7 +358,8 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
     indentIsDo: bool
   defer: # rather defer than put this at the end and try to put `break` everywhere
     if singleExprs.len != 0:
-      lineExprs.add(collectLineExpression(move singleExprs))
+      lineExprs.add(collectLineExpression(singleExprs))
+      reset(singleExprs)
     if not indent.isNil:
       if (parser.options.operatorIndentMakesBlock or indentIsDo) and
         lineExprs.len == 1 and lineExprs[0].kind in IndentableCallKinds:
@@ -374,7 +380,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
           lineExprs[0].kind in {Postfix, Prefix}:
           lineExprs[0] = Expression(kind: Infix,
             address: lineExprs[0].address,
-            arguments: move(lineExprs[0].arguments) & indent)
+            arguments: lineExprs[0].arguments & indent)
         else:
           lineExprs[0].arguments.add(indent)
       else:
@@ -398,7 +404,8 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
         finish()
       waiting = true
       if singleExprs.len != 0: # consider ,, typo as ,
-        let ex = collectLineExpression(move singleExprs)
+        let ex = collectLineExpression(singleExprs)
+        reset(singleExprs)
         if not closed and comma == NoComma and ex.kind == OpenCall:
           assert ex.arguments.len == 1, "opencall with more than 1 argument should be impossible before comma"
           comma = CommaCall
@@ -527,6 +534,12 @@ do
       b
   \else c
 """
+    tp "combination(n: Int, r: Int) = \\for result x = 1, each i in 0..<r do while i < r do x = x * (n - i) / (r - i)"
+    tp "`for` a = b, c = d do e = f"
+    tp "a := b + c * 4"
+    tp "a:b:c + 1"
+    tp "{:}"
+    tp "a + b - c"
     tp """
 try (do
   a
@@ -539,17 +552,23 @@ try (do
 (finally do
   e)
 """
+  else:
     tp """
 if (a, \
   b)
   c
 """
-    tp "combination(n: Int, r: Int) = \\for result x = 1, each i in 0..<r do while i < r do x = x * (n - i) / (r - i)"
-    tp "`for` a = b, c = d do e = f"
-    tp "a := b + c * 4"
-    tp "a:b:c + 1"
-  else:
-    tp "{:}"
+    tp """
+if (a
+  b)
+  c
+"""
+    tp """
+if (a
+    b
+      c)
+  c
+"""
 
   when false:
     import os

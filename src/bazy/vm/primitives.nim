@@ -103,6 +103,7 @@ type
   Value* = ValueObj
 
   TypeKind* = enum
+    # maybe add unknown type for values with unknown type at runtime
     # concrete
     tyNoneValue,
     tyInteger, tyUnsigned, tyFloat,
@@ -116,10 +117,13 @@ type
     tyUnique, # erased distinct type
     tyType,
     # typeclass
-    tyAny, tyNone, tyUnion, tyIntersection, tyNot,
-    tyBaseType, tyContainingProperty,
+    tyAny, tyNone,
+    tyUnion, tyIntersection, tyNot,
+    tyBaseType,
+    tyWithProperty,
     # matcher
     tyCustomMatcher
+    # maybe add parametrized types as a typeclass
   
   Type* = object
     properties*: HashSet[Value]
@@ -150,8 +154,9 @@ type
       notType*: ref Type
     of tyBaseType:
       baseKind*: TypeKind
-    of tyContainingProperty:
-      containingProperty*: Value
+    of tyWithProperty:
+      typeWithProperty*: ref Type
+      withProperty*: Value
     of tyCustomMatcher:
       typeMatcher*: proc (t: Type): bool
       valueMatcher*: proc (v: Value): bool
@@ -229,82 +234,13 @@ type
 const
   allTypeKinds* = {low(TypeKind)..high(TypeKind)}
   concreteTypeKinds* = {tyNoneValue..tyType}
-  typeclassTypeKinds* = {tyAny..tyContainingProperty}
+  typeclassTypeKinds* = {tyAny..tyWithProperty}
   matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
 
-template withkind(k, val): Value =
-  Value(kind: `vk k`, `k Value`: val)
-template withkindrefv(vk, kv, val) =
-  result = Value(kind: `vk`)
-  new(result.`kv`)
-  result.`kv`[] = val
-template withkindref(k, val) =
-  withkindrefv(`vk k`, `k Value`, val)
-
-proc toValue*(x: int): Value = withkind(integer, x)
-proc toValue*(x: uint): Value = withkind(unsigned, x)
-proc toValue*(x: float): Value = withkind(float, x)
-proc toValue*(x: sink seq[Value]): Value = withkindref(list, x)
-proc toValue*(x: sink string): Value = withkindref(string, x)
-proc toValue*(x: sink Array[Value]): Value = withkindrefv(vkTuple, tupleValue, x)
-proc toValue*(x: sink ShortArray[Value]): Value = withkind(shortTuple, x)
-proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
-proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
-proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
-proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkind(nativeFunction, x)
-proc toValue*(x: Function): Value = withkind(function, x)
-
-template toRef*[T](x: T): ref T =
-  var res: ref T
-  new(res)
-  res[] = x
-  res
-
-proc toType*(x: Value): Type =
-  case x.kind
-  of vkNone: result = Type(kind: tyNone)
-  of vkInteger: result = Type(kind: tyInteger)
-  of vkUnsigned: result = Type(kind: tyUnsigned)
-  of vkFloat: result = Type(kind: tyFloat)
-  of vkList: result = Type(kind: tyList, elementType: toRef(x.listValue[][0].toType))
-  of vkString: result = Type(kind: tyString)
-  of vkTuple:
-    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.tupleValue[].len)))
-    for i in 0 ..< x.tupleValue[].len:
-      result.elements[][i] = x.tupleValue[][i].toType
-  of vkShortTuple:
-    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.shortTupleValue.len)))
-    for i in 0 ..< x.shortTupleValue.len:
-      result.elements[][i] = x.shortTupleValue[i].toType
-  of vkReference:
-    result = Type(kind: tyReference, elementType: toRef(x.referenceValue[].toType))
-  of vkUniqueReference:
-    result = Type(kind: tyReference, elementType: toRef((ref Value)(x.uniqueReferenceValue)[].toType))
-  of vkComposite:
-    result = Type(kind: tyComposite, fields: initTable[string, Type](x.compositeValue[].len))
-    for k, v in x.compositeValue[]:
-      result.fields[k] = v.toType
-  of vkPropertyReference:
-    discard
-  of vkType:
-    result = Type(kind: tyType, typeValue: x.typeValue)
-  of vkFunction:
-    discard
-  of vkNativeFunction:
-    discard
-  of vkEffect:
-    discard
-  of vkSet:
-    result = Type(kind: tySet)
-    for v in x.setValue[]:
-      result.elementType = toRef(v.toType)
-      break
-  of vkTable:
-    result = Type(kind: tyTable)
-    for k, v in x.tableValue[]:
-      result.keyType = toRef(k.toType)
-      result.valueType = toRef(v.toType)
-      break
+proc get*(stack: Stack, index: int): lent Value {.inline.} =
+  stack.stack[index]
+proc set*(stack: Stack, index: int, value: sink Value) {.inline.} =
+  stack.stack[index] = value
 
 import ../util/objects
 
@@ -351,6 +287,77 @@ defineEquality InstructionObj
 
 static:
   doAssert sizeof(Value) <= 2 * sizeof(int)
+
+template withkind(k, val): Value =
+  Value(kind: `vk k`, `k Value`: val)
+template withkindrefv(vk, kv, val) =
+  result = Value(kind: `vk`)
+  new(result.`kv`)
+  result.`kv`[] = val
+template withkindref(k, val) =
+  withkindrefv(`vk k`, `k Value`, val)
+
+proc toValue*(x: int): Value = withkind(integer, x)
+proc toValue*(x: uint): Value = withkind(unsigned, x)
+proc toValue*(x: float): Value = withkind(float, x)
+proc toValue*(x: sink seq[Value]): Value = withkindref(list, x)
+proc toValue*(x: sink string): Value = withkindref(string, x)
+proc toValue*(x: sink Array[Value]): Value = withkindrefv(vkTuple, tupleValue, x)
+proc toValue*(x: sink ShortArray[Value]): Value = withkind(shortTuple, x)
+proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
+proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
+proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
+proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkind(nativeFunction, x)
+proc toValue*(x: Function): Value = withkind(function, x)
+
+template toRef*[T](x: T): ref T =
+  var res: ref T
+  new(res)
+  res[] = x
+  res
+
+proc toType*(x: Value): Type =
+  case x.kind
+  of vkNone: result = Type(kind: tyNoneValue)
+  of vkInteger: result = Type(kind: tyInteger)
+  of vkUnsigned: result = Type(kind: tyUnsigned)
+  of vkFloat: result = Type(kind: tyFloat)
+  of vkList: result = Type(kind: tyList, elementType: toRef(x.listValue[][0].toType))
+  of vkString: result = Type(kind: tyString)
+  of vkTuple:
+    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.tupleValue[].len)))
+    for i in 0 ..< x.tupleValue[].len:
+      result.elements[][i] = x.tupleValue[][i].toType
+  of vkShortTuple:
+    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.shortTupleValue.len)))
+    for i in 0 ..< x.shortTupleValue.len:
+      result.elements[][i] = x.shortTupleValue[i].toType
+  of vkReference:
+    result = Type(kind: tyReference, elementType: toRef(x.referenceValue[].toType))
+  of vkUniqueReference:
+    result = Type(kind: tyReference, elementType: toRef((ref Value)(x.uniqueReferenceValue)[].toType))
+  of vkComposite:
+    result = Type(kind: tyComposite, fields: initTable[string, Type](x.compositeValue[].len))
+    for k, v in x.compositeValue[]:
+      result.fields[k] = v.toType
+  of vkPropertyReference:
+    result = toType(x.propertyRefValue.value)
+    result.properties.incl(x.propertyRefValue.properties)
+  of vkType:
+    result = Type(kind: tyType, typeValue: x.typeValue)
+  of vkFunction, vkNativeFunction, vkEffect:
+    discard # XXX?
+  of vkSet:
+    result = Type(kind: tySet)
+    for v in x.setValue[]:
+      result.elementType = toRef(v.toType)
+      break
+  of vkTable:
+    result = Type(kind: tyTable)
+    for k, v in x.tableValue[]:
+      result.keyType = toRef(k.toType)
+      result.valueType = toRef(v.toType)
+      break
 
 proc fromValueObj*(v: ValueObj): PointerTaggedValue =
   when pointerTaggable:

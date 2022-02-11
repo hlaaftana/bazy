@@ -264,12 +264,16 @@ proc recordSymbolPlus*(tz: var Tokenizer, extra: char): string =
       return
 
 proc tokenize*(tz: var Tokenizer): seq[Token] =
+  type IndentContext = object
+    levels: seq[int]
+    level: int
+
   result = newSeq[Token]()
   var
     lastKind: TokenKind
-    lastIndents: seq[int]
-    lastIndentSum, indent: int
+    indent: int
     recordingIndent, comment: bool
+    indentContexts = @[IndentContext()]
 
   template dropLast() =
     let l1 = result.len - 1
@@ -311,26 +315,28 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
         inc indent
         continue
       else:
-        let diff = indent - lastIndentSum
+        template indentLevels: untyped = indentContexts[^1].levels
+        template indentLevel: untyped = indentContexts[^1].level
+        let diff = indent - indentLevel
         if diff < 0:
           var d = -diff
-          var i = lastIndents.len
+          var i = indentLevels.len
           while i > 0:
             dec i
-            let indt = lastIndents[i]
+            let indt = indentLevels[i]
             dec d, indt
-            dec lastIndentSum, indt
+            dec indentLevel, indt
             add tkIndentBack
             if d < 0:
-              dec lastIndentSum, d
-              lastIndents[lastIndents.high] = -d
+              dec indentLevel, d
+              indentLevels[^1] = -d
               add tkIndent
               break
-            lastIndents.setLen(lastIndents.high)
+            indentLevels.setLen(indentLevels.high)
             if d == 0: break
         elif diff > 0:
-          lastIndents.add(diff)
-          inc lastIndentSum, diff
+          indentLevels.add(diff)
+          inc indentLevel, diff
           add tkIndent
         indent = 0
         recordingIndent = false
@@ -371,16 +377,33 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
       add Token(kind: tkSymbol, raw: recordSymbol(tz))
     else:
       let ch = c.char
-      case ch
-      of '#': comment = true
-      of CharacterTokenSet:
-        let kind = TokenKind(low(CharacterTokenKind).ord + find(CharacterTokens, ch))
-        if kind in {tkDot, tkColon, #[tkSemicolon]#} and lastKind == kind:
+      template doubleChar(k: TokenKind) =
+        if lastKind == k:
           dropLast()
           tz.resetPos()
-          add Token(kind: tkSymbol, raw: ch & recordSymbolPlus(tz, ch))
+          add Token(kind: tkSymbol, raw: CharacterTokens[k] & recordSymbolPlus(tz, ch))
         else:
-          add(kind)
+          add k
+      template openDelim(kind: TokenKind) =
+        indentContexts.add(IndentContext())
+        add kind
+      template closeDelim(kind: TokenKind) =
+        if indentContexts.len > 1:
+          indentContexts.setLen(indentContexts.high)
+        add kind
+      case ch
+      of '#': comment = true
+      of '\\': add tkBackslash
+      of '.': doubleChar tkDot
+      of ',': add tkComma
+      of ':': doubleChar tkColon
+      of ';': add tkSemicolon
+      of '(': openDelim tkOpenParen
+      of '[': openDelim tkOpenBrack
+      of '{': openDelim tkOpenCurly
+      of ')': closeDelim tkCloseParen
+      of ']': closeDelim tkCloseBrack
+      of '}': closeDelim tkCloseCurly
       of '\'', '"', '`':
         let s = recordString(tz, ch)
         if c == '`':

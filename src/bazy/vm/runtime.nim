@@ -1,53 +1,4 @@
-import "."/[primitives, compilation, arrays], std/[sets, tables]
-
-proc toInstruction*(st: Statement): Instruction =
-  template map(s: Statement): Instruction =
-    s.toInstruction
-  template map(s: (Statement, Statement)): (Instruction, Instruction) =
-    (s[0].toInstruction, s[1].toInstruction)
-  template map(s: seq): Array =
-    var arr = newArray[typeof map s[0]](s.len)
-    for i in 0 ..< arr.len:
-      arr[i] = map s[i]
-    arr
-  case st.kind
-  of skNone: Instruction(kind: NoOp)
-  of skConstant: Instruction(kind: Constant, constantValue: st.constant)
-  of skFunctionCall:
-    Instruction(kind: FunctionCall, function: map st.callee,
-      arguments: map st.arguments)
-  of skSequence: Instruction(kind: Sequence, sequence: map st.sequence)
-  of skVariableGet:
-    Instruction(kind: VariableGet, variableGetIndex: st.variableGetIndex)
-  of skVariableSet:
-    Instruction(kind: VariableSet, variableSetIndex: st.variableSetIndex,
-      variableSetValue: map st.variableSetValue)
-  of skFromImportedStack:
-    Instruction(kind: FromImportedStack,
-      importedStackIndex: st.importedStackIndex,
-      importedStackInstruction: map st.importedStackStatement)
-  of skIf:
-    Instruction(kind: If, ifCondition: map st.ifCond,
-      ifTrue: map st.ifTrue, ifFalse: map st.ifFalse)
-  of skWhile:
-    Instruction(kind: While, whileCondition: map st.whileCond,
-      whileTrue: map st.whileBody)
-  of skDoUntil:
-    Instruction(kind: DoUntil, doUntilCondition: map st.doUntilCond,
-      doUntilTrue: map st.doUntilBody)
-  of skEmitEffect:
-    Instruction(kind: EmitEffect, effect: map st.effect)
-  of skHandleEffect:
-    Instruction(kind: HandleEffect, effectHandler: map st.effectHandler,
-      effectEmitter: map st.effectBody)
-  of skTuple:
-    Instruction(kind: BuildTuple, elements: map st.elements)
-  of skList:
-    Instruction(kind: BuildList, elements: map st.elements)
-  of skSet:
-    Instruction(kind: BuildSet, elements: map st.elements)
-  of skTable:
-    Instruction(kind: BuildTable, entries: map st.entries)
+import "."/[primitives, arrays], std/[sets, tables]
 
 type EffectHandler* = proc (effect: Value): bool
   ## returns true to continue execution
@@ -58,7 +9,7 @@ template toNegatedBool*(val: Value): bool =
 template toBool*(val: Value): bool =
   val.integerValue != 0
 
-proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler): Value
+proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = nil): Value
 
 template run(instr: Instruction, stack, effectHandler): Value =
   let val = evaluate(instr, stack, effectHandler)
@@ -69,10 +20,10 @@ template run(instr: Instruction, stack, effectHandler): Value =
 proc call*(fun: Function, args: sink Array[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
   let newStack = Stack(imports: fun.imports, stack: newArray[Value](fun.stackSize))
   for i in 0 ..< args.len:
-    newStack.stack[i] = move args[i]
+    newStack.set(i, args[i])
   result = run(fun.instruction, newStack, effectHandler)
 
-proc evaluate*(ins: Instruction, stack: Stack, effectHandler: proc (effect: Value): bool): Value =
+proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = nil): Value =
   template run(instr; stack = stack; effectHandler = effectHandler): untyped =
     run(instr, stack, effectHandler)
   case ins.kind
@@ -96,10 +47,10 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: proc (effect: Valu
     for instr in ins.sequence:
       result = run instr
   of VariableGet:
-    result = stack.stack[ins.variableGetIndex]
+    result = stack.get(ins.variableGetIndex)
   of VariableSet:
     result = run ins.variableSetValue
-    stack.stack[ins.variableSetIndex] = result
+    stack.set(ins.variableSetIndex, result)
   of FromImportedStack:
     result = run(ins.importedStackInstruction, stack.imports[ins.importedStackIndex])
   of If:

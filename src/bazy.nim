@@ -1,11 +1,13 @@
-import bazy/language/[parser, tokenizer, expressions]
-export parser, tokenizer, expressions
+import bazy/language/[parser, tokenizer, expressions, tokens]
+export parser, tokenizer, expressions, tokens
 
 proc parse*(str: string): Expression =
   var tokenizer = newTokenizer(str)
   result = parser.parse(tokenizer.tokenize())
 
 when isMainModule:
+  import bazy/vm/[arrays, compilation, pointertag, primitives, runtime]
+
   when appType in ["lib", "staticlib"]:
     type Binary* {.exportc, bycopy.} = object
       data*: ptr byte

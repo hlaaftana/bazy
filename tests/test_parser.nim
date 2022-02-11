@@ -15,6 +15,7 @@ test "simple code":
     "a+ b": "(a +)(b)",
     "a.b+c/2": "((a.b + c) / 2)",
     "a(b, c)": "a(b, c)",
+    "a + b - c": "((a + b) - c)",
     "a * b / c ^ d ^ e << f | g + h < i as j":
       "((((a * b) / (c ^ (d ^ e))) << ((f | g) + h)) < (i as j))",
     "a do\n  b": "a(b)",
@@ -88,7 +89,18 @@ else: (do
       # consequence
       "((factorial((n: Int)) = permutation(n)), n)",
     "a =\n  b": "(a = b)", # postfix expansion
-    "\\(foo a, b)": "foo(a, b)"
+    "\\(foo a, b)": "foo(a, b)",
+    """
+if (a
+  b)
+  c
+""": "if((a(b)), c)",
+    """
+if (a
+    b
+      c)
+  c
+""": "if((a(b(c))), c)"
   }
 
   for inp, outp in tests.items:
@@ -139,6 +151,8 @@ test "equivalent syntax":
     let b = reduced(parse(b))
     checkpoint "a: " & a.repr
     checkpoint "b: " & b.repr
+    checkpoint "a: " & $a
+    checkpoint "b: " & $b
     check a == b
 
 when not defined(nimscript) and defined(testsBenchmark):

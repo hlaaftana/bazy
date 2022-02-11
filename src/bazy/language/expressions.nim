@@ -86,7 +86,7 @@ proc `$`*(ex: Expression): string =
       if i < ex.statements.len - 1:
         s[^1 .. ^1] = ";\n"
     s.add(")")
-    move s
+    s
   of SemicolonBlock: "(" & ex.statements.join("; ") & ")"
 
 proc repr*(ex: Expression): string =
@@ -120,7 +120,7 @@ proc unescape*(s: sink string): string =
     uBase: int
     uNum = 0
     startedU = -1
-  result = move s
+  result = s
   var i = 0
   while i < s.len:
     template addEscaped(term) =

@@ -82,10 +82,15 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
   var prec = lowestKind
   var deleted = 0
   template delete(foo) =
-    var old: Expression
-    swap old, foo
-    if not old.isNil:
-      inc deleted
+    when false: # in case swap is bad
+      if not foo.isNil:
+        inc deleted
+      foo = nil
+    else:
+      var old: Expression
+      swap old, foo
+      if not old.isNil:
+        inc deleted
   while prec != Precedence.None:
     template isOperator(e: Expression): bool = e.kind == Symbol and e.identifier.precedence == prec
     let assoc = Associativities[prec]
@@ -120,7 +125,7 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
       var lhsStart, i = 0
       var lhs, op: Expression
       while i < exprs.len:
-        var e = exprs[i]
+        let e = exprs[i]
         if e.isNil: discard
         elif e.isOperator:
           op = e
@@ -132,13 +137,14 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
           for j in lhsStart ..< i:
             delete exprs[j]
           exprs[i] = lhs
+          discard lhs # arc destroys lhs here otherwise
           op = nil
         inc i
     of Right:
       var rhsStart, i = exprs.high
       var rhs, op: Expression
       while i >= 0:
-        var e = exprs[i]
+        let e = exprs[i]
         if e.isNil: discard
         elif e.isOperator:
           op = e
@@ -150,6 +156,7 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
           for j in i ..< rhsStart:
             delete exprs[j]
           exprs[rhsStart] = rhs
+          discard rhs # arc deletes rhs otherwise
           op = nil
         dec i
     of Unary:
