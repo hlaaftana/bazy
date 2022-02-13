@@ -186,7 +186,7 @@ proc checkType*(value: Value, t: Type): bool =
     value.kind in {vkFunction, vkNativeFunction}
   of tyTuple:
     (value.kind == vkTuple and value.tupleValue[].eachAre(t.elements[])) or
-      (value.kind == vkShortTuple and value.shortTupleValue.eachAre(t.elements[]))
+      (value.kind == vkShortTuple and value.shortTupleValue[].eachAre(t.elements[]))
   of tyReference:
     value.kind == vkReference and (value.referenceValue.isNil or
       value.referenceValue[].checkType(t.elementType[]))

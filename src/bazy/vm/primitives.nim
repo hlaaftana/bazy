@@ -68,11 +68,11 @@ type
     of vkList:
       listValue*: ref seq[Value]
     of vkString:
-      stringValue*: (when true: ShortArray[char] else: ref string)
+      stringValue*: (when false: ShortArray[char] else: ref string)
     of vkTuple:
-      tupleValue*: ref Array[Value]
+      tupleValue*: ref SafeArray[Value]
     of vkShortTuple:
-      shortTupleValue*: ShortArray[Value]
+      shortTupleValue*: ref SafeArray[Value]
     of vkReference:
       referenceValue*: ref Value
     of vkUnique:
@@ -180,8 +180,8 @@ type
         # if closer to `t` than `otherMatcher`, return true
 
   Stack* {.acyclic.} = ref object
-    imports*: Array[Stack]
-    stack*: Array[Value]
+    imports*: SafeArray[Stack]
+    stack*: SafeArray[Value]
 
   Function* = ref object
     stack*: Stack
@@ -218,9 +218,9 @@ type
       constantValue*: Value
     of FunctionCall:
       function*: Instruction # evaluates to Function or native function
-      arguments*: Array[Instruction]
+      arguments*: SafeArray[Instruction]
     of Sequence:
-      sequence*: Array[Instruction]
+      sequence*: SafeArray[Instruction]
     of VariableGet:
       variableGetIndex*: int
     of VariableSet:
@@ -240,9 +240,9 @@ type
     of HandleEffect:
       effectHandler*, effectEmitter*: Instruction
     of BuildTuple, BuildList, BuildSet:
-      elements*: Array[Instruction]
+      elements*: SafeArray[Instruction]
     of BuildTable:
-      entries*: Array[tuple[key, value: Instruction]]
+      entries*: SafeArray[tuple[key, value: Instruction]]
 
   InstructionObj = typeof(Instruction()[])
   
@@ -372,7 +372,7 @@ let
   TypedTemplate* = unique Value(kind: vkNone)
 
 proc shallowRefresh*(stack: Stack): Stack =
-  result = Stack(imports: stack.imports, stack: newArray[Value](stack.stack.len))
+  result = Stack(imports: stack.imports, stack: newSafeArray[Value](stack.stack.len))
   for i in 0 ..< stack.stack.len:
     result.stack[i] = stack.stack[i]
 

@@ -24,9 +24,11 @@ task docs, "build docs for all modules":
 
 task tests, "run tests for multiple backends":
   when declared(runTests):
-    runTests(backends = {c, js, nims}, optionCombos = @[
+    runTests(optionCombos = @[
       "",
-      #"--gc:arc -d:danger",
+      "--gc:orc",
+      "--gc:orc -d:useMalloc",
+      #"--gc:orc -d:danger",
       #"-d:bazyUseUnicode=false",
       #"-d:bazyDoLineColumn=false"
     ])

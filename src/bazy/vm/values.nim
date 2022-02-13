@@ -26,8 +26,9 @@ proc toValue*(x: sink(ShortArray[char] | Array[char])): Value =
     toValue($x)
   else:
     Value(kind: vkString, stringValue: x)
-proc toValue*(x: sink Array[Value]): Value = withkindrefv(vkTuple, tupleValue, x)
-proc toValue*(x: sink ShortArray[Value]): Value = withkind(shortTuple, x)
+proc toValue*(x: sink Array[Value]): Value = withkindrefv(vkTuple, tupleValue, x.toOpenArray(0, x.len - 1).toSafeArray)
+when false:
+  proc toValue*(x: sink ShortArray[Value]): Value = withkindrefv(vkShortTuple, shortTupleValue, x.toOpenArray(0, x.len - 1).toSafeArray)
 proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
 proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
@@ -54,9 +55,9 @@ proc toType*(x: Value): Type =
     for i in 0 ..< x.tupleValue[].len:
       result.elements[][i] = x.tupleValue[][i].toType
   of vkShortTuple:
-    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.shortTupleValue.len)))
-    for i in 0 ..< x.shortTupleValue.len:
-      result.elements[][i] = x.shortTupleValue[i].toType
+    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.shortTupleValue[].len)))
+    for i in 0 ..< x.shortTupleValue[].len:
+      result.elements[][i] = x.shortTupleValue[][i].toType
   of vkReference:
     result = Type(kind: tyReference, elementType: toRef(x.referenceValue[].toType))
   of vkUnique:

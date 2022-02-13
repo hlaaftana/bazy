@@ -17,8 +17,10 @@ template run(instr: Instruction, stack, effectHandler): Value =
     return val
   val
 
-proc call*(fun: Function, args: sink Array[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
-  let newStack = fun.stack.shallowRefresh()
+proc call*(fun: Function, args: sink SafeArray[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
+  var newStack = fun.stack.shallowRefresh()
+  for i in 0 ..< args.len:
+    newStack.set(i, args[i])
   result = run(fun.instruction, newStack, effectHandler)
 
 proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = nil): Value =
@@ -31,7 +33,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     result = ins.constantValue
   of FunctionCall:
     let fn = run ins.function
-    var args = newArray[Value](ins.arguments.len)
+    var args = newSafeArray[Value](ins.arguments.len)
     for i in 0 ..< args.len:
       args[i] = run ins.arguments[i]
     case fn.kind
@@ -81,7 +83,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     of vkFunction:
       let f = h.functionValue
       handler = proc (effect: Value): bool =
-        let val = f.call([effect].toArray)
+        let val = f.call([effect].toSafeArray)
         if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
           return false
         val.toBool
@@ -90,12 +92,12 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     result = run(ins.effectEmitter, stack, handler)
   of BuildTuple:
     if ins.elements.len <= 255:
-      var arr = newShortArray[Value](ins.elements.len)
+      var arr = newSafeArray[Value](ins.elements.len)
       for i in 0 ..< arr.len:
         arr[i] = run ins.elements[i]
       result = toValue(arr)
     else:
-      var arr = newArray[Value](ins.elements.len)
+      var arr = newSafeArray[Value](ins.elements.len)
       for i in 0 ..< arr.len:
         arr[i] = run ins.elements[i]
       result = toValue(arr)
