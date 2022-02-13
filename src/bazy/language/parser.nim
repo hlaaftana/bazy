@@ -484,7 +484,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
 
 proc parse*(tokens: sink seq[Token]): Expression =
   var parser = newParser(tokens)
-  result = parser.recordBlockLevel()
+  result = copy parser.recordBlockLevel()
 
 when isMainModule:
   import tokenizer

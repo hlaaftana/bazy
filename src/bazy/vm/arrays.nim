@@ -52,24 +52,25 @@ iterator mitems*[L, T](x: var LengthEmbeddedArray[L, T]): var T =
   for i in 0 ..< len:
     yield x[i]
 
-proc `=destroy`*[T](x: var Array[T]) =
-  if not x.data.isNil:
-    for i in 0..<x.length: `=destroy`(x.data[i])
-    dealloc(x.data)
+when not defined(js):
+  proc `=destroy`*[T](x: var Array[T]) =
+    if not x.data.isNil:
+      for i in 0..<x.length: `=destroy`(x.data[i])
+      dealloc(x.data)
 
-proc `=destroy`*[L, T](x: var LengthEmbeddedArray[L, T]) =
-  if not x.data.isNil:
-    for a in x.mitems:
-      `=destroy`(a)
-    dealloc(x.data)
+  proc `=destroy`*[L, T](x: var LengthEmbeddedArray[L, T]) =
+    if not x.data.isNil:
+      for a in x.mitems:
+        `=destroy`(a)
+      dealloc(x.data)
 
-proc `=trace`*[T](x: var Array[T]; env: pointer) =
-  if not x.data.isNil:
-    for i in 0..<x.length: `=trace`(x.data[i], env)
+  proc `=trace`*[T](x: var Array[T]; env: pointer) =
+    if not x.data.isNil:
+      for i in 0..<x.length: `=trace`(x.data[i], env)
 
-proc `=trace`*[L, T](x: var LengthEmbeddedArray[L, T]; env: pointer) =
-  if not x.data.isNil:
-    for a in x.mitems: `=trace`(a, env)
+  proc `=trace`*[L, T](x: var LengthEmbeddedArray[L, T]; env: pointer) =
+    if not x.data.isNil:
+      for a in x.mitems: `=trace`(a, env)
 
 proc `=copy`*[T](a: var Array[T]; b: Array[T]) =
   if a.data == b.data: return
@@ -77,7 +78,10 @@ proc `=copy`*[T](a: var Array[T]; b: Array[T]) =
   wasMoved(a)
   a.length = b.length
   if not b.data.isNil:
-    a.data = cast[ptr UncheckedArray[T]](alloc(b.length * sizeof(T)))
+    when defined(js):
+      {.emit: "`a`.data = Array(`b`.length);".}
+    else:
+      a.data = cast[ptr UncheckedArray[T]](alloc(b.length * sizeof(T)))
     for i in 0..<a.length:
       a.data[i] = b.data[i]
 
@@ -87,7 +91,11 @@ proc `=copy`*[L, T](a: var LengthEmbeddedArray[L, T]; b: LengthEmbeddedArray[L, 
   wasMoved(a)
   if not b.data.isNil:
     let len = b.len
-    a.data = alloc(len * sizeof(T) + sizeof(L))
+    when defined(js):
+      {.emit: "`a`.data = Array(1 + `len`);".}
+    else:
+      a.data = alloc(len * sizeof(T) + sizeof(L))
+    cast[ptr UncheckedArray[L]](a)[0] = L(len)
     for i in 0 ..< len:
       a[i] = b[i]
 
@@ -104,11 +112,17 @@ proc `=sink`*[L, T](a: var LengthEmbeddedArray[L, T]; b: LengthEmbeddedArray[L, 
 
 proc newArrayUninitialized*[T](length: int): Array[T] =
   result.length = length
-  result.data = cast[typeof(result.data)](alloc(result.length * sizeof(T)))
+  when defined(js):
+    {.emit: "`result`.data = Array(`length`);".}
+  else:
+    result.data = cast[typeof(result.data)](alloc(result.length * sizeof(T)))
 
 proc newLengthEmbeddedArrayUninitialized*[L, T](length: int): LengthEmbeddedArray[L, T] =
   rangeCheck length >= 0 and length <= high(L).int
-  result.data = alloc(length * sizeof(T) + sizeof(L))
+  when defined(js):
+    {.emit: "`result`.data = Array(`length` + 1);".}
+  else:
+    result.data = alloc(length * sizeof(T) + sizeof(L))
   cast[ptr UncheckedArray[L]](result.data)[0] = L(length)
 
 proc newShortArrayUninitialized*[T](length: int): ShortArray[T] {.inline.} =
@@ -116,11 +130,17 @@ proc newShortArrayUninitialized*[T](length: int): ShortArray[T] {.inline.} =
 
 proc newArray*[T](length: int): Array[T] =
   result.length = length
-  result.data = cast[typeof(result.data)](alloc0(result.length * sizeof(T)))
+  when defined(js):
+    {.emit: "`result`.data = Array(`length`);".}
+  else:
+    result.data = cast[typeof(result.data)](alloc0(result.length * sizeof(T)))
 
 proc newLengthEmbeddedArray*[L, T](length: int): LengthEmbeddedArray[L, T] =
   rangeCheck length >= 0 and length <= high(L).int
-  result.data = alloc0(length * sizeof(T) + sizeof(L))
+  when defined(js):
+    {.emit: "`result`.data = Array(`length` + 1);".}
+  else:
+    result.data = alloc0(length * sizeof(T) + sizeof(L))
   cast[ptr UncheckedArray[L]](result.data)[0] = L(length)
 
 template newShortArray*[T](length: int): ShortArray[T] =
@@ -163,6 +183,36 @@ proc `$`*(x: Array | LengthEmbeddedArray): string =
     else:
       result.addQuoted(value)
   result.add(")")
+
+proc `==`*[T](a, b: Array[T]): bool =
+  let len = a.len
+  if len != b.len: return false
+  for i in 0 ..< len:
+    if a[i] != b[i]: return false
+  true
+
+proc `==`*[L, T](a, b: LengthEmbeddedArray[L, T]): bool =
+  let len = a.len
+  if len != b.len: return false
+  for i in 0 ..< len:
+    if a[i] != b[i]: return false
+  true
+
+import hashes
+
+proc hash*[T](a: Array[T]): Hash =
+  mixin hash
+  result = result !& hash a.len
+  for i in 0 ..< a.len:
+    result = result !& hash a[i]
+  result = !$ result
+
+proc hash*[L, T](a: LengthEmbeddedArray[L, T]): Hash =
+  mixin hash
+  result = result !& hash a.len
+  for i in 0 ..< a.len:
+    result = result !& hash a[i]
+  result = !$ result
 
 when isMainModule:
   block:

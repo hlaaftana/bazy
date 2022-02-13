@@ -8,9 +8,9 @@ type
     exp*, bits*: int
 
 when defined(js):
+  import ../util/objects
   type NumberRepr* = ref NumberReprObj
-  proc `==`*(n1, n2: NumberRepr): bool =
-    system.`==`(n1, n2) or (n1.isNil == n2.isNil and n1[] == n2[])
+  defineRefEquality NumberRepr
 else:
   type NumberRepr* = NumberReprObj
 

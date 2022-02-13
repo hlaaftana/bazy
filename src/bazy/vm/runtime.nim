@@ -1,4 +1,4 @@
-import "."/[primitives, arrays], std/[sets, tables]
+import "."/[primitives, arrays, values], std/[sets, tables]
 
 type EffectHandler* = proc (effect: Value): bool
   ## returns true to continue execution
@@ -18,9 +18,7 @@ template run(instr: Instruction, stack, effectHandler): Value =
   val
 
 proc call*(fun: Function, args: sink Array[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
-  let newStack = Stack(imports: fun.imports, stack: newArray[Value](fun.stackSize))
-  for i in 0 ..< args.len:
-    newStack.set(i, args[i])
+  let newStack = fun.stack.shallowRefresh()
   result = run(fun.instruction, newStack, effectHandler)
 
 proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = nil): Value =

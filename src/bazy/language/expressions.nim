@@ -1,4 +1,5 @@
 import number, ../util/objects
+export same
 
 type
   ExpressionKind* = enum
@@ -37,6 +38,34 @@ type
       statements*: seq[Expression]
 
 defineEquality Expression
+defineEquality typeof(Expression()[])
+
+proc copy*(ex: Expression): Expression =
+  result = Expression(kind: ex.kind)
+  case ex.kind
+  of None: discard
+  of Number: result.number = ex.number
+  of String: result.str = ex.str
+  of Name, Symbol: result.identifier = ex.identifier
+  of Wrapped: result.wrapped = copy ex.wrapped
+  of OpenCall, Infix, Prefix, Postfix,
+    PathCall, PathInfix, PathPrefix, PathPostfix,
+    Subscript, CurlySubscript:
+    result.address = copy ex.address
+    result.arguments = newSeq[Expression](ex.arguments.len)
+    for i in 0 ..< result.arguments.len:
+      result.arguments[i] = copy ex.arguments[i]
+  of Dot, Colon:
+    result.left = copy ex.left
+    result.right = copy ex.right
+  of Comma, Tuple, Array, Set:
+    result.elements = newSeq[Expression](ex.elements.len)
+    for i in 0 ..< result.elements.len:
+      result.elements[i] = copy ex.elements[i]
+  of Block, SemicolonBlock:
+    result.statements = newSeq[Expression](ex.statements.len)
+    for i in 0 ..< result.statements.len:
+      result.statements[i] = copy ex.statements[i]
 
 const
   OpenCallKinds* = {OpenCall, Infix, Prefix, Postfix}

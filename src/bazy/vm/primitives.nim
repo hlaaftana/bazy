@@ -1,9 +1,7 @@
-import std/[tables, sets, hashes], "."/[arrays, pointertag]
+import std/[tables, sets, hashes], "."/[arrays, pointertag], ../language/expressions
 
 # type system should exist for both static and runtime dispatch
 # runtime-only types should only be subtypes of static-only types
-
-{.push acyclic.}
 
 type
   ValueKind* = enum
@@ -24,7 +22,7 @@ type
       ## that points to a length and then elements
     vkReference
       ## reference (pointer) to value
-    vkUniqueReference
+    vkUnique
       ## reference to value identified by its address (singleton)
     vkComposite
       ## like tuple, but fields are tied to names and unordered
@@ -42,36 +40,43 @@ type
       ## embedded effect value for exceptions/return/yield/whatever
     vkSet
     vkTable
-    # sets/tables/bigints can be added
+    # could be made tuples, but native macros etc need the efficiency
+    vkExpression
+    vkStatement
+    vkScope
+    # bigints can be added
 
-  UniqueReference*[T] = distinct ref T
+  Unique*[T] = object
+    id*: uint
+    value*: T
 
   RuntimePropertyObj* = object
     properties*: HashSet[Value]
     value*: Value
 
-  ValueObj* = object
+  ValueObj* = object # could be cyclic
     # entire thing can be pointer tagged, but would need GC hooks
+    # todo: interning for some pointer types
     case kind*: ValueKind
     of vkNone: discard
     of vkInteger:
-      integerValue*: BiggestInt
+      integerValue*: int
     of vkUnsigned:
-      unsignedValue*: BiggestUInt
+      unsignedValue*: uint
     of vkFloat:
       floatValue*: float
     of vkList:
       listValue*: ref seq[Value]
     of vkString:
-      stringValue*: ref string
+      stringValue*: (when true: ShortArray[char] else: ref string)
     of vkTuple:
       tupleValue*: ref Array[Value]
     of vkShortTuple:
       shortTupleValue*: ShortArray[Value]
     of vkReference:
       referenceValue*: ref Value
-    of vkUniqueReference:
-      uniqueReferenceValue*: UniqueReference[Value]
+    of vkUnique:
+      uniqueValue*: ref Unique[Value]
     of vkComposite:
       # supposed to be represented more efficiently
       # short string instead of string
@@ -92,6 +97,12 @@ type
       setValue*: ref HashSet[Value]
     of vkTable:
       tableValue*: ref Table[Value, Value]
+    of vkExpression:
+      expressionValue*: Expression
+    of vkStatement:
+      statementValue*: Statement
+    of vkScope:
+      scopeValue*: Scope
   
   PointerTaggedValue* = distinct (
     when pointerTaggable:
@@ -113,6 +124,7 @@ type
     tyString,
     tySet,
     tyTable,
+    tyExpression, tyStatement, tyScope,
     tyComposite,
     tyUnique, # erased distinct type
     tyType,
@@ -125,13 +137,17 @@ type
     tyCustomMatcher
     # maybe add parametrized types as a typeclass
   
-  Type* = object
+  Type* {.acyclic.} = object # could be cyclic
     properties*: HashSet[Value]
     case kind*: TypeKind
     of tyNoneValue, tyInteger, tyUnsigned, tyFloat,
-      tyString, tyAny, tyNone:
+      tyString, tyExpression, tyStatement, tyScope,
+      tyAny, tyNone:
       discard
     of tyFunction:
+      # arguments and return type are not reflected at runtime
+      # instead function could be an atom that takes a list of any values
+      # and it can have a property of its arguments and return type
       arguments*: ref seq[Type]
       # having multiple non-ref seq fields makes the compiler abort compilation for some reason
       returnType*: ref Type
@@ -145,7 +161,7 @@ type
       fields*: Table[string, Type]
     of tyUnique:
       name*: string
-      uniqueType*: UniqueReference[Type]
+      uniqueType*: ref Unique[Type]
     of tyType:
       typeValue*: ref Type
     of tyUnion, tyIntersection:
@@ -163,13 +179,14 @@ type
       #compare*: proc (otherMatcher, t: Type): bool
         # if closer to `t` than `otherMatcher`, return true
 
-  Stack* = ref object
+  Stack* {.acyclic.} = ref object
     imports*: Array[Stack]
     stack*: Array[Value]
 
   Function* = ref object
-    imports*: Array[Stack]
-    stackSize*: int
+    stack*: Stack
+      ## persistent stack
+      ## gets shallow copied when function is run
     instruction*: Instruction
 
   InstructionKind* = enum
@@ -194,7 +211,7 @@ type
     BuildSet
     BuildTable
 
-  Instruction* = ref object
+  Instruction* {.acyclic.} = ref object
     case kind*: InstructionKind
     of NoOp: discard
     of Constant:
@@ -228,87 +245,141 @@ type
       entries*: Array[tuple[key, value: Instruction]]
 
   InstructionObj = typeof(Instruction()[])
+  
+  StatementKind* = enum
+    skNone
+    skConstant
+    skFunctionCall
+    skSequence
+    # stack
+    skVariableGet
+    skVariableSet
+    skFromImportedStack
+    # goto
+    skIf
+    skWhile
+    skDoUntil
+    # effect, can emulate goto
+    skEmitEffect
+    skHandleEffect
+    # collections
+    skTuple
+    skList
+    skSet
+    skTable
 
-{.pop.} # acyclic
+  Statement* {.acyclic.} = ref object
+    ## typed/compiled expression
+    cachedType*: Type
+    case kind*: StatementKind
+    of skNone: discard
+    of skConstant:
+      constant*: Value
+    of skFunctionCall:
+      callee*: Statement
+      arguments*: seq[Statement]
+    of skSequence:
+      sequence*: seq[Statement]
+    of skVariableGet:
+      variableGetIndex*: int
+    of skVariableSet:
+      variableSetIndex*: int
+      variableSetValue*: Statement
+    of skFromImportedStack:
+      importedStackIndex*: int
+      importedStackStatement*: Statement
+    of skIf:
+      ifCond*, ifTrue*, ifFalse*: Statement
+    of skWhile:
+      whileCond*, whileBody*: Statement
+    of skDoUntil:
+      doUntilCond*, doUntilBody*: Statement
+    of skEmitEffect:
+      effect*: Statement
+    of skHandleEffect:
+      effectHandler*, effectBody*: Statement
+    of skTuple, skList, skSet:
+      elements*: seq[Statement]
+    of skTable:
+      entries*: seq[tuple[key, value: Statement]]
+  
+  Variable* = ref object
+    name*: string
+    cachedType*: Type
+    stackIndex*: int
+    scope*: Scope
+    lazyExpression*: Expression
+    evaluated*: bool
+
+  Context* = ref object
+    ## current module or function
+    imports*: seq[Context]
+    #stackSize*: int
+    stack*: Stack
+    top*: Scope
+    allVariables*: seq[Variable] ## should not shrink
+  
+  Scope* = ref object
+    ## restricted subset of variables in a context
+    #imports*: seq[Scope]
+    parent*: Scope
+    context*: Context
+    variables*: seq[Variable] ## should not shrink
+    #accumStackSize*: int
+    #  ## the stack size from before the start of this scope
+  
+  VariableAddress* = object
+    ## address of variable relative to context
+    indices*: seq[int]
+
+  VariableReference* = object
+    variable*: Variable
+    address*: VariableAddress
+
+static:
+  doAssert sizeof(Value) <= 2 * sizeof(int)
 
 const
   allTypeKinds* = {low(TypeKind)..high(TypeKind)}
   concreteTypeKinds* = {tyNoneValue..tyType}
   typeclassTypeKinds* = {tyAny..tyWithProperty}
   matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
+  atomicTypes* = {tyNoneValue, tyInteger, tyUnsigned, tyFloat,
+    tyString, tyExpression, tyStatement, tyScope}
 
 proc get*(stack: Stack, index: int): lent Value {.inline.} =
   stack.stack[index]
 proc set*(stack: Stack, index: int, value: sink Value) {.inline.} =
   stack.stack[index] = value
 
-import ../util/objects
+import macrocache
 
-template mix(x) =
-  result = result !& hash(x)
+proc unique*[T](x: sink T): Unique[T] {.gcsafe.} =
+  const uniqueIdCounter = CacheCounter"bazy.vm.unique"
+  when nimvm:
+    result.id = uniqueIdCounter.value.uint
+    inc uniqueIdCounter
+  else:
+    var counter {.global.}: uint = static(uniqueIdCounter.value.uint)
+    result.id = counter
+    inc counter
+  result.value = x
 
-proc hash(r: ref): Hash =
-  mix hash(r[])
-  result = !$ result
+template makeType*(name): Type = Type(kind: `ty name`)
 
-proc hash*[T](p: UniqueReference[T]): Hash =
-  mix cast[pointer]((ref T)(p))
-  result = !$ result
+let
+  Template* = unique Value(kind: vkNone)
+  TypedTemplate* = unique Value(kind: vkNone)
 
-proc hash*(v: Value): Hash =
-  for f in fields(v):
-    mix f
-  result = !$ result
+proc shallowRefresh*(stack: Stack): Stack =
+  result = Stack(imports: stack.imports, stack: newArray[Value](stack.stack.len))
+  for i in 0 ..< stack.stack.len:
+    result.stack[i] = stack.stack[i]
 
-proc hash*(v: Type): Hash =
-  for f in fields(v):
-    mix f
-  result = !$ result
-
-proc hash*(v: InstructionObj): Hash =
-  for f in fields(v):
-    mix f
-  result = !$ result
-
-proc `==`*(a, b: Value): bool {.noSideEffect.}
-proc `==`*(a, b: Type): bool {.noSideEffect.}
-proc `==`*(a, b: InstructionObj): bool {.noSideEffect.}
-
-defineRefEquality Value
-defineRefEquality Type
-defineRefEquality InstructionObj
-
-template `==`*[T](p1, p2: UniqueReference[T]): bool =
-  system.`==`((ref T)(p1), (ref T)(p2))
-
-defineEquality Value
-defineEquality Type
-defineEquality InstructionObj
-
-static:
-  doAssert sizeof(Value) <= 2 * sizeof(int)
-
-template withkind(k, val): Value =
-  Value(kind: `vk k`, `k Value`: val)
-template withkindrefv(vk, kv, val) =
-  result = Value(kind: `vk`)
-  new(result.`kv`)
-  result.`kv`[] = val
-template withkindref(k, val) =
-  withkindrefv(`vk k`, `k Value`, val)
-
-proc toValue*(x: int): Value = withkind(integer, x)
-proc toValue*(x: uint): Value = withkind(unsigned, x)
-proc toValue*(x: float): Value = withkind(float, x)
-proc toValue*(x: sink seq[Value]): Value = withkindref(list, x)
-proc toValue*(x: sink string): Value = withkindref(string, x)
-proc toValue*(x: sink Array[Value]): Value = withkindrefv(vkTuple, tupleValue, x)
-proc toValue*(x: sink ShortArray[Value]): Value = withkind(shortTuple, x)
-proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
-proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
-proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
-proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkind(nativeFunction, x)
-proc toValue*(x: Function): Value = withkind(function, x)
+proc `$`*(arr: Array[char] | ShortArray[char]): string =
+  result = newString(arr.len)
+  for i in 0 ..< result.len:
+    result[i] = arr[i]
 
 template toRef*[T](x: T): ref T =
   var res: ref T
@@ -316,96 +387,159 @@ template toRef*[T](x: T): ref T =
   res[] = x
   res
 
-proc toType*(x: Value): Type =
-  case x.kind
-  of vkNone: result = Type(kind: tyNoneValue)
-  of vkInteger: result = Type(kind: tyInteger)
-  of vkUnsigned: result = Type(kind: tyUnsigned)
-  of vkFloat: result = Type(kind: tyFloat)
-  of vkList: result = Type(kind: tyList, elementType: toRef(x.listValue[][0].toType))
-  of vkString: result = Type(kind: tyString)
-  of vkTuple:
-    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.tupleValue[].len)))
-    for i in 0 ..< x.tupleValue[].len:
-      result.elements[][i] = x.tupleValue[][i].toType
-  of vkShortTuple:
-    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.shortTupleValue.len)))
-    for i in 0 ..< x.shortTupleValue.len:
-      result.elements[][i] = x.shortTupleValue[i].toType
-  of vkReference:
-    result = Type(kind: tyReference, elementType: toRef(x.referenceValue[].toType))
-  of vkUniqueReference:
-    result = Type(kind: tyReference, elementType: toRef((ref Value)(x.uniqueReferenceValue)[].toType))
-  of vkComposite:
-    result = Type(kind: tyComposite, fields: initTable[string, Type](x.compositeValue[].len))
-    for k, v in x.compositeValue[]:
-      result.fields[k] = v.toType
-  of vkPropertyReference:
-    result = toType(x.propertyRefValue.value)
-    result.properties.incl(x.propertyRefValue.properties)
-  of vkType:
-    result = Type(kind: tyType, typeValue: x.typeValue)
-  of vkFunction, vkNativeFunction, vkEffect:
-    discard # XXX?
-  of vkSet:
-    result = Type(kind: tySet)
-    for v in x.setValue[]:
-      result.elementType = toRef(v.toType)
-      break
-  of vkTable:
-    result = Type(kind: tyTable)
-    for k, v in x.tableValue[]:
-      result.keyType = toRef(k.toType)
-      result.valueType = toRef(v.toType)
-      break
+import ../util/objects
 
-proc fromValueObj*(v: ValueObj): PointerTaggedValue =
-  when pointerTaggable:
-    result = PointerTaggedValue:
-      case v.kind
-      of vkNone: 0'u64
-      of vkInteger: (v.kind.uint64 shl 48) or int32(v.integerValue).uint64
-      of vkUnsigned: (v.kind.uint64 shl 48) or int32(v.integerValue).uint64
-      of vkFloat: (v.kind.uint64 shl 48) or int32(v.integerValue).uint64
-      of vkList: cast[pointer](v.listValue).tagPointer(v.kind.uint16)
-      of vkString: cast[pointer](v.stringValue).tagPointer(v.kind.uint16)
-      of vkTuple: cast[pointer](v.tupleValue).tagPointer(v.kind.uint16)
-      of vkShortTuple: cast[pointer](v.shortTupleValue).tagPointer(v.kind.uint16)
-      of vkReference: cast[pointer](v.referenceValue).tagPointer(v.kind.uint16)
-      of vkUniqueReference: cast[pointer](v.uniqueReferenceValue).tagPointer(v.kind.uint16)
-      of vkComposite: cast[pointer](v.compositeValue).tagPointer(v.kind.uint16)
-      of vkPropertyReference: cast[pointer](v.propertyRefValue).tagPointer(v.kind.uint16)
-      of vkType: cast[pointer](v.typeValue).tagPointer(v.kind.uint16)
-      of vkNativeFunction: cast[pointer](v.nativeFunctionValue).tagPointer(v.kind.uint16)
-      of vkFunction: cast[pointer](v.functionValue).tagPointer(v.kind.uint16)
-      of vkEffect: cast[pointer](v.effectValue).tagPointer(v.kind.uint16)
-      of vkSet: cast[pointer](v.setValue).tagPointer(v.kind.uint16)
-      of vkTable: cast[pointer](v.tableValue).tagPointer(v.kind.uint16)
-  else:
-    v.PointerTaggedValue
+template mix(x) =
+  mixin hash
+  result = result !& hash(x)
 
-proc toValueObj*(p: PointerTaggedValue): ValueObj =
-  when pointerTaggable:
-    let val = p.uint64
-    result.kind = ValueKind(val shr 48)
-    case result.kind
-    of vkNone: discard
-    of vkInteger: result.integerValue = (val and high(uint32).uint64).int32.int
-    of vkUnsigned: result.unsignedValue = (val and high(uint32).uint64).uint
-    of vkFloat: result.floatValue = (val and high(uint32).uint64).float32.float
-    of vkList: result.listValue = cast[typeof(result.listValue)](untagPointer(val))
-    of vkString: result.stringValue = cast[typeof(result.stringValue)](untagPointer(val))
-    of vkTuple: result.tupleValue = cast[typeof(result.tupleValue)](untagPointer(val))
-    of vkShortTuple: result.shortTupleValue = cast[typeof(result.shortTupleValue)](untagPointer(val))
-    of vkReference: result.referenceValue = cast[typeof(result.referenceValue)](untagPointer(val))
-    of vkUniqueReference: result.uniqueReferenceValue = cast[typeof(result.uniqueReferenceValue)](untagPointer(val))
-    of vkComposite: result.compositeValue = cast[typeof(result.compositeValue)](untagPointer(val))
-    of vkPropertyReference: result.propertyRefValue = cast[typeof(result.propertyRefValue)](untagPointer(val))
-    of vkType: result.typeValue = cast[typeof(result.typeValue)](untagPointer(val))
-    of vkNativeFunction: result.nativeFunctionValue = cast[typeof(result.nativeFunctionValue)](untagPointer(val))
-    of vkFunction: result.functionValue = cast[typeof(result.functionValue)](untagPointer(val))
-    of vkEffect: result.effectValue = cast[typeof(result.effectValue)](untagPointer(val))
-    of vkSet: result.setValue = cast[typeof(result.setValue)](untagPointer(val))
-    of vkTable: result.tableValue = cast[typeof(result.tableValue)](untagPointer(val))
+when false:
+  proc hash*(r: ref): Hash =
+    mix hash(r[])
+    result = !$ result
+
+proc hash*[T](p: Unique[T]): Hash =
+  mix p.id
+  result = !$ result
+
+proc hash*(v: Value): Hash {.noSideEffect.}
+proc hash*(v: Type): Hash {.noSideEffect.}
+proc hash*(v: InstructionObj): Hash {.noSideEffect.}
+
+proc hash*(v: ref Value): Hash =
+  if v.isNil:
+    mix 0
   else:
-    p.ValueObj
+    mix v[]
+  result = !$ result
+
+proc hash*(v: ref Type): Hash =
+  if v.isNil:
+    mix 0
+  else:
+    mix v[]
+  result = !$ result
+
+proc hash*(v: Instruction): Hash =
+  if v.isNil:
+    mix 0
+  else:
+    mix v[]
+  result = !$ result
+
+proc hash*(v: Value): Hash =
+  for f in fields(v):
+    when f is ref:
+      when compiles(hash(f[])):
+        if v.kind notin {vkReference, vkFunction} and not f.isNil:
+          mix(f[])
+        else:
+          mix cast[int](cast[pointer](f))
+      else:
+        mix cast[int](cast[pointer](f))
+    else:
+      mix f
+  result = !$ result
+
+proc hash*(v: Type): Hash =
+  for f in fields(v):
+    when f is ref:
+      when compiles(hash(f[])):
+        if not f.isNil:
+          mix f[]
+        else:
+          mix cast[int](cast[pointer](f))
+      else:
+        mix cast[int](cast[pointer](f))
+    else:
+      mix f
+  result = !$ result
+
+proc hash*(v: InstructionObj): Hash =
+  for f in fields(v):
+    when f is ref:
+      when compiles(hash(f[])):
+        if not f.isNil:
+          mix f[]
+        else:
+          mix cast[int](cast[pointer](f))
+      else:
+        mix cast[int](cast[pointer](f))
+    else:
+      mix f
+  result = !$ result
+
+proc `==`*[T](p1, p2: Unique[T]): bool {.inline.} =
+  p1.id == p2.id
+
+defineRefEquality Unique
+
+when false:
+  proc `==`*(a, b: ref): bool =
+    (a.isNil and b.isNil) or (not a.isNil and not b.isNil and a[] == b[])
+
+proc `==`*(a, b: Value): bool {.noSideEffect.}
+proc `==`*(a, b: Type): bool {.noSideEffect.}
+proc `==`*(a, b: InstructionObj): bool {.noSideEffect.}
+proc `==`*(a, b: typeof(Statement()[])): bool {.noSideEffect.}
+
+defineRefEquality Value
+defineRefEquality Type
+defineRefEquality InstructionObj
+defineRefEquality typeof(Statement()[])
+
+proc `==`*(a, b: Value): bool =
+  zipFields(a, b, aField, bField):
+    when aField is ref:
+      if a.kind notin {vkReference, vkFunction} and not aField.isNil and not bField.isNil:
+        if aField[] != bField[]:
+          return false
+      else:
+        if aField != bField:
+          return false
+    else:
+      if aField != bField:
+        return false
+  return true
+
+proc `==`*(a, b: Type): bool =
+  zipFields(a, b, aField, bField):
+    when aField is ref:
+      if not aField.isNil and not bField.isNil:
+        if aField[] != bField[]:
+          return false
+      else:
+        if aField != bField:
+          return false
+    else:
+      if aField != bField:
+        return false
+  return true
+
+proc `==`*(a, b: InstructionObj): bool =
+  zipFields(a, b, aField, bField):
+    when aField is ref:
+      if not aField.isNil and not bField.isNil:
+        if aField[] != bField[]:
+          return false
+      else:
+        if aField != bField:
+          return false
+    else:
+      if aField != bField:
+        return false
+  return true
+
+proc `==`*(a, b: typeof(Statement()[])): bool =
+  zipFields(a, b, aField, bField):
+    when aField is ref:
+      if not aField.isNil and not bField.isNil:
+        if aField[] != bField[]:
+          return false
+      else:
+        if aField != bField:
+          return false
+    else:
+      if aField != bField:
+        return false
+  return true
