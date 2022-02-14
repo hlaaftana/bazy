@@ -14,22 +14,7 @@ proc toValue*(x: uint): Value = withkind(unsigned, x)
 proc toValue*(x: float): Value = withkind(float, x)
 proc toValue*(x: bool): Value = Value(kind: vkBoolean, integerValue: int(x))
 proc toValue*(x: sink seq[Value]): Value = withkindref(list, x)
-proc toValue*(x: sink string): Value =
-  when typeof(Value().stringValue) is ref:
-    withkindref(string, x)
-  else:
-    var arr = newShortArray[char](x.len)
-    for i in 0 ..< x.len:
-      arr[i] = x[i]
-    Value(kind: vkString, stringValue: arr)
-when false:
-  proc toValue*(x: sink(ShortArray[char] | Array[char])): Value =
-    when typeof(Value().stringValue) is ref:
-      toValue($x)
-    else:
-      Value(kind: vkString, stringValue: x)
-  proc toValue*(x: sink Array[Value]): Value = withkindrefv(vkTuple, tupleValue, x.toOpenArray(0, x.len - 1).toSafeArray)
-  proc toValue*(x: sink ShortArray[Value]): Value = withkindrefv(vkShortTuple, shortTupleValue, x.toOpenArray(0, x.len - 1).toSafeArray)
+proc toValue*(x: sink string): Value = withkindref(string, x)
 proc toValue*(x: sink SafeArray[Value]): Value = Value(kind: vkTuple, tupleValue: toRef x.toOpenArray(0, x.len - 1).toSafeArray)
 proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
 proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
@@ -43,16 +28,16 @@ proc toValue*(x: Unique[Value]): Value = withkindref(unique, x)
 
 proc toType*(x: Value): Type =
   case x.kind
-  of vkNone: result = makeType(NoneValue)
-  of vkInteger: result = makeType(Integer)
-  of vkUnsigned: result = makeType(Unsigned)
-  of vkFloat: result = makeType(Float)
-  of vkBoolean: result = makeType(Boolean)
+  of vkNone: result = Ty(NoneValue)
+  of vkInteger: result = Ty(Integer)
+  of vkUnsigned: result = Ty(Unsigned)
+  of vkFloat: result = Ty(Float)
+  of vkBoolean: result = Ty(Boolean)
   of vkList: result = Type(kind: tyList, elementType: toRef(x.listValue[][0].toType))
-  of vkString: result = makeType(String)
-  of vkExpression: result = makeType(Expression)
-  of vkStatement: result = makeType(Statement)
-  of vkScope: result = makeType(Scope)
+  of vkString: result = Ty(String)
+  of vkExpression: result = Ty(Expression)
+  of vkStatement: result = Ty(Statement)
+  of vkScope: result = Ty(Scope)
   of vkTuple:
     result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.tupleValue[].len)))
     for i in 0 ..< x.tupleValue[].len:
@@ -71,16 +56,16 @@ proc toType*(x: Value): Type =
   of vkType:
     result = Type(kind: tyType, typeValue: x.typeValue)
   of vkFunction, vkNativeFunction:
-    result = makeType(Function) # XXX
+    result = Ty(Function) # XXX
   of vkEffect:
     result = x.effectValue[].toType # XXX
   of vkSet:
-    result = makeType(Set)
+    result = Ty(Set)
     for v in x.setValue[]:
       result.elementType = toRef(v.toType)
       break
   of vkTable:
-    result = makeType(Table)
+    result = Ty(Table)
     for k, v in x.tableValue[]:
       result.keyType = toRef(k.toType)
       result.valueType = toRef(v.toType)

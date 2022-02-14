@@ -10,25 +10,25 @@ macro callOp(op: static string, args: varargs[untyped]): untyped =
 import std/math
 
 module numbers:
-  define "Int", makeType(Integer)
-  define "Float", makeType(Float)
-  define "Unsigned", makeType(Unsigned)
+  define "Int", Ty(Integer)
+  define "Float", Ty(Float)
+  define "Unsigned", Ty(Unsigned)
   template unarySingle(op: static string, k) =
-    fn op, [makeType(`k`)], makeType(`k`):
+    fn op, [Ty(`k`)], Ty(`k`):
       toValue callOp(`op`, args[0].`k Value`)
   template unary(op: static string) {.used.} =
     unarySingle op, integer
     unarySingle op, unsigned
     unarySingle op, float
   template binarySingle(op: static string, k) =
-    fn op, [makeType(`k`), makeType(`k`)], makeType(`k`):
+    fn op, [Ty(`k`), Ty(`k`)], Ty(`k`):
       toValue callOp(`op`, args[0].`k Value`, args[1].`k Value`)
   template binary(op: static string) =
     binarySingle op, integer
     binarySingle op, unsigned
     binarySingle op, float
   template binarySingleBool(op: static string, k) =
-    fn op, [makeType(`k`), makeType(`k`)], makeType(Boolean):
+    fn op, [Ty(`k`), Ty(`k`)], Ty(Boolean):
       toValue callOp(`op`, args[0].`k Value`, args[1].`k Value`)
   template binaryBool(op: static string) =
     binarySingleBool op, integer
@@ -44,18 +44,18 @@ module numbers:
   binarySingle "div", integer
   binarySingle "div", unsigned
   template floatDivide(k) =
-    fn "/", [makeType(`k`), makeType(`k`)], makeType(Float):
+    fn "/", [Ty(`k`), Ty(`k`)], Ty(Float):
       toValue args[0].`k Value` / args[1].`k Value`
   floatDivide integer
   floatDivide float
   when false:
     template instr(name, instructionName, k) =
-      typedTempl name, [makeType(`k`), makeType(`k`)], makeType(`k`):
+      typedTempl name, [Ty(`k`), Ty(`k`)], Ty(`k`):
         toValue Statement(kind: skBinaryInstruction,
           instructionKind: instructionName,
           binary1: scope.compile(args[0]),
           binary2: scope.compile(args[1]),
-          cachedType: makeType(`k`))
+          cachedType: Ty(`k`))
     instr "+", AddInt, integer
   binary "mod"
   binaryBool "=="

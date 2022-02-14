@@ -22,10 +22,10 @@ proc funcType*(returnType: Type, arguments: varargs[Type]): Type {.inline.} =
 
 proc templType*(arity: int): Type {.inline.} =
   var args = newSeq[Type](arity + 1)
-  args[0] = makeType(Scope)
+  args[0] = Ty(Scope)
   for i in 0 ..< arity:
-    args[i + 1] = makeType(Expression)
-  result = funcType(makeType(Statement), args)
+    args[i + 1] = Ty(Expression)
+  result = funcType(Ty(Statement), args)
   result.properties.incl(toValue(Template))
 
 template templ*(body): untyped =
@@ -38,10 +38,10 @@ template templ*(body): untyped =
 
 proc typedTemplType*(arity: int): Type {.inline.} =
   var args = newSeq[Type](arity + 1)
-  args[0] = makeType(Scope)
+  args[0] = Ty(Scope)
   for i in 0 ..< arity:
-    args[i + 1] = makeType(Statement)
-  result = funcType(makeType(Statement), args)
+    args[i + 1] = Ty(Statement)
+  result = funcType(Ty(Statement), args)
   result.properties.incl(toValue(TypedTemplate))
 
 template typedTempl*(body): untyped =

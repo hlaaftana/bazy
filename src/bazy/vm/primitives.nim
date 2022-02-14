@@ -65,7 +65,7 @@ type
     of vkList:
       listValue*: ref seq[Value]
     of vkString:
-      stringValue*: (when false: ShortArray[char] else: ref string)
+      stringValue*: ref string
     of vkTuple:
       tupleValue*: ref SafeArray[Value]
     of vkReference:
@@ -378,7 +378,7 @@ proc unique*[T](x: sink T): Unique[T] {.gcsafe.} =
     inc counter
   result.value = x
 
-template makeType*(name): Type = Type(kind: `ty name`)
+template Ty*(name): Type = Type(kind: `ty name`)
 
 let
   Template* = unique Value(kind: vkNone)
@@ -388,12 +388,6 @@ proc shallowRefresh*(stack: Stack): Stack =
   result = Stack(imports: stack.imports, stack: newSafeArray[Value](stack.stack.len))
   for i in 0 ..< stack.stack.len:
     result.stack[i] = stack.stack[i]
-
-when false:
-  proc `$`*(arr: Array[char] | ShortArray[char]): string =
-    result = newString(arr.len)
-    for i in 0 ..< result.len:
-      result[i] = arr[i]
 
 template toRef*[T](x: T): ref T =
   var res: ref T
@@ -406,11 +400,6 @@ import ../util/objects
 template mix(x) =
   mixin hash
   result = result !& hash(x)
-
-when false:
-  proc hash*(r: ref): Hash =
-    mix hash(r[])
-    result = !$ result
 
 proc hash*[T](p: Unique[T]): Hash =
   mix p.id
@@ -487,10 +476,6 @@ proc `==`*[T](p1, p2: Unique[T]): bool {.inline.} =
   p1.id == p2.id
 
 defineRefEquality Unique
-
-when false:
-  proc `==`*(a, b: ref): bool =
-    (a.isNil and b.isNil) or (not a.isNil and not b.isNil and a[] == b[])
 
 proc `==`*(a, b: Value): bool {.noSideEffect.}
 proc `==`*(a, b: Type): bool {.noSideEffect.}

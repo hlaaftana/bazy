@@ -8,11 +8,11 @@ module syntax:
     let rhs = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: toRef(makeType(Any)))).typeValue[]
+        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: toRef(Ty(Any)))).typeValue[]
         lhs = lhs.left
         (+t, true)
       else:
-        (+makeType(Any), false)
+        (+Ty(Any), false)
     case lhs.kind
     of Name, Symbol:
       let name = lhs.identifier
@@ -27,10 +27,10 @@ module syntax:
       for i in 0 ..< lhs.arguments.len:
         var arg = lhs.arguments[i]
         if arg.kind == Colon:
-          argTypes[i] = scope.evaluateStatic(arg.right, +Type(kind: tyType, typeValue: toRef(makeType(Any)))).typeValue[]
+          argTypes[i] = scope.evaluateStatic(arg.right, +Type(kind: tyType, typeValue: toRef(Ty(Any)))).typeValue[]
           arg = arg.left
         else:
-          argTypes[i] = makeType(Any)
+          argTypes[i] = Ty(Any)
         discard bodyScope.define(arg.identifier, argTypes[i])
       var fnType = Type(kind: tyFunction, returnType: toRef(bound.boundType), arguments: toRef(argTypes))
       var v = scope.define(name, fnType)
@@ -45,8 +45,8 @@ module syntax:
   templ "if", 2:
     let sc = scope.childScope()
     result = toValue Statement(kind: skIf,
-      ifCond: sc.compile(args[0], +makeType(Boolean)),
-      ifTrue: sc.compile(args[1], +makeType(Any)),
+      ifCond: sc.compile(args[0], +Ty(Boolean)),
+      ifTrue: sc.compile(args[1], +Ty(Any)),
       ifFalse: Statement(kind: skNone))
   templ "if", 3:
     var els = args[2]
@@ -55,8 +55,8 @@ module syntax:
     let sc = scope.childScope()
     let elsesc = scope.childScope()
     var res = Statement(kind: skIf,
-      ifCond: sc.compile(args[0], +makeType(Boolean)),
-      ifTrue: sc.compile(args[1], +makeType(Any)),
-      ifFalse: elsesc.compile(els, +makeType(Any)))
+      ifCond: sc.compile(args[0], +Ty(Boolean)),
+      ifTrue: sc.compile(args[1], +Ty(Any)),
+      ifFalse: elsesc.compile(els, +Ty(Any)))
     res.cachedType = commonType(res.ifTrue.cachedType, res.ifFalse.cachedType)
     result = toValue(res)

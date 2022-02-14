@@ -42,10 +42,10 @@ type
   Variance* = enum
     Covariant
     Contravariant
+    Invariant
   
   TypeBound* = object
     boundType*: Type
-    least*: TypeMatch
     variance*: Variance
 
 const
@@ -63,9 +63,9 @@ template min*(a, b: TypeMatch): TypeMatch =
   (if am == tmNone: am
   else: system.min(am, b))
 
-proc `+`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, least: lowestMatching, variance: Covariant)
-proc `-`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, least: lowestMatching, variance: Contravariant)
-proc `*`*(t: Type, variance: Variance): TypeBound {.inline.} = TypeBound(boundType: t, least: lowestMatching, variance: variance)
+proc `+`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Covariant)
+proc `-`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Contravariant)
+proc `*`*(t: Type, variance: Variance): TypeBound {.inline.} = TypeBound(boundType: t, variance: variance)
 
 proc `-`*(tm: TypeMatch): TypeMatch =
   case tm
@@ -87,17 +87,13 @@ proc match*(b: TypeBound, t: Type): TypeMatch =
     result = t.match(b.boundType)
     if result == tmUnknown:
       result = -b.boundType.match(t)
+  of Invariant:
+    result = b.boundType.match(t)
+    if result == tmUnknown:
+      result = t.match(b.boundType)
 
-proc matchBound*(b: TypeBound, t: Type): bool =
-  when false:
-    case b.variance
-    of lowestMatching .. high(TypeMatch):
-      rel >= b.variance
-    of tmNone:
-      rel == tmNone
-    else:
-      rel in {tmEqual, tmAlmostEqual} or (rel != tmNone and rel <= b.variance)
-  b.match(t) >= b.least
+proc matchBound*(b: TypeBound, t: Type): bool {.inline.} =
+  b.match(t).matches
 
 proc match*(matcher, t: Type): TypeMatch =
   # commutativity rules:
@@ -119,8 +115,6 @@ proc match*(matcher, t: Type): TypeMatch =
       return case t.kind
       of concreteTypeKinds:
         tmNone
-      of tyAny:#typeclassTypeKinds + matcherTypeKinds:
-        tmFalse
       else:
         tmUnknown
     case matcher.kind
@@ -153,7 +147,7 @@ proc match*(matcher, t: Type): TypeMatch =
       tmNone
     of tyType:
       match(+matcher.typeValue[], t.typeValue[])
-    of allTypeKinds - concreteTypeKinds: tmNone # unreachable
+    of allTypeKinds - concreteTypeKinds: tmUnknown # unreachable
   of tyAny: tmTrue
   of tyNone: tmUnknown
   of tyUnion:
@@ -209,7 +203,7 @@ proc commonType*(a, b: Type): Type =
   let
     m1 = a.match(b)
     m2 = b.match(a)
-  let cmp = ord(m1) - ord(m2)
+  let cmp = compare(m1, m2)
   if cmp < 0:
     a
   elif cmp > 0:

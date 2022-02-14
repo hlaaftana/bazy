@@ -7,8 +7,8 @@ else:
 import bazy, bazy/vm/[primitives, values, types, compilation, arrays]
 
 test "type relation":
-  check {makeType(Integer).match(makeType(Float))
-, makeType(Float).match(makeType(Integer))} == {tmNone}
+  check {Ty(Integer).match(Ty(Float))
+, Ty(Float).match(Ty(Integer))} == {tmNone}
 
 test "compile success":
   template working(a) =

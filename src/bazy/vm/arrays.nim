@@ -29,10 +29,6 @@ when true:
       `==`(toSeq(a), toSeq(b))
 
   distinctSeq SafeArray
-
-  when false:
-    distinctSeq Array
-    distinctSeq ShortArray
 else:
   import ../disabled/arrays
   type SafeArray*[T] = Array[T]

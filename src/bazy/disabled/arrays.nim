@@ -22,18 +22,6 @@ proc `=destroy`*[T](arr: var Array[T]) =
 
 proc `=copy`*[T](a: var Array[T], b: Array[T]) #[{.error.}]# =
   a.info = b.info
-  when false:
-    if a.info != b.info:
-      `=destroy`(a)
-      wasMoved(a)
-      if b.info.isNil:
-        a.info = nil
-      else:
-        let L = b.info.length
-        a.info = cast[typeof(a.info)](alloc(sizeof(a.info.length) + L * sizeof(T)))
-        a.info.length = L
-        for i in 0 ..< L:
-          `=copy`(a.info.data[i], b.info.data[i])
 
 proc `=trace`[T](arr: var Array[T]; env: pointer) =
   if arr.info != nil:
