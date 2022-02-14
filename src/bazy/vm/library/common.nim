@@ -36,24 +36,42 @@ template templ*(body): untyped =
       args[i] = valueArgs[i + 1].expressionValue
     body)
 
+proc typedTemplType*(arity: int): Type {.inline.} =
+  var args = newSeq[Type](arity + 1)
+  args[0] = makeType(Scope)
+  for i in 0 ..< arity:
+    args[i + 1] = makeType(Statement)
+  result = funcType(makeType(Statement), args)
+  result.properties.incl(toValue(TypedTemplate))
+
+template typedTempl*(body): untyped =
+  (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
+    let scope {.inject.} = valueArgs[0].scopeValue
+    var args {.inject.} = newSeq[Statement](valueArgs.len - 1)
+    for i in 0 ..< args.len:
+      args[i] = valueArgs[i + 1].statementValue
+    body)
+
 template fn*(body): untyped =
   (proc (args {.inject.}: openarray[Value]): Value {.nimcall.} =
     body)
 
-template module*(moduleName, definitions): untyped =
+template module*(moduleName, definitions): untyped {.dirty.} =
   proc `moduleName`*: Context =
     result = newContext(@[])
-    template define(n: string, typ: Type, x: Value) {.used, dirty.} =
+    template define(n: string, typ: Type, x: Value) {.used.} =
       define(result, n, typ, x)
-    template define(n: string, x: Value) {.used, dirty.} =
+    template define(n: string, x: Value) {.used.} =
       let value = x
       define(n, toType(value), value)
-    template define(n: string, typ: Type, x) {.used, dirty.} =
+    template define(n: string, typ: Type, x) {.used.} =
       define(n, typ, toValue(x))
-    template define(n: string, x) {.used, dirty.} =
+    template define(n: string, x) {.used.} =
       define(n, toValue(x))
-    template templ(n: string, arity: int, body: untyped) {.used, dirty.} =
+    template templ(n: string, arity: int, body: untyped) {.used.} =
       define n, templType(arity), templ(body)
-    template fn(n: string, arguments: openarray[Type], returnType: Type, body: untyped) {.used, dirty.} =
+    template typedTempl(n: string, arity: int, body: untyped) {.used.} =
+      define n, typedTemplType(arity), typedTempl(body)
+    template fn(n: string, arguments: openarray[Type], returnType: Type, body: untyped) {.used.} =
       define n, funcType(returnType, arguments), fn(body)
     definitions

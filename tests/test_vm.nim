@@ -1,16 +1,20 @@
+when (compiles do: import nimbleutils/bridge):
+  import nimbleutils/bridge
+else:
+  import unittest
+  # unittest causes insane GC bugs with arrays
+
 import bazy, bazy/vm/[primitives, values, types, compilation, arrays]
 
-# unittest causes insane GC bugs
-
-block: # type relation
-  doAssert {makeType(Integer).match(makeType(Float))
+test "type relation":
+  check {makeType(Integer).match(makeType(Float))
 , makeType(Float).match(makeType(Integer))} == {tmNone}
 
-block: # compile success
+test "compile success":
   template working(a) =
     discard compile(a)
   template failing(a) =
-    doAssert (
+    check (
       try:
         discard compile(a)
         false
@@ -20,8 +24,8 @@ block: # compile success
   working "1 + 1"
   failing "1 + 1.0"
 
-block: # eval values
-  doAssert toValue(Template) == toValue(Template)
+test "eval values":
+  check toValue(Template) == toValue(Template)
 
   let tests = {
     "a = \"abcd\"; a": toValue("abcd"), # breaks arc
@@ -33,9 +37,27 @@ block: # eval values
     "a = (b = do c = 1); a + (b + 3) + c": toValue(6),
     "9 * (1 + 4) / 2 - 3f": toValue(19.5),
     "9 * (1 + 4) div 2 - 3": toValue(19),
+    "foo(x) = x + 1; foo(3)": toValue(4),
+    """
+gcd(a: Int, b: Int): Int =
+  if b == 0
+    a
+  \else
+    gcd(b, a mod b)
+gcd(12, 42)
+""": toValue(6),
+    "foo(x) = x + 1; foo(x: Float) = x - 1.0; foo(3)": toValue(4),
+    "foo(x) = x + 1; foo(x: Int) = x - 1; foo(3)": toValue(2),
+    "foo(x: Float) = x - 1.0; foo(x) = x + 1; foo(3)": toValue(4),
+    "foo(x: Int) = x - 1; foo(x) = x + 1; foo(3)": toValue(2),
+    "foo(x) = x + 1; foo(x) = x - 1; foo(3)": toValue(2),
   }
   
   for inp, outp in tests.items:
-    let val = evaluate(inp)
-    if val != outp:
-      echo "fail: ", (input: val, output: outp)
+    try:
+      check evaluate(inp) == outp
+    except:
+      echo "fail: ", (input: inp)
+      if getCurrentException() of ref NoOverloadFoundError:
+        echo (ref NoOverloadFoundError)(getCurrentException()).scope.variables
+      raise

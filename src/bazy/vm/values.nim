@@ -12,6 +12,7 @@ template withkindref(k, val) =
 proc toValue*(x: int): Value = withkind(integer, x)
 proc toValue*(x: uint): Value = withkind(unsigned, x)
 proc toValue*(x: float): Value = withkind(float, x)
+proc toValue*(x: bool): Value = Value(kind: vkBoolean, integerValue: int(x))
 proc toValue*(x: sink seq[Value]): Value = withkindref(list, x)
 proc toValue*(x: sink string): Value =
   when typeof(Value().stringValue) is ref:
@@ -21,14 +22,15 @@ proc toValue*(x: sink string): Value =
     for i in 0 ..< x.len:
       arr[i] = x[i]
     Value(kind: vkString, stringValue: arr)
-proc toValue*(x: sink(ShortArray[char] | Array[char])): Value =
-  when typeof(Value().stringValue) is ref:
-    toValue($x)
-  else:
-    Value(kind: vkString, stringValue: x)
-proc toValue*(x: sink Array[Value]): Value = withkindrefv(vkTuple, tupleValue, x.toOpenArray(0, x.len - 1).toSafeArray)
 when false:
+  proc toValue*(x: sink(ShortArray[char] | Array[char])): Value =
+    when typeof(Value().stringValue) is ref:
+      toValue($x)
+    else:
+      Value(kind: vkString, stringValue: x)
+  proc toValue*(x: sink Array[Value]): Value = withkindrefv(vkTuple, tupleValue, x.toOpenArray(0, x.len - 1).toSafeArray)
   proc toValue*(x: sink ShortArray[Value]): Value = withkindrefv(vkShortTuple, shortTupleValue, x.toOpenArray(0, x.len - 1).toSafeArray)
+proc toValue*(x: sink SafeArray[Value]): Value = Value(kind: vkTuple, tupleValue: toRef x.toOpenArray(0, x.len - 1).toSafeArray)
 proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
 proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
@@ -45,6 +47,7 @@ proc toType*(x: Value): Type =
   of vkInteger: result = makeType(Integer)
   of vkUnsigned: result = makeType(Unsigned)
   of vkFloat: result = makeType(Float)
+  of vkBoolean: result = makeType(Boolean)
   of vkList: result = Type(kind: tyList, elementType: toRef(x.listValue[][0].toType))
   of vkString: result = makeType(String)
   of vkExpression: result = makeType(Expression)
@@ -54,10 +57,6 @@ proc toType*(x: Value): Type =
     result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.tupleValue[].len)))
     for i in 0 ..< x.tupleValue[].len:
       result.elements[][i] = x.tupleValue[][i].toType
-  of vkShortTuple:
-    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.shortTupleValue[].len)))
-    for i in 0 ..< x.shortTupleValue[].len:
-      result.elements[][i] = x.shortTupleValue[][i].toType
   of vkReference:
     result = Type(kind: tyReference, elementType: toRef(x.referenceValue[].toType))
   of vkUnique:
@@ -94,13 +93,12 @@ proc fromValueObj*(v: ValueObj): PointerTaggedValue =
     result = PointerTaggedValue:
       case v.kind
       of vkNone: 0'u64
-      of vkInteger: (v.kind.uint64 shl 48) or int32(v.integerValue).uint64
+      of vkInteger, vkBoolean: (v.kind.uint64 shl 48) or int32(v.integerValue).uint64
       of vkUnsigned: (v.kind.uint64 shl 48) or int32(v.unsignedValue).uint64
       of vkFloat: (v.kind.uint64 shl 48) or int32(v.floatValue).uint64
       of vkList: fromPtr list
       of vkString: fromPtr string
       of vkTuple: cast[pointer](v.tupleValue).tagPointer(v.kind.uint16)
-      of vkShortTuple: fromPtr shortTuple
       of vkReference: fromPtr reference
       of vkUnique: fromPtr unique
       of vkComposite: fromPtr composite
@@ -125,13 +123,12 @@ proc toValueObj*(p: PointerTaggedValue): ValueObj =
       result.`name Value` = cast[typeof(result.`name Value`)](untagPointer(val))
     case result.kind
     of vkNone: discard
-    of vkInteger: result.integerValue = (val and high(uint32).uint64).int32.int
+    of vkInteger, vkBoolean: result.integerValue = (val and high(uint32).uint64).int32.int
     of vkUnsigned: result.unsignedValue = (val and high(uint32).uint64).uint
     of vkFloat: result.floatValue = (val and high(uint32).uint64).float32.float
     of vkList: castPointer list
     of vkString: castPointer string
     of vkTuple: result.tupleValue = cast[typeof(result.tupleValue)](untagPointer(val))
-    of vkShortTuple: castPointer shortTuple
     of vkReference: castPointer reference
     of vkUnique: castPointer unique
     of vkComposite: castPointer composite

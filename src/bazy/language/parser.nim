@@ -14,6 +14,7 @@ notes:
   command-after-operator transformation for `a b, c d`
   these would not be infixes, they would be one list of expressions
 * maybe command-after-operator also works with commas
+* delegate \ and else behavior to line parser
 
 ]#
 

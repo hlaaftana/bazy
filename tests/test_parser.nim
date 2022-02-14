@@ -100,7 +100,10 @@ if (a
     b
       c)
   c
-""": "if((a(b(c))), c)"
+""": "if((a(b(c))), c)",
+    "a: b = c": "((a: b) = c)",
+    "a(b): c = d": "((a(b): c) = d)",
+    "a(b): c =\n  d": "((a(b): c) = d)",
   }
 
   for inp, outp in tests.items:

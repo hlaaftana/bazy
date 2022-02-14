@@ -1,4 +1,4 @@
-import "."/[primitives, arrays, values], std/[sets, tables]
+import "."/[primitives, arrays, values, types], std/[sets, tables]
 
 type EffectHandler* = proc (effect: Value): bool
   ## returns true to continue execution
@@ -23,9 +23,19 @@ proc call*(fun: Function, args: sink SafeArray[Value], effectHandler: EffectHand
     newStack.set(i, args[i])
   result = run(fun.instruction, newStack, effectHandler)
 
+proc call*(fun: Value, args: sink SafeArray[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
+  case fun.kind
+  of vkNativeFunction:
+    result = fun.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
+  of vkFunction:
+    result = fun.functionValue.call(args, effectHandler)
+  else:
+    discard # error
+
 proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = nil): Value =
   template run(instr; stack = stack; effectHandler = effectHandler): untyped =
     run(instr, stack, effectHandler)
+  let ins = ins[]
   case ins.kind
   of NoOp:
     result = Value(kind: vkNone)
@@ -36,13 +46,19 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     var args = newSafeArray[Value](ins.arguments.len)
     for i in 0 ..< args.len:
       args[i] = run ins.arguments[i]
-    case fn.kind
-    of vkNativeFunction:
-      result = fn.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
-    of vkFunction:
-      result = fn.functionValue.call(args, effectHandler)
-    else:
-      discard # error
+    result = fn.call(args, effectHandler)
+  of Dispatch:
+    var args = newSafeArray[Value](ins.dispatchArguments.len)
+    for i in 0 ..< args.len:
+      args[i] = run ins.dispatchArguments[i]
+    for ts, fnInstr in ins.dispatchFunctions.items:
+      block accepted:
+        for i in 0 ..< args.len:
+          if not args[i].checkType(ts[i]):
+            break accepted
+        let fn = run fnInstr
+        result = fn.call(args, effectHandler)
+        break
   of Sequence:
     for instr in ins.sequence:
       result = run instr
@@ -116,3 +132,35 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     for k, v in ins.entries.items:
       arr[run k] = run v
     result = toValue(arr)
+  of AddInt:
+    let a = run ins.binary1
+    let b = run ins.binary2
+    result = toValue(a.integerValue + b.integerValue)
+  of SubInt:
+    let a = run ins.binary1
+    let b = run ins.binary2
+    result = toValue(a.integerValue - b.integerValue)
+  of MulInt:
+    let a = run ins.binary1
+    let b = run ins.binary2
+    result = toValue(a.integerValue * b.integerValue)
+  of DivInt:
+    let a = run ins.binary1
+    let b = run ins.binary2
+    result = toValue(a.integerValue div b.integerValue)
+  of AddFloat:
+    let a = run ins.binary1
+    let b = run ins.binary2
+    result = toValue(a.floatValue + b.floatValue)
+  of SubFloat:
+    let a = run ins.binary1
+    let b = run ins.binary2
+    result = toValue(a.floatValue - b.floatValue)
+  of MulFloat:
+    let a = run ins.binary1
+    let b = run ins.binary2
+    result = toValue(a.floatValue * b.floatValue)
+  of DivFloat:
+    let a = run ins.binary1
+    let b = run ins.binary2
+    result = toValue(a.floatValue / b.floatValue)

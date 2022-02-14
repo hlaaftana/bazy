@@ -7,7 +7,7 @@ type
   ValueKind* = enum
     vkNone
       ## some kind of null value
-    vkInteger, vkUnsigned, vkFloat
+    vkInteger, vkUnsigned, vkFloat, vkBoolean
       ## size is implementation detail
       ## same as pointer size for now but may be 32 or 48 bits
       ## if values use pointer packing
@@ -17,9 +17,6 @@ type
       ## general byte sequence type
     vkTuple
       ## like java array but typed like TS, not necessarily hetero or homogenously typed
-    vkShortTuple
-      ## same as tuple but caps out at 255 size so it can be a single pointer
-      ## that points to a length and then elements
     vkReference
       ## reference (pointer) to value
     vkUnique
@@ -40,7 +37,7 @@ type
       ## embedded effect value for exceptions/return/yield/whatever
     vkSet
     vkTable
-    # could be made tuples, but native macros etc need the efficiency
+    # could be pointers or serialized but for now this is more efficient:
     vkExpression
     vkStatement
     vkScope
@@ -59,7 +56,7 @@ type
     # todo: interning for some pointer types
     case kind*: ValueKind
     of vkNone: discard
-    of vkInteger:
+    of vkInteger, vkBoolean:
       integerValue*: int
     of vkUnsigned:
       unsignedValue*: uint
@@ -71,8 +68,6 @@ type
       stringValue*: (when false: ShortArray[char] else: ref string)
     of vkTuple:
       tupleValue*: ref SafeArray[Value]
-    of vkShortTuple:
-      shortTupleValue*: ref SafeArray[Value]
     of vkReference:
       referenceValue*: ref Value
     of vkUnique:
@@ -117,7 +112,7 @@ type
     # maybe add unknown type for values with unknown type at runtime
     # concrete
     tyNoneValue,
-    tyInteger, tyUnsigned, tyFloat,
+    tyInteger, tyUnsigned, tyFloat, tyBoolean,
     tyFunction, tyTuple,
     tyReference,
     tyList,
@@ -140,18 +135,17 @@ type
   Type* {.acyclic.} = object # could be cyclic
     properties*: HashSet[Value]
     case kind*: TypeKind
-    of tyNoneValue, tyInteger, tyUnsigned, tyFloat,
+    of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
       tyString, tyExpression, tyStatement, tyScope,
       tyAny, tyNone:
       discard
     of tyFunction:
-      # arguments and return type are not reflected at runtime
-      # instead function could be an atom that takes a list of any values
-      # and it can have a property of its arguments and return type
+      # ideally signature is a property, it behaves exactly like it
       arguments*: ref seq[Type]
       # having multiple non-ref seq fields makes the compiler abort compilation for some reason
       returnType*: ref Type
     of tyTuple:
+      # could add varargs (probably should)
       elements*: ref seq[Type]
     of tyReference, tyList, tySet:
       elementType*: ref Type
@@ -176,8 +170,7 @@ type
     of tyCustomMatcher:
       typeMatcher*: proc (t: Type): bool
       valueMatcher*: proc (v: Value): bool
-      #compare*: proc (otherMatcher, t: Type): bool
-        # if closer to `t` than `otherMatcher`, return true
+      # could add custom compare
 
   Stack* {.acyclic.} = ref object
     imports*: SafeArray[Stack]
@@ -193,6 +186,7 @@ type
     NoOp
     Constant
     FunctionCall
+    Dispatch
     Sequence
     # stack
     VariableGet
@@ -210,6 +204,11 @@ type
     BuildList
     BuildSet
     BuildTable
+    # custom
+    AddInt, SubInt, MulInt, DivInt
+    AddFloat, SubFloat, MulFloat, DivFloat
+  
+  BinaryInstructionKind* = range[AddInt .. DivFloat]
 
   Instruction* {.acyclic.} = ref object
     case kind*: InstructionKind
@@ -219,6 +218,9 @@ type
     of FunctionCall:
       function*: Instruction # evaluates to Function or native function
       arguments*: SafeArray[Instruction]
+    of Dispatch:
+      dispatchFunctions*: SafeArray[(SafeArray[Type], Instruction)]
+      dispatchArguments*: SafeArray[Instruction]
     of Sequence:
       sequence*: SafeArray[Instruction]
     of VariableGet:
@@ -243,6 +245,8 @@ type
       elements*: SafeArray[Instruction]
     of BuildTable:
       entries*: SafeArray[tuple[key, value: Instruction]]
+    of low(BinaryInstructionKind) .. high(BinaryInstructionKind):
+      binary1*, binary2*: Instruction
 
   InstructionObj = typeof(Instruction()[])
   
@@ -250,6 +254,7 @@ type
     skNone
     skConstant
     skFunctionCall
+    skDispatch
     skSequence
     # stack
     skVariableGet
@@ -267,6 +272,8 @@ type
     skList
     skSet
     skTable
+    # custom instructions
+    skBinaryInstruction
 
   Statement* {.acyclic.} = ref object
     ## typed/compiled expression
@@ -278,6 +285,9 @@ type
     of skFunctionCall:
       callee*: Statement
       arguments*: seq[Statement]
+    of skDispatch:
+      dispatchees*: seq[(seq[Type], Statement)]
+      dispatchArguments*: seq[Statement]
     of skSequence:
       sequence*: seq[Statement]
     of skVariableGet:
@@ -302,6 +312,9 @@ type
       elements*: seq[Statement]
     of skTable:
       entries*: seq[tuple[key, value: Statement]]
+    of skBinaryInstruction:
+      binaryInstructionKind*: BinaryInstructionKind
+      binary1*, binary2*: Instruction
   
   Variable* = ref object
     name*: string
@@ -344,7 +357,7 @@ const
   concreteTypeKinds* = {tyNoneValue..tyType}
   typeclassTypeKinds* = {tyAny..tyWithProperty}
   matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
-  atomicTypes* = {tyNoneValue, tyInteger, tyUnsigned, tyFloat,
+  atomicTypes* = {tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
     tyString, tyExpression, tyStatement, tyScope}
 
 proc get*(stack: Stack, index: int): lent Value {.inline.} =
@@ -376,10 +389,11 @@ proc shallowRefresh*(stack: Stack): Stack =
   for i in 0 ..< stack.stack.len:
     result.stack[i] = stack.stack[i]
 
-proc `$`*(arr: Array[char] | ShortArray[char]): string =
-  result = newString(arr.len)
-  for i in 0 ..< result.len:
-    result[i] = arr[i]
+when false:
+  proc `$`*(arr: Array[char] | ShortArray[char]): string =
+    result = newString(arr.len)
+    for i in 0 ..< result.len:
+      result[i] = arr[i]
 
 template toRef*[T](x: T): ref T =
   var res: ref T
@@ -517,7 +531,7 @@ proc `==`*(a, b: Type): bool =
   return true
 
 proc `==`*(a, b: InstructionObj): bool =
-  zipFields(a, b, aField, bField):
+  zipFields(forceElse = true, a, b, aField, bField):
     when aField is ref:
       if not aField.isNil and not bField.isNil:
         if aField[] != bField[]:

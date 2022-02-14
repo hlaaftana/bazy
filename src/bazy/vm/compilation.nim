@@ -1,8 +1,17 @@
 import "."/[primitives, arrays, runtime, types, values], ../language/[expressions, number], std/[tables, sets, strutils]
 
+proc `$`*(variable: Variable): string =
+  variable.name & ": " & $variable.cachedType
+
 proc newContext*(imports: seq[Context]): Context =
   result = Context(stack: Stack(), imports: imports)
   result.top = Scope(context: result)
+
+proc childContext*(context: Context): Context =
+  result = newContext(@[context])
+
+proc childScope*(scope: Scope): Scope =
+  result = Scope(parent: scope, context: scope.context)
 
 proc refreshStack*(context: Context) =
   ## grow static stack if new variables have been added
@@ -34,10 +43,12 @@ proc define*(scope: Scope, variable: Variable) =
   scope.variables.add(variable)
 
 proc toInstruction*(st: Statement): Instruction =
+  template map[T](s: T): T =
+    s
   template map(s: Statement): Instruction =
     s.toInstruction
-  template map(s: (Statement, Statement)): (Instruction, Instruction) =
-    (s[0].toInstruction, s[1].toInstruction)
+  template map[T, U](s: (T, U)): untyped =
+    (map s[0], map s[1])
   template map(s: seq): SafeArray =
     var arr = newSafeArray[typeof map s[0]](s.len)
     for i in 0 ..< arr.len:
@@ -49,6 +60,10 @@ proc toInstruction*(st: Statement): Instruction =
   of skFunctionCall:
     Instruction(kind: FunctionCall, function: map st.callee,
       arguments: map st.arguments)
+  of skDispatch:
+    Instruction(kind: Dispatch,
+      dispatchFunctions: map st.dispatchees,
+      dispatchArguments: map st.dispatchArguments)
   of skSequence: Instruction(kind: Sequence, sequence: map st.sequence)
   of skVariableGet:
     Instruction(kind: VariableGet, variableGetIndex: st.variableGetIndex)
@@ -81,6 +96,8 @@ proc toInstruction*(st: Statement): Instruction =
     Instruction(kind: BuildSet, elements: map st.elements)
   of skTable:
     Instruction(kind: BuildTable, entries: map st.entries)
+  of skBinaryInstruction:
+    Instruction(kind: st.binaryInstructionKind, binary1: map st.binary1, binary2: map st.binary2)
 
 type
   CompileError* = object of CatchableError
@@ -93,8 +110,15 @@ type
   NoOverloadFoundError* = object of CompileError
     bound*: TypeBound
     scope*: Scope
+  
+  CannotCallError* = object of NoOverloadFoundError
+    `type`*: Type
+    argumentTypes*: seq[Type]
 
 proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement
+
+proc evaluateStatic*(scope: Scope, ex: Expression, bound: TypeBound = +makeType(Any)): Value =
+  scope.context.evaluateStatic(scope.compile(ex, bound).toInstruction)
 
 proc setStatic*(variable: Variable, expression: Expression) =
   variable.scope.context.refreshStack()
@@ -134,7 +158,7 @@ proc overloads*(scope: Scope | Context, name: string, bound: TypeBound): seq[Var
   result.sort(
     cmp = proc (a, b: VariableReference): int =
       compare(a.variable.cachedType, b.variable.cachedType),
-    order = if bound.variance.matches: Ascending else: Descending)
+    order = if bound.variance == Covariant: Ascending else: Descending)
   result.reverse()
 
 proc variableGet*(r: VariableReference): Statement =
@@ -204,6 +228,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       raise (ref NoOverloadFoundError)(
         expression: ex,
         bound: bound,
+        scope: scope,
         msg: "no overloads with bound " & $bound & " for " & $ex)
     # XXX warn on ambiguity, thankfully recency is accounted for
     result = variableGet(overloads[0])
@@ -239,7 +264,10 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           address: Expression(kind: Symbol, identifier: "."),
           arguments: @[ex.left, ex.right]))
   of OpenCall, Infix, Prefix, Postfix, PathCall, PathInfix, PathPrefix, PathPostfix:
-    # XXX better templates
+    # move this out to a proc
+    # XXX expanded templates with partial typing and mixed expressions/statements
+    # XXX pass type bound as well as scope, to pass both to a compile proc
+    # template: (scope, expressions -> statement)
     if ex.address.kind in {Name, Symbol}:
       var argTypes = toRef(newSeq[Type](ex.arguments.len + 1))
       argTypes[][0] = makeType(Scope)
@@ -260,6 +288,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           callee: variableGet(templ),
           arguments: arguments).toInstruction
         result = scope.context.evaluateStatic(call).statementValue
+    # typed template: (scope, statements -> statement)
     if result.isNil and ex.address.kind in {Name, Symbol}:
       var argTypes = toRef(newSeq[Type](ex.arguments.len + 1))
       argTypes[][0] = makeType(Scope)
@@ -287,21 +316,72 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       var argumentTypes = toRef(newSeq[Type](ex.arguments.len))
       for i in 0 ..< arguments.len:
         let b =
-          if bound.boundType.kind == tyFunction and bound.variance.matches:
+          if bound.boundType.kind == tyFunction and bound.least.matches:
             bound.boundType.arguments[i] * bound.variance
           else:
             defaultBound
         arguments[i] = map(ex.arguments[i], b)
         argumentTypes[][i] = arguments[i].cachedType
       var functionType = Type(kind: tyFunction,
-        returnType: toRef makeType(None),
+        returnType: toRef(if bound.variance == Covariant: makeType(Any) else: bound.boundType),
         arguments: argumentTypes)
-      # XXX dynamic overloading
-      let callee = map(ex.address, -functionType)
-      result = Statement(kind: skFunctionCall,
-        cachedType: callee.cachedType.returnType[],
-        callee: callee,
-        arguments: arguments)
+      # lowest supertype function:
+      try:
+        let callee = map(ex.address, -functionType)
+        result = Statement(kind: skFunctionCall,
+          cachedType: callee.cachedType.returnType[],
+          callee: callee,
+          arguments: arguments)
+      except NoOverloadFoundError as e:
+        # dispatch lowest subtype functions in order:
+        if same(e.expression, ex.address) and ex.address.kind in {Name, Symbol}:
+          functionType.returnType = toRef(
+            if bound.variance == Covariant:
+              Type(kind: tyUnion, operands: toRef(seq[Type](@[])))
+            else:
+              bound.boundType)
+          let subs = overloads(scope, ex.address.identifier, +functionType)
+          if subs.len != 0:
+            #echo "dispatching: ", subs, " against: ", functionType
+            var dispatchees = newSeq[(seq[Type], Statement)](subs.len)
+            for i, d in dispatchees.mpairs:
+              let t = subs[i].variable.cachedType
+              d[0].newSeq(arguments.len)
+              for i in 0 ..< arguments.len:
+                let pt = t.paramType(i)
+                if matchBound(-argumentTypes[i], pt):
+                  d[0][i] = makeType(Any) # optimize checking types we know match
+                else:
+                  d[0][i] = pt
+              d[1] = variableGet(subs[i])
+            result = Statement(kind: skDispatch,
+              cachedType: functionType.returnType[], # we could calculate a union here but it's not worth dealing with a typeclass
+              dispatchees: dispatchees,
+              dispatchArguments: arguments)
+      # .call:
+      if result.isNil:
+        let callee = map ex.address
+        arguments.insert(callee, 0)
+        argumentTypes[].insert(callee.cachedType, 0)
+        functionType = Type(kind: tyFunction,
+          returnType: toRef(if bound.variance == Covariant: bound.boundType else: makeType(Any)),
+          arguments: argumentTypes)
+        let overs = overloads(scope, ".call", -functionType)
+        if overs.len != 0:
+          let dotCall = variableGet(overs[0])
+          result = Statement(kind: skFunctionCall,
+            cachedType: dotCall.cachedType.returnType[],
+            callee: callee,
+            arguments: arguments)
+        else:
+          raise (ref CannotCallError)(
+            expression: ex.address,
+            bound: bound,
+            scope: scope,
+            argumentTypes: argumentTypes[],
+            type: callee.cachedType,
+            msg: "no way to call " & $ex.address & " of type " & $callee.cachedType &
+              " found for argument types " & $argumentTypes[])
   of Subscript:
     # what specialization can go here
     result = forward(Expression(kind: PathCall,
@@ -314,12 +394,12 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   of Colon:
     assert false, "cannot compile lone colon expression"
   of Comma, Tuple:
-    if bound.boundType.kind == tyTuple and bound.variance.matches:
+    if bound.boundType.kind == tyTuple and bound.least.matches:
       assert bound.boundType.elements[].len == ex.elements.len, "tuple bound type lengths do not match"
     result = Statement(kind: skTuple, cachedType:
       Type(kind: tyTuple, elements: toRef(newSeqOfCap[Type](ex.elements.len))))
     for i, e in ex.elements:
-      let element = if bound.boundType.kind == tyTuple and bound.variance.matches:
+      let element = if bound.boundType.kind == tyTuple and bound.least.matches:
         map(e, bound.boundType.elements[][i] * bound.variance)
       else:
         map e
@@ -327,7 +407,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       result.cachedType.elements[].add(element.cachedType)
   of ExpressionKind.Array:
     result = Statement(kind: skList, cachedType: makeType(List))
-    var boundSet = bound.boundType.kind == tyList and bound.variance.matches 
+    var boundSet = bound.boundType.kind == tyList and bound.least.matches 
     var b =
       if boundSet:
         bound.boundType.elementType[] * bound.variance
@@ -347,7 +427,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
     if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
       ex.elements[0].isSingleColon):
       result = Statement(kind: skTable, cachedType: makeType(Table))
-      var boundSet = bound.boundType.kind == tyList and bound.variance.matches 
+      var boundSet = bound.boundType.kind == tyList and bound.least.matches 
       var (bk, bv) =
         if boundSet:
           (bound.boundType.keyType[] * bound.variance,
@@ -370,7 +450,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           boundSet = true
     else:
       result = Statement(kind: skSet, cachedType: makeType(Set))
-      var boundSet = bound.boundType.kind == tySet and bound.variance.matches 
+      var boundSet = bound.boundType.kind == tySet and bound.least.matches 
       var b =
         if boundSet:
           bound.boundType.elementType[] * bound.variance
@@ -391,7 +471,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
         if i == ex.statements.high:
           bound
         else:
-          -makeType(None) # like void
+          -Type(kind: tyUnion, operands: toRef[seq[Type]](@[])) #-makeType(None) # like void
       let element = map(e, bound = b)
       result.sequence.add(element)
       if i == ex.statements.high:
@@ -409,10 +489,10 @@ type Program* = Function #[object
   stack*: Stack
   instruction*: Instruction]#
 
-proc compile*(ex: Expression, imports: seq[Context]): Program =
+proc compile*(ex: Expression, imports: seq[Context], bound: TypeBound = +makeType(Any)): Program =
   new(result)
   var context = newContext(imports)
-  result.instruction = compile(context.top, ex, -makeType(None)).toInstruction
+  result.instruction = compile(context.top, ex, bound).toInstruction
   context.refreshStack()
   result.stack = context.stack.shallowRefresh()
 

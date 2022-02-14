@@ -100,7 +100,7 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
     while i < exprs.len:
       var e = exprs[i]
       if e.isNil: discard
-      elif e.kind == Symbol:
+      elif e.isOperator:
         if mustPrefix:
           prefixStack.add(e)
         mustPrefix = true
