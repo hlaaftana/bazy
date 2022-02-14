@@ -60,4 +60,5 @@ module numbers:
   binary "mod"
   binaryBool "=="
   # todo: add bools, logic, bitwise, comparison
+  # conversions, hex, binary, instructions
   # maybe bool not as property yet 

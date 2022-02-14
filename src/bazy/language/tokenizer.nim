@@ -102,8 +102,7 @@ proc recordString*(tz: var Tokenizer, quote: char): string =
     elif tz.options.stringBackslashEscape and c == '\\':
       escaped = true
     elif c == quote:
-      if tz.options.stringQuoteEscape and tz.pos + 1 < tz.str.len and
-        tz.str[tz.pos + 1] == quote:
+      if tz.options.stringQuoteEscape and tz.pos < tz.str.len and tz.str[tz.pos] == quote:
         tz.nextRune()
         result.add(c)
       else:
@@ -435,9 +434,12 @@ proc tokenize*(str: string): seq[Token] =
   tokenize(tokenizer)
 
 when isMainModule:
-  import times
+  import times, sequtils
   template bench*(body) =
     let a = cpuTime()
     for i in 1..10000000: body
     let b = cpuTime()
     echo "took ", b - a
+  let s = "foo(\"a\" \"abcd\")"
+  echo system.`$`(tokenize(s))
+  echo $tokenize(s).mapIt(it.kind)

@@ -10,9 +10,7 @@ import bazy/vm/[compilation, primitives, library/prelude]
 let Prelude* = prelude()
 
 proc compile*(code: string): Program =
-  let p = parse(code)
-  GC_ref p
-  compile(p, @[Prelude])
+  compile(parse(code), @[Prelude])
 
 proc evaluate*(code: string): Value =
   run(compile(code))
@@ -23,12 +21,22 @@ when isMainModule:
       data*: ptr byte
       length*: cint
 
+    proc toBinary*(str: string): Binary =
+      result.length = str.len.cint
+      result.data = cast[ptr byte](alloc(str.len))
+      for i in 0 ..< str.len:
+        cast[ptr byte](cast[int](result.data) + i)[] = str[i].byte
+
     proc parse*(input: cstring): Binary {.stdcall, exportc, dynlib.} =
-      let output = binary(parse($input))
-      result.length = output.len.cint
-      result.data = cast[ptr byte](alloc(output.len))
-      for i in 0 ..< output.len:
-        cast[ptr byte](cast[int](result.data) + i)[] = output[i].byte
+      toBinary binary(parse($input))
+
+    import bazy/vm/values
+
+    proc evaluate*(input: cstring): cstring {.stdcall, exportc, dynlib.} =
+      try:
+        result = cstring $evaluate($input)
+      except Exception as e:
+        result = cstring e.msg
   elif appType == "console":
     import os
     let params = commandLineParams()

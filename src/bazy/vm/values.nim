@@ -1,5 +1,40 @@
 import "."/[primitives, pointertag, arrays], ../language/expressions, std/[sets, tables]
 
+proc `$`*(value: Value): string =
+  case value.kind
+  of vkNone: "()"
+  of vkInteger: $value.integerValue
+  of vkBoolean: $bool(value.integerValue)
+  of vkUnsigned: $value.unsignedValue
+  of vkFloat: $value.floatValue
+  of vkList: ($value.listValue[])[1..^1]
+  of vkString: value.stringValue[]
+  of vkTuple:
+    var s = ($value.tupleValue[])[1..^1]
+    s[0] = '('
+    s[^1] = ')'
+    s
+  of vkReference: ($value.referenceValue[])
+  of vkUnique: "unique " & $value.uniqueValue[].id
+  of vkComposite:
+    var s = "("
+    for k, v in value.compositeValue[]:
+      s.add(k)
+      s.add(": ")
+      s.add($v)
+    s.add(')')
+    s
+  of vkPropertyReference: $value.propertyRefValue[].value
+  of vkType: $value.typeValue[]
+  of vkFunction: "<function>"
+  of vkNativeFunction: "<native function>"
+  of vkEffect: $value.effectValue[]
+  of vkSet: $value.setValue[]
+  of vkTable: $value.tableValue[]
+  of vkExpression: $value.expressionValue[]
+  of vkStatement: $value.statementValue[]
+  of vkScope: $value.scopeValue[]
+
 template withkind(k, val): Value =
   Value(kind: `vk k`, `k Value`: val)
 template withkindrefv(vk, kv, val) =

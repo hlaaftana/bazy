@@ -60,3 +60,4 @@ module syntax:
       ifFalse: elsesc.compile(els, +Ty(Any)))
     res.cachedType = commonType(res.ifTrue.cachedType, res.ifFalse.cachedType)
     result = toValue(res)
+  # todo: while, separate defn/fn, static, let/for

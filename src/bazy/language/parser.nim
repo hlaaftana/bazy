@@ -4,7 +4,7 @@ import tokens, expressions, operators
 
 notes:
 
-* probably a lot of indent bugs when you indent in parentheses or with variable spaces
+* probably (not) a lot of indent bugs when you indent in parentheses or with variable spaces (delegated to tokenizer)
 * some kind of delimiter counter/stack on parser object would stop infinite loops from errors
 * keep track of indents with a counter (maybe not)
 * maybe make distinction between indent and normal argument, or `do` and indent, no idea
@@ -14,7 +14,6 @@ notes:
   command-after-operator transformation for `a b, c d`
   these would not be infixes, they would be one list of expressions
 * maybe command-after-operator also works with commas
-* delegate \ and else behavior to line parser
 
 ]#
 
@@ -24,18 +23,17 @@ type
       pathOperators*,
       operatorIndentMakesBlock*,
       backslashLine*,
-      backslashNestedPostArgument*,
+      backslashPostArgument*,
       colonPostArgument*,
       weirdOperatorIndentUnwrap*,
       makeOperatorInfixOnIndent*,
       backslashParenLine*
     : bool
-    defaultBackslashNames*: seq[string] # performance hazard
+    postArgumentKeywords*: seq[string] # performance hazard
 
   Parser* = ref object
     tokens*: seq[Token]
     pos*: int
-    fakeIndents*: int
     options*: ParserOptions
 
 proc defaultOptions*(): ParserOptions =
@@ -43,13 +41,13 @@ proc defaultOptions*(): ParserOptions =
     curlyBlocks: false,
     pathOperators: true,
     operatorIndentMakesBlock: true,
-    backslashLine: true, # should be false
-    backslashNestedPostArgument: true,
+    backslashLine: false,#true, # should be false
+    backslashPostArgument: true,
     colonPostArgument: true,
     weirdOperatorIndentUnwrap: true,
     makeOperatorInfixOnIndent: true,
     backslashParenLine: true,
-    defaultBackslashNames: @[#["else", "finally"]#])
+    postArgumentKeywords: @[#["else", "finally"]#])
 
 proc newParser*(tokens: sink seq[Token] = @[], options = defaultOptions()): Parser =
   Parser(tokens: tokens, options: options)
@@ -57,11 +55,11 @@ proc newParser*(tokens: sink seq[Token] = @[], options = defaultOptions()): Pars
 iterator nextTokens*(p: var Parser): Token =
   while p.pos < p.tokens.len:
     let t = p.tokens[p.pos]
-    if t.kind == tkIndentBack and p.fakeIndents > 0:
-      dec p.fakeIndents
-    else:
-      yield t
+    yield t
     inc p.pos
+
+template conservePosNextIteration(p: var Parser) =
+  dec p.pos
 
 proc makeStringExpression*(s: sink string): Expression {.inline.} =
   Expression(kind: String, str: unescape(s))
@@ -75,20 +73,14 @@ proc recordWideLine*(parser: var Parser, closed = false): Expression =
     case t.kind
     of tkSemicolon:
       semicoloned = true
-    of tkComma, tkCloseParen, tkCloseBrack, tkCloseCurly:
-      dec parser.pos
+    of tkComma, tkCloseParen, tkCloseBrack, tkCloseCurly,
+      tkIndentBack, tkNewline: # newline could be delegated to line
       break
-    of tkNewline:
-      if not closed:
-        dec parser.pos
-        break
-    of tkIndentBack:
-      if closed:
-        dec parser.fakeIndents
-      else:
-        break
-    else:
+    elif s.len == 0 or semicoloned:
       s.add(parser.recordLineLevel(closed))
+      parser.conservePosNextIteration()
+    else:
+      break
   if semicoloned: Expression(kind: SemicolonBlock, statements: s)
   elif s.len == 0: Expression(kind: ExpressionKind.None)
   else: s[0]
@@ -104,13 +96,13 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
     of tkSemicolon: discard
     of tkIndentBack:
       if indented:
+        inc parser.pos
         break
       else:
-        dec parser.fakeIndents
+        echo "warning extra indentback at " & $(token.line, token.column)
         continue
     of tkComma, tkCloseBrack, tkCloseCurly, tkCloseParen:
       assert indented, "extra delim " & $token.kind
-      dec parser.pos
       break
     elif token.kind == tkColon and 
       parser.options.colonPostArgument and
@@ -118,95 +110,73 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
       result.statements[^1].kind in IndentableCallKinds:
       inc parser.pos
       result.statements[^1].arguments.add(parser.recordWideLine())
-    elif
-      ((parser.options.backslashNestedPostArgument and token.kind == tkBackslash) or
-        (parser.options.defaultBackslashNames.len != 0 and token.kind == tkWord and
-          token.raw in parser.options.defaultBackslashNames)) and
-      result.statements.len > 0 and
-      result.statements[^1].kind in IndentableCallKinds and (
-        # epic abuse
-        var lastEx = result.statements[^1]
-        var valid = true
-        for n in backslashNames:
-          if n == "" and lastEx.arguments.len > 0 and
-            lastEx.arguments[^1].kind in IndentableCallKinds:
-            lastEx = lastEx.arguments[^1]
-          elif n != "" and lastEx.arguments.len > 0 and
-            lastEx.arguments[^1].kind == ExpressionKind.Colon and
-            lastEx.arguments[^1].left.kind == Name and lastEx.arguments[^1].left.identifier == n and
-            lastEx.arguments[^1].right.kind in IndentableCallKinds:
-            lastEx = lastEx.arguments[^1].right
-          else:
-            valid = false
-            break
-        valid):
-      if token.kind == tkBackslash:
-        inc parser.pos
-      let ex = lastEx
-      let tok = parser.tokens[parser.pos]
-      if tok.kind == tkWord:
-        inc parser.pos
-        if parser.tokens[parser.pos].kind == tkNewLine: inc parser.pos
-        let name = tok.raw
-        ex.arguments.add(Expression(kind: ExpressionKind.Colon,
-          left: Expression(kind: Name, identifier: name),
-          right: parser.recordWideLine()))
-        backslashNames.add(name)
-      else:
-        if parser.tokens[parser.pos].kind == tkNewLine: inc parser.pos
-        ex.arguments.add(parser.recordWideLine())
-        backslashNames.add("")
-      continue
+      parser.conservePosNextIteration()
     else:
       result.statements.add(parser.recordWideLine())
+      parser.conservePosNextIteration()
     reset backslashNames
 
 proc recordBrack*(parser: var Parser): Expression =
   var s: seq[Expression]
+  var ended = false
   for t in parser.nextTokens:
     case t.kind
     of tkNone, tkWhitespace, tkIndent, tkIndentBack, tkNewline, tkComma: discard
     of tkCloseBrack:
+      inc parser.pos
+      ended = true
       break
     of tkCloseCurly, tkCloseParen:
       assert false, "wrong delim for brack"
     else:
       s.add(parser.recordWideLine(closed = true))
+      parser.conservePosNextIteration()
+  assert ended, "missing ending brack"
   Expression(kind: Array, elements: s)
 
 proc recordParen*(parser: var Parser): Expression =
   var commad = false
   var s: seq[Expression]
+  var ended = false
   for t in parser.nextTokens:
     case t.kind
     of tkNone, tkWhitespace, tkIndent, tkIndentBack, tkNewline: discard
     of tkComma: commad = true
     of tkCloseParen:
+      inc parser.pos
+      ended = true
       break
     of tkCloseCurly, tkCloseBrack:
       assert false, "wrong delim for paren"
-    else:
+    elif s.len == 0 or commad:
       s.add(parser.recordWideLine(closed = true))
+      parser.conservePosNextIteration()
+    else:
+      break
+  assert ended, "missing ending paren"
   if not commad and s.len == 1: Expression(kind: Wrapped, wrapped: s[0])
+  #elif not commad and s.len == 0: Expression(kind: ExpressionKind.None)
   else: Expression(kind: Tuple, elements: s)
 
 proc recordCurly*(parser: var Parser): Expression =
   var s: seq[Expression]
-  var makeSet = not parser.options.curlyBlocks
+  var commad = false
+  var ended = false
   for t in parser.nextTokens:
     case t.kind
     of tkNone, tkWhitespace, tkIndent, tkIndentBack, tkNewline: discard
-    of tkComma: makeSet = true
+    of tkComma: commad = true
     of tkCloseCurly:
+      inc parser.pos
+      ended = true
       break
     of tkCloseBrack, tkCloseParen:
       assert false, "wrong delim for curly"
-    # funny behavior
-    elif t.kind == tkSemicolon and parser.options.curlyBlocks:
-      makeSet = false
-    else:
-      s.add(parser.recordWideLine(closed = makeSet))
-  if makeSet: Expression(kind: Set, elements: s)
+    elif s.len == 0 or commad or parser.options.curlyBlocks:
+      s.add(parser.recordWideLine(closed = not parser.options.curlyBlocks or commad))
+      parser.conservePosNextIteration()
+  assert ended, "missing ending curly"
+  if commad: Expression(kind: Set, elements: s)
   else: Expression(kind: Block, statements: s)
 
 proc recordSingle*(parser: var Parser): Expression =
@@ -217,7 +187,7 @@ proc recordSingle*(parser: var Parser): Expression =
     precedingSymbol, currentSymbol: Expression = nil
     precedingDot, lastWhitespace, lastDot = false
   defer:
-    dec parser.pos # paths will never terminate with delimiter
+    # paths will never terminate with delimiter
     let resultWasNil = result.isNil
     if not currentSymbol.isNil:
       if not parser.options.pathOperators:
@@ -302,8 +272,11 @@ proc recordSingle*(parser: var Parser): Expression =
             result = Expression(kind: PathCall, address: result.right, arguments: @[result.left, ex.wrapped])
           else:
             result = Expression(kind: PathCall, address: result, arguments: @[ex.wrapped])
+        of ExpressionKind.None:
+          result = Expression(kind: PathCall, address: result, arguments: @[])
         else:
           assert false, "should return one of tuple, array, set, wrapped"
+      parser.conservePosNextIteration()
     of tkDot:
       lastDot = true
       lastWhitespace = false
@@ -357,6 +330,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
     singleExprs: seq[Expression]
     indent: Expression
     indentIsDo: bool
+    postArg: Expression
   defer: # rather defer than put this at the end and try to put `break` everywhere
     if singleExprs.len != 0:
       lineExprs.add(collectLineExpression(singleExprs))
@@ -386,6 +360,11 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
           lineExprs[0].arguments.add(indent)
       else:
         lineExprs.add(indent)
+    if not postArg.isNil:
+      if lineExprs[0].kind in IndentableCallKinds:
+        lineExprs[0].arguments.add(postArg)
+      else:
+        lineExprs.add(postArg)
     if lineExprs.len == 0:
       result = Expression(kind: ExpressionKind.None)
     elif comma == CommaList:
@@ -401,7 +380,6 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
     of tkComma:
       if closed:
         # outside line scope
-        dec parser.pos
         finish()
       waiting = true
       if singleExprs.len != 0: # consider ,, typo as ,
@@ -415,55 +393,73 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
         else:
           if comma == NoComma: comma = CommaList
           lineExprs.add(ex)
-    of tkNewline:
-      if waiting or closed:
-        for tok in parser.nextTokens:
-          if tok.kind notin {tkNone, tkWhitespace, tkNewline, tkIndent, tkIndentBack}:
-            dec parser.pos
-            break
+    of tkNewline, tkIndent:
+      if waiting or (token.kind == tkNewline and closed):
+        if token.kind == tkNewline:
+          for tok in parser.nextTokens:
+            if tok.kind notin {tkNone, tkWhitespace, tkNewline, tkIndent, tkIndentBack}:
+              parser.conservePosNextIteration()
+              break
       else:
-        let originalPos = parser.pos
+        var lastPos = parser.pos
+        var indentRecorded = false
         for tok in parser.nextTokens:
           case tok.kind
           of tkNone, tkWhitespace, tkNewline: discard
-          of tkIndent:
-            if not waiting:
+          elif tok.kind == tkIndent and not indentRecorded:
+            inc parser.pos
+            while parser.tokens[parser.pos].kind in {tkNewline, tkWhitespace}:
+              # skip newlines to not confuse line recorder
               inc parser.pos
-              indent = parser.recordBlockLevel(indented = true)
-              # current position will be immediately after indentback
-              # and refer to token of new line 
-              dec parser.pos
-              finish()
-          else:
-            parser.pos = originalPos - 1 # ???
+            indent = parser.recordBlockLevel(indented = true)
+            indentRecorded = true
+            lastPos = parser.pos
+            parser.conservePosNextIteration()
+          elif (parser.options.backslashPostArgument and tok.kind == tkBackslash) or
+            (parser.options.postArgumentKeywords.len != 0 and tok.kind == tkWord and
+              tok.raw in parser.options.postArgumentKeywords):
+            if tok.kind == tkBackslash:
+              inc parser.pos
+            let newTok = parser.tokens[parser.pos]
+            let name =
+              if newTok.kind == tkWord:
+                inc parser.pos
+                Expression(kind: Name, identifier: newTok.raw)
+              else:
+                nil
+            for tok in parser.nextTokens:
+              case tok.kind
+              of tkNone, tkWhitespace, tkNewline: discard
+              else: break
+            let value = parser.recordLineLevel(closed) # closed is clearly false here
+            if name.isNil:
+              postArg = value
+            else:
+              postArg = Expression(kind: ExpressionKind.Colon, left: name, right: value)
             finish()
+          else:
+            parser.pos = lastPos
+            finish()
+        parser.pos = lastPos
+        finish()
       waiting = false
     of tkIndentBack:
       if not waiting:
         # outside line scope
-        dec parser.pos
         finish()
     of tkSemicolon, tkCloseBrack, tkCloseCurly, tkCloseParen:
       # outside line scope
-      dec parser.pos
       finish()
     of tkColon:
       waiting = true # should change this
       singleExprs.add(Expression(kind: Symbol, identifier: ":"))
-    of tkIndent:
-      if not waiting:
-        inc parser.pos
-        indent = parser.recordBlockLevel(indented = true)
-        indentIsDo = false
-        dec parser.pos # maybe should not be here
-        finish()
     elif token.kind == tkBackslash and parser.options.backslashParenLine and
       parser.pos + 1 < parser.tokens.len and
       parser.tokens[parser.pos + 1].kind == tkOpenParen:
       inc parser.pos, 2
       singleExprs.add(parser.recordLineLevel(closed = false))
-      inc parser.pos
       assert parser.tokens[parser.pos].kind == tkCloseParen, "wrong delimiter for backslash paren line"
+      inc parser.pos
     elif token.kind == tkBackslash and parser.options.backslashLine:
       inc parser.pos
       singleExprs.add(parser.recordLineLevel(closed))
@@ -481,6 +477,7 @@ proc recordLineLevel*(parser: var Parser, closed = false): Expression =
       let ex = parser.recordSingle()
       waiting = false # symbols do not bypass this
       singleExprs.add(ex)
+      parser.conservePosNextIteration()
   finish()
 
 proc parse*(tokens: sink seq[Token]): Expression =
@@ -489,6 +486,8 @@ proc parse*(tokens: sink seq[Token]): Expression =
 
 when isMainModule:
   import tokenizer
+
+  #echo parse(tokenize(readFile("concepts/test.ba")))
 
   when false:
     let tests = [
@@ -553,7 +552,6 @@ try (do
 (finally do
   e)
 """
-  else:
     tp """
 if (a, \
   b)
@@ -570,6 +568,23 @@ if (a
       c)
   c
 """
+  else:
+    tp """
+a
+  b
+    c
+d
+"""
+    tp """
+if a
+  if b
+    c
+  \else
+    d
+\else
+  e
+"""
+    discard
 
   when false:
     import os

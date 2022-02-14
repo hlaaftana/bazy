@@ -1,8 +1,8 @@
 # Package
 
 version       = "0.1.0"
-author        = "hlaaftana"
-description   = "brother academia"
+author        = "metagn"
+description   = "bagy"
 license       = "MIT"
 srcDir        = "src"
 installExt    = @["nim"]
@@ -37,6 +37,6 @@ task tests, "run tests for multiple backends":
 
 task buildall, "builds library and exe":
   echo "building all"
-  exec "nim c -d:release --gc:arc --d:useMalloc --outdir:bin src/bazy"
-  exec "nim c --app:lib -d:release --gc:arc --d:useMalloc --outdir:bin src/bazy"
+  exec "nim c -d:release --gc:orc --d:useMalloc --outdir:bin src/bazy"
+  exec "nim c --app:lib -d:release --gc:orc --d:useMalloc --outdir:bin src/bazy"
   echo "done building"

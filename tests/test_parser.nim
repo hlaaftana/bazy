@@ -34,15 +34,32 @@ test "simple code":
   d;
   e
 )))""",
-    "a = \\b c\na = \\b c\n  a = \\b c\na = \\b c": """(
+#    "a = \\b c\na = \\b c\n  a = \\b c\na = \\b c": """(
+#  (a = b(c));
+#  (a = b(c, (a = b(c))));
+#  (a = b(c))
+#)""",
+    #"""
+    #a = (b = \c d
+    #  e = \f g
+    #h = \i j)""": "(a = ((b = c(d((e = f(g((h = i(j))))))))))",
+    """
+a = do b c
+a = do b c
+  a = do b c
+a = do b c""": """(
   (a = b(c));
   (a = b(c, (a = b(c))));
   (a = b(c))
 )""",
     """
-    a = (b = \c d
-      e = \f g
-    h = \i j)""": "(a = ((b = c(d((e = f(g((h = i(j))))))))))",
+    a = (do
+      b = do c d
+        e = do f g
+      h = do i j)""": """(a = ((
+  (b = c(d, (e = f(g))));
+  (h = i(j))
+)))""",
     "\"abc\"": "\"abc\"",
     "1..20": "(1 .. 20)",
     "1a": "(1 a)",
@@ -56,12 +73,25 @@ test "simple code":
     "a+b c+d e": "(a + b)((c + d)(e))",
     "a + b c, d e + f g": "((a + b(c)), d((e + f(g))))",
     "a do(b) do(c)": "a((b)((c)))",
+#    """
+#a = \b
+#  c = \d
+#    e = \f
+#      g = \h
+#  i = \j
+#k""": """(
+#  (a = b((
+#    (c = d((e = f((g = h)))));
+#    (i = j)
+#  )));
+#  k
+#)""",
     """
-a = \b
-  c = \d
-    e = \f
-      g = \h
-  i = \j
+a = do b
+  c = do d
+    e = do f
+      g = do h
+  i = do j
 k""": """(
   (a = b((
     (c = d((e = f((g = h)))));
@@ -104,6 +134,51 @@ if (a
     "a: b = c": "((a: b) = c)",
     "a(b): c = d": "((a(b): c) = d)",
     "a(b): c =\n  d": "((a(b): c) = d)",
+    """
+if a
+  if b
+    c
+  \else do
+    d
+\else do
+  e
+""": "if(a, if(b, c, (else: d)), (else: e))",
+    """
+if a
+  if b
+    c
+  \else do
+    d
+    e
+\else do
+  f
+""": """if(a, if(b, c, (else: (
+  d;
+  e
+))), (else: f))""",
+    """
+if a
+  if b
+    c
+  \else
+    d
+\else
+  e
+""": "if(a, if(b, c, (else: d)), (else: e))",
+    """
+if a
+  if b
+    c
+  \else
+    d
+    e
+\else
+  f
+""": """if(a, if(b, c, (else: (
+  d;
+  e
+))), (else: f))""",
+    "foo(a \"a\" \"abcd\")": "foo(a(\"a\"(\"abcd\")))",
   }
 
   for inp, outp in tests.items:
@@ -182,7 +257,7 @@ test "parse files without crashing":
     bench("tokenizing"):
       let ts = tokenize(s)
     bench("parsing"):
-      let _ = parse(ts)
+      let p {.used.} = parse(ts)
 
 when defined(testsBenchmark):
   test "200x size file":

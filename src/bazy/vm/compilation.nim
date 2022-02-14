@@ -354,7 +354,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
               cachedType: functionType.returnType[], # we could calculate a union here but it's not worth dealing with a typeclass
               dispatchees: dispatchees,
               dispatchArguments: arguments)
-      # .call:
+      # .call, should recurse but compiled arguments should be reused:
       if result.isNil:
         let callee = map ex.address
         arguments.insert(callee, 0)

@@ -7,8 +7,7 @@ else:
 import bazy, bazy/vm/[primitives, values, types, compilation, arrays]
 
 test "type relation":
-  check {Ty(Integer).match(Ty(Float))
-, Ty(Float).match(Ty(Integer))} == {tmNone}
+  check {Ty(Integer).match(Ty(Float)), Ty(Float).match(Ty(Integer))} == {tmNone}
 
 test "compile success":
   template working(a) =
@@ -51,6 +50,14 @@ gcd(12, 42)
     "foo(x: Float) = x - 1.0; foo(x) = x + 1; foo(3)": toValue(4),
     "foo(x: Int) = x - 1; foo(x) = x + 1; foo(3)": toValue(2),
     "foo(x) = x + 1; foo(x) = x - 1; foo(3)": toValue(2),
+    "foo(x: Int) = if(x == 0, (), (x, foo(x - 1))); foo(5)":
+      toValue(toSafeArray([toValue 5,
+        toValue(toSafeArray([toValue 4,
+          toValue(toSafeArray([toValue 3,
+            toValue(toSafeArray([toValue 2,
+              toValue(toSafeArray([toValue 1,
+                #[Value(kind: vkNone)]#toValue(toSafeArray[Value]([]))]))]))]))]))])),
+    "a = 1; foo() = a; foo()": toValue(1),
   }
   
   for inp, outp in tests.items:
@@ -58,6 +65,7 @@ gcd(12, 42)
       check evaluate(inp) == outp
     except:
       echo "fail: ", (input: inp)
+      echo parse(inp)
       if getCurrentException() of ref NoOverloadFoundError:
         echo (ref NoOverloadFoundError)(getCurrentException()).scope.variables
       raise

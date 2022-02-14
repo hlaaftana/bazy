@@ -385,9 +385,11 @@ let
   TypedTemplate* = unique Value(kind: vkNone)
 
 proc shallowRefresh*(stack: Stack): Stack =
-  result = Stack(imports: stack.imports, stack: newSafeArray[Value](stack.stack.len))
+  result = stack
+  var newStack = newSafeArray[Value](stack.stack.len)
   for i in 0 ..< stack.stack.len:
-    result.stack[i] = stack.stack[i]
+    newStack[i] = stack.stack[i]
+  result.stack = newStack
 
 template toRef*[T](x: T): ref T =
   var res: ref T
