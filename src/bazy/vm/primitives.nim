@@ -131,6 +131,7 @@ type
     # matcher
     tyCustomMatcher
     # maybe add parametrized types as a typeclass
+    # (could use custom matcher instead)
   
   Type* {.acyclic.} = object # could be cyclic
     properties*: HashSet[Value]
@@ -140,12 +141,12 @@ type
       tyAny, tyNone:
       discard
     of tyFunction:
-      # ideally signature is a property, it behaves exactly like it
+      # XXX ideally signature is a property, it behaves exactly like it
       arguments*: ref seq[Type]
       # having multiple non-ref seq fields makes the compiler abort compilation for some reason
       returnType*: ref Type
     of tyTuple:
-      # could add varargs (probably should)
+      # XXX (2) add varargs
       elements*: ref seq[Type]
     of tyReference, tyList, tySet:
       elementType*: ref Type
@@ -327,19 +328,16 @@ type
   Context* = ref object
     ## current module or function
     imports*: seq[Context]
-    #stackSize*: int
     stack*: Stack
     top*: Scope
     allVariables*: seq[Variable] ## should not shrink
   
   Scope* = ref object
     ## restricted subset of variables in a context
-    #imports*: seq[Scope]
+    #imports*: seq[Scope] # maybe add blacklist
     parent*: Scope
     context*: Context
     variables*: seq[Variable] ## should not shrink
-    #accumStackSize*: int
-    #  ## the stack size from before the start of this scope
   
   VariableAddress* = object
     ## address of variable relative to context
@@ -385,7 +383,7 @@ let
   TypedTemplate* = unique Value(kind: vkNone)
 
 proc shallowRefresh*(stack: Stack): Stack =
-  result = stack
+  result = Stack(imports: stack.imports)
   var newStack = newSafeArray[Value](stack.stack.len)
   for i in 0 ..< stack.stack.len:
     newStack[i] = stack.stack[i]

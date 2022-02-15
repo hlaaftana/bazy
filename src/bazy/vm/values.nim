@@ -91,9 +91,9 @@ proc toType*(x: Value): Type =
   of vkType:
     result = Type(kind: tyType, typeValue: x.typeValue)
   of vkFunction, vkNativeFunction:
-    result = Ty(Function) # XXX
+    result = Ty(Function) # XXX no signature
   of vkEffect:
-    result = x.effectValue[].toType # XXX
+    result = x.effectValue[].toType # XXX do what here
   of vkSet:
     result = Ty(Set)
     for v in x.setValue[]:

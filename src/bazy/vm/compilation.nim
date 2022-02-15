@@ -154,7 +154,7 @@ import algorithm
 
 proc overloads*(scope: Scope | Context, name: string, bound: TypeBound): seq[VariableReference] =
   result = symbols(scope, name, bound)
-  # sort must be stable
+  # sort must be stable to preserve definition/import order
   result.sort(
     cmp = proc (a, b: VariableReference): int =
       compare(a.variable.cachedType, b.variable.cachedType),
@@ -184,22 +184,23 @@ proc variableSet*(r: VariableReference, value: Statement): Statement =
       importedStackStatement: result,
       cachedType: t)
 
+template constant*(value: Value, ty: Type): Statement =
+  Statement(kind: skConstant, constant: value, cachedType: ty)
+template constant*(value: untyped, ty: Type): Statement =
+  constant(toValue(value), ty)
+template constant*(value: untyped, ty: TypeKind): Statement =
+  constant(value, Type(kind: ty))
+template constant*(value: string): Statement = constant(value, tyString)
+template constant*(value: int): Statement = constant(value, tyInteger)
+template constant*(value: uint): Statement = constant(value, tyUnsigned)
+template constant*(value: float): Statement = constant(value, tyFloat)
+
 proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   template defaultBound: untyped = +Ty(Any)
   template map(ex: Expression, bound = defaultBound): Statement =
     compile(scope, ex, bound)
   template forward(ex: Expression): Statement =
     compile(scope, ex, bound)
-  template constant(value: Value, ty: Type): Statement =
-    Statement(kind: skConstant, constant: value, cachedType: ty)
-  template constant(value: untyped, ty: Type): Statement =
-    constant(toValue(value), ty)
-  template constant(value: untyped, ty: TypeKind): Statement =
-    constant(value, Type(kind: ty))
-  template constant(value: string): Statement = constant(value, tyString)
-  template constant(value: int): Statement = constant(value, tyInteger)
-  template constant(value: uint): Statement = constant(value, tyUnsigned)
-  template constant(value: float): Statement = constant(value, tyFloat)
   case ex.kind
   of None: result = Statement(kind: skNone, cachedType: Ty(None))
   of Number:
@@ -261,8 +262,9 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           arguments: @[ex.left, ex.right]))
   of OpenCall, Infix, Prefix, Postfix, PathCall, PathInfix, PathPrefix, PathPostfix:
     # move this out to a proc
-    # XXX expanded templates with partial typing and mixed expressions/statements
-    # XXX pass type bound as well as scope, to pass both to a compile proc
+    # XXX (1) expanded templates with partial typing and mixed expressions/statements, probably with some kind of signature property
+    # XXX named arguments with said signature property
+    # XXX (3) pass type bound as well as scope, to pass both to a compile proc
     # template: (scope, expressions -> statement)
     if ex.address.kind in {Name, Symbol}:
       var argTypes = toRef(newSeq[Type](ex.arguments.len + 1))
@@ -347,6 +349,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
                 let pt = t.paramType(i)
                 if matchBound(-argumentTypes[i], pt):
                   d[0][i] = Ty(Any) # optimize checking types we know match
+                  # XXX do this recursively
                 else:
                   d[0][i] = pt
               d[1] = variableGet(subs[i])
@@ -390,6 +393,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   of Colon:
     assert false, "cannot compile lone colon expression"
   of Comma, Tuple:
+    # XXX composites
     if bound.boundType.kind == tyTuple:
       assert bound.boundType.elements[].len == ex.elements.len, "tuple bound type lengths do not match"
     result = Statement(kind: skTuple, cachedType:
@@ -490,7 +494,7 @@ proc compile*(ex: Expression, imports: seq[Context], bound: TypeBound = +Ty(Any)
   var context = newContext(imports)
   result.instruction = compile(context.top, ex, bound).toInstruction
   context.refreshStack()
-  result.stack = context.stack.shallowRefresh()
+  result.stack = context.stack
 
 proc run*(program: Program, effectHandler: EffectHandler = nil): Value =
   evaluate(program.instruction, program.stack, effectHandler)

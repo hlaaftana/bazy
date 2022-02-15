@@ -1,9 +1,9 @@
 import ".."/[compilation, primitives]
 
-import "."/[syntax, numbers]
+import "."/[syntax, numbers, logic, types]
 
 proc prelude*: Context =
-  result = newContext(@[syntax(), numbers()])
+  result = newContext(@[syntax(), numbers(), logic(), types()])
   # todo:
   # reflection, modules, types,
   # functions, logic, errors,

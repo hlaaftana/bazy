@@ -3,6 +3,9 @@ import ".."/[primitives, compilation, types, values], ../../language/expressions
 import common
 
 module syntax:
+  templ "block", 2:
+    let sc = scope.childScope()
+    result = toValue sc.compile(args[0], +Ty(Any))
   templ "=", 2:
     var lhs = args[0]
     let rhs = args[1]
@@ -60,4 +63,9 @@ module syntax:
       ifFalse: elsesc.compile(els, +Ty(Any)))
     res.cachedType = commonType(res.ifTrue.cachedType, res.ifFalse.cachedType)
     result = toValue(res)
-  # todo: while, separate defn/fn, static, let/for
+  templ "while", 2:
+    let sc = scope.childScope()
+    result = toValue Statement(kind: skWhile,
+      whileCond: sc.compile(args[0], +Ty(Boolean)),
+      whileBody: sc.compile(args[1], -Type(kind: tyUnion, operands: toRef(seq[Type] @[]))))
+  # todo: separate defn/fn, static, let/for

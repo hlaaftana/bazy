@@ -106,7 +106,7 @@ proc match*(matcher, t: Type): TypeMatch =
     result = tmEqual
     for i in 0 ..< s1.len:
       let m = match(+s1[i], s2[i])
-      if m == tmNone: return m
+      if m <= tmNone: return m
       elif m < result: result = m
   if matcher == t: return tmEqual
   result = case matcher.kind
@@ -125,7 +125,6 @@ proc match*(matcher, t: Type): TypeMatch =
     of tyTuple:
       reduceMatch(matcher.elements[], t.elements[])
     of tyFunction:
-      #echo (matcher, t, rm, am)
       min(
         match(-matcher.returnType[], t.returnType[]),
         reduceMatch(matcher.arguments[], t.arguments[]))
@@ -140,7 +139,7 @@ proc match*(matcher, t: Type): TypeMatch =
         for k, v1 in t1:
           if k notin t2: return tmNone
           let m = match(+v1, t2[k])
-          if m == tmNone: return m
+          if m <= tmNone: return m
           elif m < result: result = m
       tableMatch(matcher.fields, t.fields)
     of tyUnique:
@@ -180,11 +179,8 @@ proc match*(matcher, t: Type): TypeMatch =
       match(+matcher.typeWithProperty[], t))
   result = min(result, tmAlmostEqual)
 
-proc compare*(m1, m2: TypeMatch): int =
-  if m1 == tmUnknown:
-    result = ord(m2)
-  else:
-    result = ord(m1) - ord(m2)
+proc compare*(m1, m2: TypeMatch): int {.inline.} =
+  ord(m1) - ord(m2)
 
 proc compare*(t1, t2: Type): int =
   ## t1 < t2 mirrors being a subtype

@@ -16,6 +16,8 @@ proc evaluate*(code: string): Value =
   run(compile(code))
 
 when isMainModule:
+  import bazy/vm/values
+
   when appType in ["lib", "staticlib"]:
     type Binary* {.exportc, bycopy.} = object
       data*: ptr byte
@@ -29,8 +31,6 @@ when isMainModule:
 
     proc parse*(input: cstring): Binary {.stdcall, exportc, dynlib.} =
       toBinary binary(parse($input))
-
-    import bazy/vm/values
 
     proc evaluate*(input: cstring): cstring {.stdcall, exportc, dynlib.} =
       try:
@@ -58,8 +58,7 @@ when isMainModule:
           of "--expression", "-e": input = nextOrFail("expected expression")
           of "--output", "--out", "-o": outputFile = nextOrFail("expected output file")
           inc i
-        let ex = evaluate(input)
-        let res = $ex
+        let res = $evaluate(input)
         if outputFile == "": stdout.write(res)
         else: writeFile(outputFile, res)
       of "parse":

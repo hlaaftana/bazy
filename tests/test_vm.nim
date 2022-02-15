@@ -58,6 +58,26 @@ gcd(12, 42)
               toValue(toSafeArray([toValue 1,
                 #[Value(kind: vkNone)]#toValue(toSafeArray[Value]([]))]))]))]))]))])),
     "a = 1; foo() = a; foo()": toValue(1),
+    """
+foo(i: Int) =
+  if i == 1
+    "a"
+  \else if i == 2
+    "b"
+  \else
+    "c"
+[foo(0), foo(1), foo(2), foo(3)]
+""": toValue(@[toValue("c"), toValue("a"), toValue("b"), toValue("c")]),
+    """
+fibo(i: Int): Int =
+  if i == 1
+    1
+  \else if i == 2
+    1
+  \else
+    fibo(i - 1) + fibo(i - 2)
+
+[fibo(3), fibo(4), fibo(5)]""": toValue(@[toValue(2), toValue(3), toValue(5)])
   }
   
   for inp, outp in tests.items:
