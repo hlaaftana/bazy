@@ -18,12 +18,12 @@ module syntax:
         (+Ty(Any), false)
     case lhs.kind
     of Name, Symbol:
-      let name = lhs.identifier
+      let name = $lhs
       let value = compile(scope, rhs, bound)
       let v = scope.define(name, if typeSet: bound.boundType else: value.cachedType)
       result = toValue variableSet(v.shallowReference, value)
     of CallKinds:
-      let name = lhs.address.identifier
+      let name = $lhs.address
       let context = scope.context.childContext()
       let bodyScope = context.top
       var argTypes = newSeq[Type](lhs.arguments.len)
@@ -34,7 +34,7 @@ module syntax:
           arg = arg.left
         else:
           argTypes[i] = Ty(Any)
-        discard bodyScope.define(arg.identifier, argTypes[i])
+        discard bodyScope.define($arg, argTypes[i])
       var fnType = Type(kind: tyFunction, returnType: toRef(bound.boundType), arguments: toRef(argTypes))
       var v = scope.define(name, fnType)
       let body = bodyScope.compile(rhs, bound)
@@ -53,7 +53,7 @@ module syntax:
       ifFalse: Statement(kind: skNone))
   templ "if", 3:
     var els = args[2]
-    if els.kind == Colon and els.left.kind in {Name, Symbol} and els.left.identifier == "else":
+    if els.kind == Colon and els.left.isIdentifier(ident) and ident == "else":
       els = els.right
     let sc = scope.childScope()
     let elsesc = scope.childScope()

@@ -1,6 +1,7 @@
-import number, ../defines
+import number, shortstring, ../defines
 
 type
+  # TODO: add shortword/shortsymbol tokens with shortstrings for faster operator/keyword handling
   TokenKind* = enum
     tkNone, tkWhitespace, tkIndent, tkIndentBack, tkNewLine
     tkBackslash, tkDot, tkComma, tkColon, tkSemicolon
@@ -9,20 +10,25 @@ type
   
   CharacterTokenKind* = range[tkBackslash..tkCloseCurly]
 
-  # ref to not copy on JS, not sure if improves performance on C
+  # XXX should also have filename and ending column
+  TokenInfo* = tuple[line, column: int]
+
   TokenObj* = object
     when doLineColumn:
-      line*, column*: int
+      info*: TokenInfo
     case kind*: TokenKind
     of tkString:
       content*: string
     of tkNumber:
       num*: NumberRepr
-    of tkWord, tkSymbol:
+    of tkWord:
       raw*: string
       quoted*: bool
+    of tkSymbol:
+      short*: ShortString
     else: discard
 
+# reduces copying on JS, not sure if improves performance on C
 when refToken:
   type Token* = ref TokenObj
 else:
@@ -60,7 +66,8 @@ proc `$`*(token: Token): string =
     $CharacterTokens[token.kind]
   of tkString: "\"" & token.content & "\""
   of tkNumber: $token.num
-  of tkWord, tkSymbol: token.raw
+  of tkWord: token.raw
+  of tkSymbol: $token.short
 
 proc `$`*(tokens: seq[Token]): string =
   var ind = 0
@@ -88,5 +95,6 @@ proc `==`*(tok1, tok2: Token): bool =
   case tok1.kind
   of tkString: tok1.content == tok2.content
   of tkNumber: tok1.num == tok2.num
-  of tkWord, tkSymbol: tok1.raw  == tok2.raw
+  of tkWord: tok1.raw == tok2.raw
+  of tkSymbol: tok1.short == tok2.short
   else: true

@@ -1,4 +1,4 @@
-import number, ../util/objects
+import shortstring, number, tokens, ../util/objects, ../defines
 export same
 
 type
@@ -14,14 +14,18 @@ type
     Tuple, Array, Set
     Block, SemicolonBlock
   Expression* {.acyclic.} = ref object
+    when doLineColumn:
+      info*: TokenInfo
     case kind*: ExpressionKind
     of None: discard
     of Number:
       number*: NumberRepr
     of String:
       str*: string
-    of Name, Symbol:
+    of Name:
       identifier*: string
+    of Symbol:
+      symbol*: ShortString
     of Wrapped:
       wrapped*: Expression
     of OpenCall, Infix, Prefix, Postfix,
@@ -40,13 +44,46 @@ type
 defineEquality Expression
 defineEquality typeof(Expression()[])
 
+proc len*(ex: Expression): int =
+  case ex.kind
+  of Wrapped: 1
+  of Dot, Colon: 2
+  of OpenCall, Infix, Prefix, Postfix,
+    PathCall, PathInfix, PathPrefix, PathPostfix,
+    Subscript, CurlySubscript: ex.arguments.len + 1
+  of Comma, Tuple, Array, Set: ex.elements.len
+  of Block, SemicolonBlock: ex.statements.len
+  else: -1
+
+proc `[]`*(ex: Expression, i: int): Expression =
+  rangeCheck i >= 0 and i < ex.len
+  case ex.kind
+  of Wrapped: ex.wrapped
+  of Dot, Colon:
+    if i == 0: ex.left else: ex.right
+  of OpenCall, Infix, Prefix, Postfix,
+    PathCall, PathInfix, PathPrefix, PathPostfix,
+    Subscript, CurlySubscript:
+    if i == 0: ex.address else: ex.arguments[i - 1]
+  of Comma, Tuple, Array, Set: ex.elements[i]
+  of Block, SemicolonBlock: ex.statements[i]
+  else: assert false; nil # unreachable
+
+proc withInfo*(ex: sink Expression, info: TokenInfo): Expression {.inline.} =
+  result = ex
+  when doLineColumn:
+    result.info = info
+
+proc inferInfo*(ex: sink Expression): Expression {.inline.} = ex.withInfo(ex[0].info)
+
 proc copy*(ex: Expression): Expression =
   result = Expression(kind: ex.kind)
   case ex.kind
   of None: discard
   of Number: result.number = ex.number
   of String: result.str = ex.str
-  of Name, Symbol: result.identifier = ex.identifier
+  of Name: result.identifier = ex.identifier
+  of Symbol: result.symbol = ex.symbol
   of Wrapped: result.wrapped = copy ex.wrapped
   of OpenCall, Infix, Prefix, Postfix,
     PathCall, PathInfix, PathPrefix, PathPostfix,
@@ -74,10 +111,14 @@ const
   IndentableCallKinds* = OpenCallKinds + {PathCall}
 
 proc makeInfix*(op, a, b: Expression): Expression =
-  if op.kind == Symbol and op.identifier == ":":
-    Expression(kind: Colon, left: a, right: b)
+  if op.kind == Symbol and op.symbol == short":":
+    Expression(kind: Colon, left: a, right: b, info: op.info)
   else:
-    Expression(kind: Infix, address: op, arguments: @[a, b])
+    Expression(kind: Infix, address: op, arguments: @[a, b], info: op.info)
+
+template isIdentifier*(ex: Expression, name: untyped): bool =
+  var `name` {.inject.}: string
+  (ex.kind == Name and (`name` = ex.identifier; true)) or (ex.kind == Symbol and (`name` = $ex.symbol; true))
 
 import strutils
 
@@ -87,7 +128,8 @@ proc `$`*(ex: Expression): string =
   of None: "()"
   of Number: $ex.number
   of String: "\"" & ex.str & "\""
-  of Name, Symbol: ex.identifier
+  of Name: ex.identifier
+  of Symbol: $ex.symbol
   of Wrapped: "(" & $ex.wrapped & ")"
   of Infix, PathInfix:
     "(" & $ex.arguments[0] & " " & $ex.address & " " & $ex.arguments[1] & ")" &
@@ -129,7 +171,8 @@ proc repr*(ex: Expression): string =
   of None: "None"
   of Number: "Number " & $ex.number
   of String: "String \"" & ex.str & "\""
-  of Name, Symbol: $ex.kind & " " & ex.identifier
+  of Name: $ex.kind & " " & ex.identifier
+  of Symbol: $ex.kind & " " & $ex.symbol
   of Wrapped: "Wrapped(" & ex.wrapped.repr & ")"
   of Infix, PathInfix, Postfix, PathPostfix, Prefix, PathPrefix,
     OpenCall, PathCall, Subscript, CurlySubscript:
@@ -242,8 +285,14 @@ proc binary*(ex: Expression): string =
     result.add(char (s.len shr 8) and 0xFF)
     result.add(char s.len and 0xFF)
     result.add(s)
-  of Name, Symbol:
+  of Name:
     let s = ex.identifier
+    result.add(char (s.len shr 8) and 0xFF)
+    result.add(char s.len and 0xFF)
+    result.add(s)
+  of Symbol:
+    # TODO make this single int
+    let s = $ex.symbol
     result.add(char (s.len shr 8) and 0xFF)
     result.add(char s.len and 0xFF)
     result.add(s)

@@ -1,4 +1,4 @@
-import "."/[primitives, arrays, runtime, types, values], ../language/[expressions, number], std/[tables, sets, strutils]
+import "."/[primitives, arrays, runtime, types, values], ../language/[expressions, number, shortstring], std/[tables, sets, strutils]
 
 proc `$`*(variable: Variable): string =
   variable.name & ": " & $variable.cachedType
@@ -223,8 +223,18 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
     result = constant(ex.str)
   of Wrapped:
     result = forward(ex.wrapped)
-  of Name, Symbol:
+  of Name:
     let overloads = overloads(scope, ex.identifier, bound)
+    if overloads.len == 0:
+      raise (ref NoOverloadFoundError)(
+        expression: ex,
+        bound: bound,
+        scope: scope,
+        msg: "no overloads with bound " & $bound & " for " & $ex)
+    # XXX warn on ambiguity, thankfully recency is accounted for
+    result = variableGet(overloads[0])
+  of Symbol:
+    let overloads = overloads(scope, $ex.symbol, bound)
     if overloads.len == 0:
       raise (ref NoOverloadFoundError)(
         expression: ex,
@@ -246,7 +256,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
             tyNone),
           arguments: @[lhs, constant(name)])
       else:
-        let ident = Expression(kind: Symbol, identifier: "." & name)
+        let ident = Expression(kind: Name, identifier: "." & name)
         try:
           result = forward(
             Expression(kind: PathCall,
@@ -258,7 +268,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
     if result.isNil:
       result = forward(
         Expression(kind: PathCall,
-          address: Expression(kind: Symbol, identifier: "."),
+          address: Expression(kind: Name, identifier: "."),
           arguments: @[ex.left, ex.right]))
   of OpenCall, Infix, Prefix, Postfix, PathCall, PathInfix, PathPrefix, PathPostfix:
     # move this out to a proc
@@ -266,7 +276,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
     # XXX named arguments with said signature property
     # XXX (3) pass type bound as well as scope, to pass both to a compile proc
     # template: (scope, expressions -> statement)
-    if ex.address.kind in {Name, Symbol}:
+    if ex.address.isIdentifier(name):
       var argTypes = toRef(newSeq[Type](ex.arguments.len + 1))
       argTypes[][0] = Ty(Scope)
       for i in 0 ..< ex.arguments.len:
@@ -275,7 +285,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
         returnType: toRef(Ty(Statement)),
         arguments: argTypes)
       let templateType = Type(kind: tyWithProperty, typeWithProperty: toRef(templateFunctionType), withProperty: toValue(Template))
-      let overloads = overloads(scope, ex.address.identifier, +templateType)
+      let overloads = overloads(scope, name, +templateType)
       if overloads.len != 0:
         let templ = overloads[0]
         var arguments = newSeq[Statement](ex.arguments.len + 1)
@@ -287,7 +297,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           arguments: arguments).toInstruction
         result = scope.context.evaluateStatic(call).statementValue
     # typed template: (scope, statements -> statement)
-    if result.isNil and ex.address.kind in {Name, Symbol}:
+    if result.isNil and ex.address.isIdentifier(name):
       var argTypes = toRef(newSeq[Type](ex.arguments.len + 1))
       argTypes[][0] = Ty(Scope)
       for i in 0 ..< ex.arguments.len:
@@ -296,7 +306,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
         returnType: toRef(Ty(Statement)),
         arguments: argTypes)
       let typedTemplateType = Type(kind: tyWithProperty, typeWithProperty: toRef(typedTemplateFunctionType), withProperty: toValue(TypedTemplate))
-      let overloads = overloads(scope, ex.address.identifier, +typedTemplateType)
+      let overloads = overloads(scope, name, +typedTemplateType)
       if overloads.len != 0:
         let templ = overloads[0]
         var arguments = newSeq[Statement](ex.arguments.len + 1)
@@ -332,13 +342,13 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           arguments: arguments)
       except NoOverloadFoundError as e:
         # dispatch lowest subtype functions in order:
-        if same(e.expression, ex.address) and ex.address.kind in {Name, Symbol}:
+        if same(e.expression, ex.address) and ex.address.isIdentifier(name):
           functionType.returnType = toRef(
             if bound.variance == Covariant:
               Type(kind: tyUnion, operands: toRef(seq[Type](@[])))
             else:
               bound.boundType)
-          let subs = overloads(scope, ex.address.identifier, +functionType)
+          let subs = overloads(scope, name, +functionType)
           if subs.len != 0:
             #echo "dispatching: ", subs, " against: ", functionType
             var dispatchees = newSeq[(seq[Type], Statement)](subs.len)
@@ -384,11 +394,11 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   of Subscript:
     # what specialization can go here
     result = forward(Expression(kind: PathCall,
-      address: Expression(kind: Symbol, identifier: ".[]"),
+      address: Expression(kind: Symbol, symbol: short".[]"),
       arguments: @[ex.address] & ex.arguments))
   of CurlySubscript:
     result = forward(Expression(kind: PathCall,
-      address: Expression(kind: Symbol, identifier: ".{}"),
+      address: Expression(kind: Symbol, symbol: short".{}"),
       arguments: @[ex.address] & ex.arguments))
   of Colon:
     assert false, "cannot compile lone colon expression"
@@ -423,7 +433,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
         boundSet = true
   of Set:
     proc isSingleColon(e: Expression): bool =
-      e.kind == Symbol and e.identifier == ":"
+      e.kind == Symbol and e.symbol == short":"
     if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
       ex.elements[0].isSingleColon):
       result = Statement(kind: skTable, cachedType: Ty(Table))

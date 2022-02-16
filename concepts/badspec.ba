@@ -21,8 +21,8 @@ binary_search(a, k) =
     while i < b
       if a[mid] < k
         i = mid + 1
-      \else
-        # \ allows `else if` to work with a named argument `else`
+      else
+        # `else` is treated specially and becomes `\else:`
         b = mid
     unless i < a.size and a[i] == k, i = -1
     # not a syntactical construct, just to show unless can be defined as a normal call

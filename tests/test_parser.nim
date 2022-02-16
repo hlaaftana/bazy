@@ -30,7 +30,7 @@ test "simple code":
 )""",
     "a b, c": "a(b, c)",
     "a b c, d e, f": "a(b(c), d(e), f)",
-    "a b\n\\c\n  d\n  e": """a(b, (c: (
+    "a b\n\\c\n  d\n  e": """a(b, c((
   d;
   e
 )))""",
@@ -138,19 +138,19 @@ if (a
 if a
   if b
     c
-  \else do
+  else do
     d
-\else do
+else do
   e
 """: "if(a, if(b, c, (else: d)), (else: e))",
     """
 if a
   if b
     c
-  \else do
+  else do
     d
     e
-\else do
+else do
   f
 """: """if(a, if(b, c, (else: (
   d;
@@ -160,9 +160,9 @@ if a
 if a
   if b
     c
-  \else
+  else
     d
-\else
+else
   e
 """: "if(a, if(b, c, (else: d)), (else: e))",
     """
@@ -171,8 +171,26 @@ if a
     c
   \else
     d
-    e
 \else
+  e
+""": "if(a, if(b, c, else(d)), else(e))",
+    """
+if a
+  if b
+    c
+  \else:
+    d
+\else:
+  e
+""": "if(a, if(b, c, (else: d)), (else: e))",
+    """
+if a
+  if b
+    c
+  else
+    d
+    e
+else
   f
 """: """if(a, if(b, c, (else: (
   d;
@@ -184,6 +202,8 @@ if a
   for inp, outp in tests.items:
     let parsed = parse(inp)
     check $parsed == outp
+
+import bazy/language/shortstring
 
 test "equivalent syntax":
   let equivalents = {
@@ -217,7 +237,7 @@ test "equivalent syntax":
           result = Expression(kind: PathCall, address: result.address.reduced,
             arguments: result.arguments.reduced)
         elif Name in ek:
-          result = Expression(kind: Name, identifier: result.identifier)
+          result = Expression(kind: Name, identifier: (if result.kind == Symbol: $result.symbol else: result.identifier))
         elif Block in ek:
           result = Expression(kind: Block, statements: result.statements.reduced)
         else:

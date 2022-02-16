@@ -1,4 +1,4 @@
-import number, tokens, ../defines, std/strutils
+import number, shortstring, tokens, ../defines, std/strutils
 
 when useUnicode:
   import std/unicode
@@ -29,7 +29,7 @@ else:
 
 type
   TokenizerOptions* = object
-    symbolWords*: seq[string]
+    symbolWords*: seq[ShortString]
     stringBackslashEscape*, stringQuoteEscape*: bool
     backslashBreakNewline*, commaIgnoreIndent*: bool
 
@@ -42,12 +42,14 @@ type
       ln*, cl*, previousCol*: int
 
 proc defaultOptions*(): TokenizerOptions =
-  TokenizerOptions(
-    symbolWords: @["do", "and", "or", "is", "as", "not", "in", "div", "mod", "xor"],
+  result = TokenizerOptions(
     stringBackslashEscape: true,
     stringQuoteEscape: true,
     backslashBreakNewline: true,
     commaIgnoreIndent: true)
+  for it in @["do", "else", "and", "or", "is", "as", "not", "in",
+    "div", "mod", "xor"]:
+    result.symbolWords.add(it.toShortString)
 
 proc newTokenizer*(str: sink string = "", options = defaultOptions()): Tokenizer =
   Tokenizer(str: str, options: options)
@@ -247,17 +249,24 @@ proc recordWord*(tz: var Tokenizer): string =
 const NonSymbolChars = Whitespace + Digits + CharacterTokenSet + {'_', '\'', '"', '`', '#'}
 
 proc recordSymbol*(tz: var Tokenizer): string =
+  result = newStringOfCap(sizeof(ShortString))
   for c in tz.runes:
     if c notin NonSymbolChars and not c.isAlpha:
       result.add(c)
+      if result.len == shortStringMaxSize:
+        return
     else:
       tz.resetPos()
       return
 
 proc recordSymbolPlus*(tz: var Tokenizer, extra: char): string =
+  result = newStringOfCap(sizeof(ShortString))
+  result.add(extra)
   for c in tz.runes:
     if c == extra or (c notin NonSymbolChars and not c.isAlpha):
       result.add(c)
+      if result.len == shortStringMaxSize:
+        return
     else:
       tz.resetPos()
       return
@@ -282,8 +291,8 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
   template add(t: Token) =
     var tok = t
     when doLineColumn:
-      tok.line = ln
-      tok.column = cl
+      tok.info.line = ln
+      tok.info.column = cl
     lastKind = tok.kind
     result.add(tok)
 
@@ -352,7 +361,7 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
             if tz.options.backslashBreakNewline:
               result.del(xi)
               breakIndent = true
-          of tkColon:
+          of tkComma:
             if tz.options.commaIgnoreIndent:
               breakIndent = true
           else: discard
@@ -366,21 +375,22 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
       # identifier start
       tz.resetPos()
       let word = recordWord(tz)
-      if word in tz.options.symbolWords:
-        add Token(kind: tkSymbol, raw: word)
+      if word.len < shortStringMaxSize and
+        (let ss = word.toShortString; ss in tz.options.symbolWords):
+        add Token(kind: tkSymbol, short: ss)
       else:
         add Token(kind: tkWord, raw: word)
     elif c.int32 > 127:
       # non-space and non-alpha unicode char, so symbol start
       tz.resetPos()
-      add Token(kind: tkSymbol, raw: recordSymbol(tz))
+      add Token(kind: tkSymbol, short: recordSymbol(tz).toShortString)
     else:
       let ch = c.char
-      template doubleChar(k: TokenKind) =
+      template doubleChar(k: TokenKind, startChar: char) =
         if lastKind == k:
           dropLast()
           tz.resetPos()
-          add Token(kind: tkSymbol, raw: CharacterTokens[k] & recordSymbolPlus(tz, ch))
+          add Token(kind: tkSymbol, short: recordSymbolPlus(tz, ch).toShortString)
         else:
           add k
       template openDelim(kind: TokenKind) =
@@ -393,9 +403,9 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
       case ch
       of '#': comment = true
       of '\\': add tkBackslash
-      of '.': doubleChar tkDot
+      of '.': doubleChar tkDot, '.'
       of ',': add tkComma
-      of ':': doubleChar tkColon
+      of ':': doubleChar tkColon, ':'
       of ';': add tkSemicolon
       of '(': openDelim tkOpenParen
       of '[': openDelim tkOpenBrack
@@ -406,7 +416,7 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
       of '\'', '"', '`':
         let s = recordString(tz, ch)
         if c == '`':
-          add Token(kind: tkSymbol, raw: s, quoted: true)
+          add Token(kind: tkWord, raw: s, quoted: true)
         else:
           add Token(kind: tkString, content: s)
       of '0'..'9':
@@ -418,16 +428,16 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
           add Token(kind: tkNumber, num: recordNumber(tz, ch == '-'))
         else:
           tz.resetPos()
-          add Token(kind: tkSymbol, raw: recordSymbol(tz))
+          add Token(kind: tkSymbol, short: recordSymbol(tz).toShortString)
       else:
         # non-alpha, so symbol start
         tz.resetPos()
         if lastKind in {tkDot, tkColon}:
           let ch = CharacterTokens[lastKind]
           dropLast()
-          add Token(kind: tkSymbol, raw: ch & recordSymbol(tz))
+          add Token(kind: tkSymbol, short: recordSymbolPlus(tz, ch).toShortString)
         else:
-          add Token(kind: tkSymbol, raw: recordSymbol(tz))
+          add Token(kind: tkSymbol, short: recordSymbol(tz).toShortString)
 
 proc tokenize*(str: string): seq[Token] =
   var tokenizer = newTokenizer(str)

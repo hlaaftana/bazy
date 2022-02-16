@@ -19,52 +19,52 @@ a do b do
 
 if a
   b
-\else if c
+else if c
   d
-\else if e
+else if e
   f
-\else if g
+else if g
   h
-\else
+else
   i
 
 try
   a
-:catch b
+\catch b
   c
-:catch d
+\catch d
   e
-:finally
+\finally
   f
 
 if a
   b
-\else if c
+else if c
   if d
     e
-  \else if f
+  else if f
     g
-  \else
+  else
     h
-\else if i
+else if i
   j
-\else
+else
   k
 
 if a
   b
-\else if c
+else if c
   if d
     e
-  \else if f
+  else if f
     if g
       h
-    \else if i
+    else if i
       j
-    \else k
-  \else
+    else k
+  else
     l
-\else if m
+else if m
   n
-\else
+else
   o

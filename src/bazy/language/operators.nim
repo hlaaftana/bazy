@@ -1,4 +1,4 @@
-import expressions
+import shortstring, expressions
 
 type
   Precedence* = enum
@@ -42,23 +42,22 @@ const Associativities*: array[Precedence, Associativity] = [
   None: Left
 ]
 
-proc precedence*(symbol: string): Precedence =
-  # computation is pretty simple so no cache
-  if symbol.len == 0: return None
+proc precedence*(symbol: ShortString): Precedence =
+  var L: int
   case symbol
-  of "": None
-  of "=": Assignment
-  of ":": Colon
-  of "**", "pow": Exponent # not keyword
-  of "shl", "shr": Shift # not keywords
-  of "div", "mod", "rem": Multiplication # rem not a keyword
-  of "as", "from": Conversion
-  of "is", "in", "of": Comparison # maybe not of
-  of "not", "!": Not
-  of "and", "&&": And
-  of "or", "||": Or
-  of "for", "if", "while", "unless", "until", "do": Statement # not sure if these can be keywords
-  elif symbol.len > 1 and symbol[^2 .. ^1] in ["=>", "->"]:
+  of ShortString(0): None
+  of short"=": Assignment
+  of short":": Colon
+  of short"**", short"pow": Exponent # not keyword
+  of short"shl", short"shr": Shift # not keywords
+  of short"div", short"mod", short"rem": Multiplication # rem not a keyword
+  of short"as", short"from": Conversion
+  of short"is", short"in", short"of": Comparison # maybe not of
+  of short"not", short"!": Not
+  of short"and", short"&&": And
+  of short"or", short"||": Or
+  of short"for", short"if", short"while", short"unless", short"until", short"do": Statement # not sure if these can be keywords
+  elif (L = symbol.len; L > 1 and symbol[L - 2 .. L - 1] in [short"=>", short"->"]):
     Lambda
   else:
     case symbol[0]
@@ -66,14 +65,14 @@ proc precedence*(symbol: string): Precedence =
     of '*', '%', '/', '&', '\\': Multiplication
     of '+', '-', '~', '|': Addition
     of '.':
-      if symbol.len > 1 and symbol[1] == '.':
+      if L > 1 and symbol[1] == '.':
         Range
       else:
         Access
     of '<', '>', '!', '=': Comparison
     of '@', '?', ':': Accusative
     of ',', ';': Separation
-    elif symbol[^1] == '=': Assignment
+    elif symbol[L - 1] == '=': Assignment
     else: Misc
 
 proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence)): seq[Expression] =
@@ -92,7 +91,7 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
       if not old.isNil:
         inc deleted
   while prec != Precedence.None:
-    template isOperator(e: Expression): bool = e.kind == Symbol and e.identifier.precedence == prec
+    template isOperator(e: Expression): bool = e.kind == Symbol and e.symbol.precedence == prec
     let assoc = Associativities[prec]
     var mustPrefix = true
     var prefixStack: seq[Expression]
@@ -107,7 +106,7 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
       else:
         let psl = prefixStack.len
         while prefixStack.len != 0:
-          e = Expression(kind: Prefix, address: prefixStack.pop, arguments: @[e])
+          e = Expression(kind: Prefix, address: prefixStack.pop, arguments: @[e]).inferInfo()
         for j in i - psl ..< i:
           delete exprs[j]
         exprs[i] = e
@@ -117,7 +116,7 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
       let startIndex = max(0, exprs.len - prefixStack.len - 2)
       var e = exprs[startIndex]
       for i in startIndex + 1 ..< exprs.len:
-        e = Expression(kind: Postfix, address: exprs[i], arguments: @[e])
+        e = Expression(kind: Postfix, address: exprs[i], arguments: @[e]).inferInfo()
         delete exprs[i]
       exprs[startIndex] = e
     case assoc
@@ -170,7 +169,7 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
         else:
           let sl = stack.len
           while stack.len != 0:
-            e = Expression(kind: Prefix, address: stack.pop, arguments: @[e])
+            e = Expression(kind: Prefix, address: stack.pop, arguments: @[e]).inferInfo()
           for j in i - sl ..< i:
             delete exprs[j]
           exprs[i] = e

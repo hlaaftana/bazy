@@ -39,7 +39,7 @@ test "eval values":
 gcd(a: Int, b: Int): Int =
   if b == 0
     a
-  \else
+  else
     gcd(b, a mod b)
 gcd(12, 42)
 """: toValue(6),
@@ -60,9 +60,9 @@ gcd(12, 42)
 foo(i: Int) =
   if i == 1
     "a"
-  \else if i == 2
+  else if i == 2
     "b"
-  \else
+  else
     "c"
 [foo(0), foo(1), foo(2), foo(3)]
 """: toValue(@[toValue("c"), toValue("a"), toValue("b"), toValue("c")]),
@@ -70,9 +70,9 @@ foo(i: Int) =
 fibo(i: Int): Int =
   if i == 1
     1
-  \else if i == 2
+  else if i == 2
     1
-  \else
+  else
     fibo(i - 1) + fibo(i - 2)
 
 [fibo(3), fibo(4), fibo(5)]""": toValue(@[toValue(2), toValue(3), toValue(5)])
