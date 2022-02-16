@@ -74,6 +74,8 @@ proc toInstruction*(st: Statement): Instruction =
     Instruction(kind: FromImportedStack,
       importedStackIndex: st.importedStackIndex,
       importedStackInstruction: map st.importedStackStatement)
+  of skArmStack:
+    Instruction(kind: ArmStack, armStackFunction: map st.armStackFunction)
   of skIf:
     Instruction(kind: If, ifCondition: map st.ifCond,
       ifTrue: map st.ifTrue, ifFalse: map st.ifFalse)
@@ -96,6 +98,8 @@ proc toInstruction*(st: Statement): Instruction =
     Instruction(kind: BuildSet, elements: map st.elements)
   of skTable:
     Instruction(kind: BuildTable, entries: map st.entries)
+  of skUnaryInstruction:
+    Instruction(kind: st.unaryInstructionKind, unary: map st.unary)
   of skBinaryInstruction:
     Instruction(kind: st.binaryInstructionKind, binary1: map st.binary1, binary2: map st.binary2)
 

@@ -69,6 +69,9 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     stack.set(ins.variableSetIndex, result)
   of FromImportedStack:
     result = run(ins.importedStackInstruction, stack.imports[ins.importedStackIndex])
+  of ArmStack:
+    result = run ins.armStackFunction
+    result.functionValue.stack.imports[0] = stack
   of If:
     let cond = run ins.ifCondition
     if cond.toBool:
@@ -164,3 +167,9 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     let a = run ins.binary1
     let b = run ins.binary2
     result = toValue(a.floatValue / b.floatValue)
+  of NegInt:
+    let a = run ins.unary
+    result = toValue(-a.integerValue)
+  of NegFloat:
+    let a = run ins.unary
+    result = toValue(-a.floatValue)

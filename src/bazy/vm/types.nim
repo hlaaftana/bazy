@@ -1,6 +1,7 @@
 import "."/[primitives, values], std/[tables, sets]
 
 proc `$`*(t: Type): string =
+  # not recursive
   case t.kind
   of tyNoneValue: "NoneValue"
   of tyInteger: "Int"
@@ -47,6 +48,12 @@ type
   TypeBound* = object
     boundType*: Type
     variance*: Variance
+
+proc `$`*(tb: TypeBound): string =
+  (case tb.variance
+  of Covariant: '+'
+  of Contravariant: '-'
+  of Invariant: '~') & $tb.boundType
 
 const
   highestNonMatching* = tmFalse

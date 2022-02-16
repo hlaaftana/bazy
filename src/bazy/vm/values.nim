@@ -106,6 +106,31 @@ proc toType*(x: Value): Type =
       result.valueType = toRef(v.toType)
       break
 
+proc copy*(value: Value): Value =
+  case value.kind
+  of vkNone, vkInteger, vkBoolean, vkUnsigned, vkFloat,
+    vkReference, vkUnique, vkType, vkFunction, vkNativeFunction: value
+  of vkList:
+    var newSeq = newSeq[Value](value.listValue[].len)
+    for i in 0 ..< newSeq.len:
+      newSeq[i] = copy value.listValue[][i]
+    toValue(newSeq)
+  of vkString: toValue(value.stringValue[])
+  of vkArray:
+    var newArray = newArray[Value](value.tupleValue.unref.len)
+    for i in 0 ..< newArray.len:
+      newArray[i] = copy value.tupleValue.unref[i]
+    toValue(newArray)
+  of vkComposite:
+    var newTable = newTable[string, Value](value.compositeValue[].len)
+    for k, v in value.compositeValue[]:
+      newTable[k] = copy v
+    Value(kind: vkComposite, compositeValue: newTable)
+  of vkPropertyReference, vkEffect,
+    vkSet, vkTable, vkExpression, vkStatement, vkScope:
+    # unimplemented
+    value
+
 proc fromValueObj*(v: ValueObj): PointerTaggedValue =
   when pointerTaggable:
     template fromPtr(name): untyped =

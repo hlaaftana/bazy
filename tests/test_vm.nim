@@ -75,7 +75,8 @@ fibo(i: Int): Int =
   else
     fibo(i - 1) + fibo(i - 2)
 
-[fibo(3), fibo(4), fibo(5)]""": toValue(@[toValue(2), toValue(3), toValue(5)])
+[fibo(3), fibo(4), fibo(5)]""": toValue(@[toValue(2), toValue(3), toValue(5)]),
+    "a = 1; foo() = (b = 2; bar() = (c = 3; (a, b, c)); bar()); foo()": toValue(toArray([toValue(1), toValue(2), toValue(3)])),
   }
   
   for inp, outp in tests.items:

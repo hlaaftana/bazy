@@ -195,6 +195,7 @@ type
     VariableGet
     VariableSet
     FromImportedStack
+    ArmStack
     # goto
     If
     While
@@ -210,8 +211,10 @@ type
     # custom
     AddInt, SubInt, MulInt, DivInt
     AddFloat, SubFloat, MulFloat, DivFloat
+    NegInt, NegFloat
   
   BinaryInstructionKind* = range[AddInt .. DivFloat]
+  UnaryInstructionKind* = range[NegInt .. NegFloat]
 
   Instruction* {.acyclic.} = ref object
     case kind*: InstructionKind
@@ -234,6 +237,8 @@ type
     of FromImportedStack:
       importedStackIndex*: int
       importedStackInstruction*: Instruction
+    of ArmStack:
+      armStackFunction*: Instruction
     of If:
       ifCondition*, ifTrue*, ifFalse*: Instruction
     of While:
@@ -248,6 +253,8 @@ type
       elements*: Array[Instruction]
     of BuildTable:
       entries*: Array[tuple[key, value: Instruction]]
+    of low(UnaryInstructionKind) .. high(UnaryInstructionKind):
+      unary*: Instruction
     of low(BinaryInstructionKind) .. high(BinaryInstructionKind):
       binary1*, binary2*: Instruction
 
@@ -263,6 +270,7 @@ type
     skVariableGet
     skVariableSet
     skFromImportedStack
+    skArmStack
     # goto
     skIf
     skWhile
@@ -276,6 +284,7 @@ type
     skSet
     skTable
     # custom instructions
+    skUnaryInstruction
     skBinaryInstruction
 
   Statement* {.acyclic.} = ref object
@@ -301,6 +310,8 @@ type
     of skFromImportedStack:
       importedStackIndex*: int
       importedStackStatement*: Statement
+    of skArmStack:
+      armStackFunction*: Statement
     of skIf:
       ifCond*, ifTrue*, ifFalse*: Statement
     of skWhile:
@@ -315,6 +326,9 @@ type
       elements*: seq[Statement]
     of skTable:
       entries*: seq[tuple[key, value: Statement]]
+    of skUnaryInstruction:
+      unaryInstructionKind*: UnaryInstructionKind
+      unary*: Instruction
     of skBinaryInstruction:
       binaryInstructionKind*: BinaryInstructionKind
       binary1*, binary2*: Instruction
