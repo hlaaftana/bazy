@@ -17,13 +17,13 @@ template run(instr: Instruction, stack, effectHandler): Value =
     return val
   val
 
-proc call*(fun: Function, args: sink SafeArray[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
+proc call*(fun: Function, args: sink Array[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
   var newStack = fun.stack.shallowRefresh()
   for i in 0 ..< args.len:
     newStack.set(i, args[i])
   result = run(fun.instruction, newStack, effectHandler)
 
-proc call*(fun: Value, args: sink SafeArray[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
+proc call*(fun: Value, args: sink Array[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
   case fun.kind
   of vkNativeFunction:
     result = fun.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
@@ -43,12 +43,12 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     result = ins.constantValue
   of FunctionCall:
     let fn = run ins.function
-    var args = newSafeArray[Value](ins.arguments.len)
+    var args = newArray[Value](ins.arguments.len)
     for i in 0 ..< args.len:
       args[i] = run ins.arguments[i]
     result = fn.call(args, effectHandler)
   of Dispatch:
-    var args = newSafeArray[Value](ins.dispatchArguments.len)
+    var args = newArray[Value](ins.dispatchArguments.len)
     for i in 0 ..< args.len:
       args[i] = run ins.dispatchArguments[i]
     for ts, fnInstr in ins.dispatchFunctions.items:
@@ -99,7 +99,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     of vkFunction:
       let f = h.functionValue
       handler = proc (effect: Value): bool =
-        let val = f.call([effect].toSafeArray)
+        let val = f.call([effect].toArray)
         if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
           return false
         val.toBool
@@ -108,12 +108,12 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     result = run(ins.effectEmitter, stack, handler)
   of BuildTuple:
     if ins.elements.len <= 255:
-      var arr = newSafeArray[Value](ins.elements.len)
+      var arr = newArray[Value](ins.elements.len)
       for i in 0 ..< arr.len:
         arr[i] = run ins.elements[i]
       result = toValue(arr)
     else:
-      var arr = newSafeArray[Value](ins.elements.len)
+      var arr = newArray[Value](ins.elements.len)
       for i in 0 ..< arr.len:
         arr[i] = run ins.elements[i]
       result = toValue(arr)

@@ -2,7 +2,6 @@ when (compiles do: import nimbleutils/bridge):
   import nimbleutils/bridge
 else:
   import unittest
-  # unittest causes insane GC bugs with arrays
 
 import bazy, bazy/vm/[primitives, values, types, compilation, arrays]
 
@@ -19,7 +18,6 @@ test "compile success":
         false
       except CompileError:
         true)
-  # useMalloc stops here:
   working "1 + 1"
   failing "1 + 1.0"
 
@@ -32,7 +30,7 @@ test "eval values":
     "a = (b = do c = 1); [a, 2, b,  3, c]":
       toValue(@[toValue(1), toValue(2), toValue(1), toValue(3), toValue(1)]),
     "a = (b = do c = 1); (a, 2, b,  3, c, \"ab\")":
-      toValue(toSafeArray([toValue(1), toValue(2), toValue(1), toValue(3), toValue(1), toValue("ab")])),
+      toValue(toArray([toValue(1), toValue(2), toValue(1), toValue(3), toValue(1), toValue("ab")])),
     "a = (b = do c = 1); a + (b + 3) + c": toValue(6),
     "9 * (1 + 4) / 2 - 3f": toValue(19.5),
     "9 * (1 + 4) div 2 - 3": toValue(19),
@@ -51,12 +49,12 @@ gcd(12, 42)
     "foo(x: Int) = x - 1; foo(x) = x + 1; foo(3)": toValue(2),
     "foo(x) = x + 1; foo(x) = x - 1; foo(3)": toValue(2),
     "foo(x: Int) = if(x == 0, (), (x, foo(x - 1))); foo(5)":
-      toValue(toSafeArray([toValue 5,
-        toValue(toSafeArray([toValue 4,
-          toValue(toSafeArray([toValue 3,
-            toValue(toSafeArray([toValue 2,
-              toValue(toSafeArray([toValue 1,
-                #[Value(kind: vkNone)]#toValue(toSafeArray[Value]([]))]))]))]))]))])),
+      toValue(toArray([toValue 5,
+        toValue(toArray([toValue 4,
+          toValue(toArray([toValue 3,
+            toValue(toArray([toValue 2,
+              toValue(toArray([toValue 1,
+                #[Value(kind: vkNone)]#toValue(toArray[Value]([]))]))]))]))]))])),
     "a = 1; foo() = a; foo()": toValue(1),
     """
 foo(i: Int) =

@@ -15,7 +15,7 @@ type
       ## both seq and string are references to save memory
     vkString
       ## general byte sequence type
-    vkTuple
+    vkArray
       ## like java array but typed like TS, not necessarily hetero or homogenously typed
     vkReference
       ## reference (pointer) to value
@@ -44,6 +44,7 @@ type
     # bigints can be added
 
   Unique*[T] = object
+    # XXX make this more convenient and comprehensible
     id*: uint
     value*: T
 
@@ -54,6 +55,7 @@ type
   ValueObj* = object # could be cyclic
     # entire thing can be pointer tagged, but would need GC hooks
     # todo: interning for some pointer types
+    # todo: separate string (array) from mutable string (nim string)
     case kind*: ValueKind
     of vkNone: discard
     of vkInteger, vkBoolean:
@@ -66,8 +68,8 @@ type
       listValue*: ref seq[Value]
     of vkString:
       stringValue*: ref string
-    of vkTuple:
-      tupleValue*: ref SafeArray[Value]
+    of vkArray:
+      tupleValue*: ArrayRef[Value]
     of vkReference:
       referenceValue*: ref Value
     of vkUnique:
@@ -174,8 +176,8 @@ type
       # could add custom compare
 
   Stack* {.acyclic.} = ref object
-    imports*: SafeArray[Stack]
-    stack*: SafeArray[Value]
+    imports*: Array[Stack]
+    stack*: Array[Value]
 
   Function* = ref object
     stack*: Stack
@@ -218,12 +220,12 @@ type
       constantValue*: Value
     of FunctionCall:
       function*: Instruction # evaluates to Function or native function
-      arguments*: SafeArray[Instruction]
+      arguments*: Array[Instruction]
     of Dispatch:
-      dispatchFunctions*: SafeArray[(SafeArray[Type], Instruction)]
-      dispatchArguments*: SafeArray[Instruction]
+      dispatchFunctions*: Array[(Array[Type], Instruction)]
+      dispatchArguments*: Array[Instruction]
     of Sequence:
-      sequence*: SafeArray[Instruction]
+      sequence*: Array[Instruction]
     of VariableGet:
       variableGetIndex*: int
     of VariableSet:
@@ -243,9 +245,9 @@ type
     of HandleEffect:
       effectHandler*, effectEmitter*: Instruction
     of BuildTuple, BuildList, BuildSet:
-      elements*: SafeArray[Instruction]
+      elements*: Array[Instruction]
     of BuildTable:
-      entries*: SafeArray[tuple[key, value: Instruction]]
+      entries*: Array[tuple[key, value: Instruction]]
     of low(BinaryInstructionKind) .. high(BinaryInstructionKind):
       binary1*, binary2*: Instruction
 
@@ -384,7 +386,7 @@ let
 
 proc shallowRefresh*(stack: Stack): Stack =
   result = Stack(imports: stack.imports)
-  var newStack = newSafeArray[Value](stack.stack.len)
+  var newStack = newArray[Value](stack.stack.len)
   for i in 0 ..< stack.stack.len:
     newStack[i] = stack.stack[i]
   result.stack = newStack
@@ -394,6 +396,10 @@ template toRef*[T](x: T): ref T =
   new(res)
   res[] = x
   res
+
+template unref*[T](x: ref T): T = x[]
+
+template unref*[T](x: T): T = x
 
 import ../util/objects
 

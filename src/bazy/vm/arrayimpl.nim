@@ -1,5 +1,3 @@
-# XXX arrays over ref types are broken, sometimes the array pointer becomes a ref counter (as in it has a value of 1)
-
 type
   ArrayInfo[T] = ptr object
     length: int
@@ -12,13 +10,15 @@ template initarr*(arr, L, allocProc): untyped =
   arr.info = cast[typeof(arr.info)](allocProc(sizeof(arr.info.length) + L * sizeof(T)))
   arr.info.length = L
 
-proc `=destroy`*[T](arr: var Array[T]) =
-  if not arr.info.isNil:
-    let len = arr.info.length
-    for i in 0 ..< len:
-      `=destroy`((addr arr.info.data)[i])
-    dealloc(arr.info)
-    arr.info = nil
+when false:
+  # XXX very fragile, memory corruption with nesting of any kind
+  proc `=destroy`*[T](arr: var Array[T]) =
+    if not arr.info.isNil:
+      let len = arr.info.length
+      for i in 0 ..< len:
+        `=destroy`(arr.info.data[i])
+      dealloc(arr.info)
+      arr.info = nil
 
 proc `=copy`*[T](a: var Array[T], b: Array[T]) #[{.error.}]# =
   a.info = b.info
@@ -103,16 +103,29 @@ proc hash*[T](a: Array[T]): Hash =
   result = !$ result
 
 when isMainModule:
-  type Foo = ref object
-    x: int
-  proc foo(x: int): Foo = Foo(x: x)
-  proc `$`(f: Foo): string = $f.x
-  var f: Array[Array[Foo]]
-  block:
-    var a = @[foo(1), foo(2), foo(3), foo(4), foo(5)].toArray()
-    doAssert $a == "Array(1, 2, 3, 4, 5)"
-    a[2] = foo 7
-    doAssert $a == "Array(1, 2, 7, 4, 5)"
-    f = [a].toArray
-  block:
-    echo f
+  when false:
+    type Foo = ref object
+      x: int
+    proc foo(x: int): Foo = Foo(x: x)
+    proc `$`(f: Foo): string = $f.x
+    var f: Array[Array[Foo]]
+    block:
+      var a = @[foo(1), foo(2), foo(3), foo(4), foo(5)].toArray()
+      doAssert $a == "Array(1, 2, 3, 4, 5)"
+      a[2] = foo 7
+      doAssert $a == "Array(1, 2, 7, 4, 5)"
+      f = [a].toArray
+    block:
+      echo f
+  
+  type Foo = object
+    case atom: bool
+    of false:
+      node: Array[Foo]
+    of true:
+      leaf: int
+  
+  proc tree(arr: varargs[Foo]): Foo =
+    Foo(atom: false, node: toArray(@arr))
+  proc leaf(x: int): Foo = Foo(atom: true, leaf: x)
+  echo tree(leaf(1), tree(leaf(2), tree(leaf(3))))#, tree(leaf(4), tree(leaf(5))))))

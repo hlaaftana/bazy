@@ -20,14 +20,14 @@ proc refreshStack*(context: Context) =
   for im in context.imports:
     im.refreshStack()
   if context.imports.len != context.stack.imports.len:
-    var newImports = newSafeArray[Stack](context.imports.len)
+    var newImports = newArray[Stack](context.imports.len)
     for i in 0 ..< context.stack.imports.len:
       newImports[i] = context.stack.imports[i]
     for i in context.stack.imports.len ..< context.imports.len:
       newImports[i] = context.imports[i].stack
     context.stack.imports = newImports
   if context.allVariables.len != context.stack.stack.len:
-    var newStack = newSafeArray[Value](context.allVariables.len)
+    var newStack = newArray[Value](context.allVariables.len)
     for i in 0 ..< context.stack.stack.len:
       newStack[i] = context.stack.stack[i]
     context.stack.stack = newStack
@@ -49,8 +49,8 @@ proc toInstruction*(st: Statement): Instruction =
     s.toInstruction
   template map[T, U](s: (T, U)): untyped =
     (map s[0], map s[1])
-  template map(s: seq): SafeArray =
-    var arr = newSafeArray[typeof map s[0]](s.len)
+  template map(s: seq): Array =
+    var arr = newArray[typeof map s[0]](s.len)
     for i in 0 ..< arr.len:
       arr[i] = map s[i]
     arr

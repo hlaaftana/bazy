@@ -248,7 +248,7 @@ proc checkType*(value: Value, t: Type): bool =
     # XXX no information about signature
     value.kind in {vkFunction, vkNativeFunction}
   of tyTuple:
-    value.kind == vkTuple and value.tupleValue[].eachAre(t.elements[])
+    value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements[])
   of tyReference:
     value.kind == vkReference and (value.referenceValue.isNil or
       value.referenceValue[].checkType(t.elementType[]))

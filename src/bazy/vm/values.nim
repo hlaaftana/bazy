@@ -9,8 +9,8 @@ proc `$`*(value: Value): string =
   of vkFloat: $value.floatValue
   of vkList: ($value.listValue[])[1..^1]
   of vkString: value.stringValue[]
-  of vkTuple:
-    var s = ($value.tupleValue[])[1..^1]
+  of vkArray:
+    var s = ($value.tupleValue.unref)[1..^1]
     s[0] = '('
     s[^1] = ')'
     s
@@ -50,7 +50,7 @@ proc toValue*(x: float): Value = withkind(float, x)
 proc toValue*(x: bool): Value = Value(kind: vkBoolean, integerValue: int(x))
 proc toValue*(x: sink seq[Value]): Value = withkindref(list, x)
 proc toValue*(x: sink string): Value = withkindref(string, x)
-proc toValue*(x: sink SafeArray[Value]): Value = Value(kind: vkTuple, tupleValue: toRef x.toOpenArray(0, x.len - 1).toSafeArray)
+proc toValue*(x: sink Array[Value]): Value = Value(kind: vkArray, tupleValue: toArrayRef x.toOpenArray(0, x.len - 1))
 proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
 proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
@@ -73,10 +73,10 @@ proc toType*(x: Value): Type =
   of vkExpression: result = Ty(Expression)
   of vkStatement: result = Ty(Statement)
   of vkScope: result = Ty(Scope)
-  of vkTuple:
-    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.tupleValue[].len)))
-    for i in 0 ..< x.tupleValue[].len:
-      result.elements[][i] = x.tupleValue[][i].toType
+  of vkArray:
+    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.tupleValue.unref.len)))
+    for i in 0 ..< x.tupleValue.unref.len:
+      result.elements[][i] = x.tupleValue.unref[i].toType
   of vkReference:
     result = Type(kind: tyReference, elementType: toRef(x.referenceValue[].toType))
   of vkUnique:
@@ -118,7 +118,7 @@ proc fromValueObj*(v: ValueObj): PointerTaggedValue =
       of vkFloat: (v.kind.uint64 shl 48) or int32(v.floatValue).uint64
       of vkList: fromPtr list
       of vkString: fromPtr string
-      of vkTuple: cast[pointer](v.tupleValue).tagPointer(v.kind.uint16)
+      of vkArray: cast[pointer](v.tupleValue).tagPointer(v.kind.uint16)
       of vkReference: fromPtr reference
       of vkUnique: fromPtr unique
       of vkComposite: fromPtr composite
@@ -148,7 +148,7 @@ proc toValueObj*(p: PointerTaggedValue): ValueObj =
     of vkFloat: result.floatValue = (val and high(uint32).uint64).float32.float
     of vkList: castPointer list
     of vkString: castPointer string
-    of vkTuple: result.tupleValue = cast[typeof(result.tupleValue)](untagPointer(val))
+    of vkArray: result.tupleValue = cast[typeof(result.tupleValue)](untagPointer(val))
     of vkReference: castPointer reference
     of vkUnique: castPointer unique
     of vkComposite: castPointer composite

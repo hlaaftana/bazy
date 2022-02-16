@@ -1,4 +1,11 @@
-when true:
+import ../defines
+
+when useArrays:
+  import arrayimpl
+  export arrayimpl
+  type ArrayRef*[T] = Array[T]
+  template toArrayRef*(foo): ArrayRef = toArray(foo)
+else:
   template distinctSeq(name) {.dirty.} =
     type `name`*[T] = distinct seq[T]
 
@@ -28,15 +35,10 @@ when true:
       mixin `==`
       `==`(toSeq(a), toSeq(b))
 
-  distinctSeq SafeArray
-else:
-  import ../disabled/arrays
-  type SafeArray*[T] = Array[T]
+  distinctSeq Array
 
-  template newSafeArray*[T](len: int): SafeArray[T] =
-    newArray[T](len)
-
-  template toSafeArray*[T](x: openarray[T]): SafeArray[T] =
-    toArray[T](x)
-  
-  export arrays
+  type ArrayRef*[T] = ref Array[T]
+  template toArrayRef*(foo): ArrayRef =
+    var res = new(typeof(toArray(foo)))
+    res[] = toArray(foo)
+    res
