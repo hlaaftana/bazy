@@ -24,38 +24,63 @@ proc `[]=`*(ss: var ShortString, i: int, c: char) {.inline.} =
   rangeCheck i >= 0 and i < shortStringMaxSize
   set(ss, i, c)
 
-proc `[]`*(ss: ShortString, sl: Slice[int]): ShortString {.inline.} =
-  rangeCheck sl.a >= 0 and sl.a < shortStringMaxSize and sl.b >= 0 and sl.b < shortStringMaxSize
-  # use left shift overflow instead of unsigned 1 - overflow
-  ShortString((ss.uint shl (sl.a * charBits)) shr (sl.b * charBits))
-
-proc `[]=`*(ss: var ShortString, sl: Slice[int], ss2: ShortString) {.inline.} =
-  rangeCheck sl.a >= 0 and sl.a < shortStringMaxSize and sl.b >= 0 and sl.b < shortStringMaxSize
-  for i in sl:
-    ss[i] = ss2[i - sl.a]
-
 proc len*(ss: ShortString): int =
-  # unrolled loop
-  {.push rangeChecks: off.}
-  template doIndex(i: int) =
-    if get(ss, i) == char(0):
-      return i
-  doIndex 0
-  doIndex 1
-  doIndex 2
-  doIndex 3
-  doIndex 4
-  doIndex 5
-  doIndex 6
-  doIndex 7
-  return 8
-  {.pop.}
+  when false:
+    # unrolled loop
+    {.push rangeChecks: off.}
+    template doIndex(i: int) =
+      if get(ss, i) == char(0):
+        return i
+    doIndex 0
+    doIndex 1
+    doIndex 2
+    doIndex 3
+    doIndex 4
+    doIndex 5
+    doIndex 6
+    doIndex 7
+    return 8
+    {.pop.}
+  else:
+    if ss.uint <= 0xFF:
+      1
+    else:
+      when sizeof(uint) == 2:
+        2
+      else:
+        if ss.uint <= 0xFF_FF:
+          2
+        elif ss.uint <= 0xFF_FF_FF:
+          3
+        else:
+          when sizeof(uint) == 4:
+            4
+          else:
+            if ss.uint <= 0xFF_FF_FF_FF'u:
+              4
+            elif ss.uint <= 0xFF_FF_FF_FF_FF'u:
+              5
+            elif ss.uint <= 0xFF_FF_FF_FF_FF_FF'u:
+              6
+            elif ss.uint <= 0xFF_FF_FF_FF_FF_FF_FF'u:
+              7
+            else:
+              8
 
 template `[]`*(ss: ShortString, i: BackwardsIndex): char =
   ss[ss.len - i.int]
 
 template `[]=`*(ss: var ShortString, i: BackwardsIndex, c: char) =
   ss[ss.len - i.int] = c
+
+proc `[]`*(ss: ShortString, sl: Slice[int]): ShortString {.inline.} =
+  rangeCheck sl.a >= 0 and sl.a < shortStringMaxSize and sl.b >= 0 and sl.b < shortStringMaxSize
+  ShortString((ss.uint shl (sl.a * charBits)) shr ((sl.len - sl.b + sl.a - 1) * charBits))
+
+proc `[]=`*(ss: var ShortString, sl: Slice[int], ss2: ShortString) {.inline.} =
+  rangeCheck sl.a >= 0 and sl.a < shortStringMaxSize and sl.b >= 0 and sl.b < shortStringMaxSize
+  for i in sl:
+    ss[i] = ss2[i - sl.a]
 
 iterator items*(ss: ShortString): char =
   # not unrolled because nim doesnt allow return
@@ -167,7 +192,7 @@ proc toShortString*(s: openarray[char], optimized: static bool = true): ShortStr
         #ShortString(cast[ptr uint](unsafeAddr s[0])[] and
         #  # use unsigned to bypass overflow
         #  (1u shl (result.len.uint * charBits.uint + 1u) - 1u))
-        # XXX benchmark if this is faster
+        # XXX benchmark if this is faster (benchmark in general)
         let offset = shortStringMaxSize - s.len
         result = ShortString(
           (cast[ptr uint](unsafeAddr s[0])[].toLittleEndian shl

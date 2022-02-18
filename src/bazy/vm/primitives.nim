@@ -13,14 +13,14 @@ type
       ## if values use pointer packing
     vkList
       ## both seq and string are references to save memory
+    #vkShortestString
+    #  ## word size string
     vkString
       ## general byte sequence type
     vkArray
       ## like java array but typed like TS, not necessarily hetero or homogenously typed
     vkReference
       ## reference (pointer) to value
-    vkUnique
-      ## reference to value identified by its address (singleton)
     vkComposite
       ## like tuple, but fields are tied to names and unordered
       ## (really the names define the order and the names can at least be shortstrings)
@@ -43,13 +43,8 @@ type
     vkScope
     # bigints can be added
 
-  Unique*[T] = object
-    # XXX make this more convenient and comprehensible
-    id*: uint
-    value*: T
-
   RuntimePropertyObj* = object
-    properties*: HashSet[Value]
+    properties*: Properties
     value*: Value
 
   ValueObj* = object # could be cyclic
@@ -72,8 +67,6 @@ type
       tupleValue*: ArrayRef[Value]
     of vkReference:
       referenceValue*: ref Value
-    of vkUnique:
-      uniqueValue*: ref Unique[Value]
     of vkComposite:
       # supposed to be represented more efficiently
       # short string instead of string
@@ -113,10 +106,15 @@ type
   PropertyTag* = ref object
     name*: string
     argumentTypes*: seq[Type]
+    typeMatcher*: proc (t: Type, arguments: seq[Value]): TypeMatch
+    valueMatcher*: proc (v: Value, arguments: seq[Value]): bool
 
   Property* = object
     tag*: PropertyTag
     arguments*: seq[Value]
+  
+  Properties* = object
+    table*: Table[PropertyTag, seq[Value]]
 
   TypeKind* = enum
     # maybe add unknown type for values with unknown type at runtime
@@ -131,7 +129,6 @@ type
     tyTable,
     tyExpression, tyStatement, tyScope,
     tyComposite,
-    tyUnique, # erased distinct type
     tyType,
     # typeclass
     tyAny, tyNone,
@@ -144,19 +141,19 @@ type
     # (could use custom matcher instead)
   
   Type* {.acyclic.} = object # could be cyclic
-    properties*: HashSet[Value]
+    properties*: Properties
     case kind*: TypeKind
     of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
       tyString, tyExpression, tyStatement, tyScope,
       tyAny, tyNone:
       discard
     of tyFunction:
-      # XXX ideally signature is a property, it behaves exactly like it
-      arguments*: ref seq[Type]
+      # XXX (4) ideally signature is a property, it behaves exactly like it
+      arguments*: ref seq[Type] # XXX tuple type (maybe signature goes here)
       # having multiple non-ref seq fields makes the compiler abort compilation for some reason
       returnType*: ref Type
     of tyTuple:
-      # XXX (2) add varargs
+      # XXX (2) add varargs (and maybe allow names in a property to reflect regular named tuples)
       elements*: ref seq[Type]
     of tyReference, tyList, tySet:
       elementType*: ref Type
@@ -164,9 +161,6 @@ type
       keyType*, valueType*: ref Type
     of tyComposite:
       fields*: Table[string, Type]
-    of tyUnique:
-      name*: string
-      uniqueType*: ref Unique[Type]
     of tyType:
       typeValue*: ref Type
     of tyUnion, tyIntersection:
@@ -177,11 +171,24 @@ type
       baseKind*: TypeKind
     of tyWithProperty:
       typeWithProperty*: ref Type
-      withProperty*: Value
+      withProperty*: PropertyTag
     of tyCustomMatcher:
-      typeMatcher*: proc (t: Type): bool
+      typeMatcher*: proc (t: Type): TypeMatch
       valueMatcher*: proc (v: Value): bool
       # could add custom compare
+    
+  TypeMatch* = enum
+    # in order of strength
+    tmUnknown, tmNone, tmFiniteFalse, tmFalse, tmTrue, tmFiniteTrue, tmAlmostEqual, tmEqual
+
+  Variance* = enum
+    Covariant
+    Contravariant
+    Invariant
+  
+  TypeBound* = object
+    boundType*: Type
+    variance*: Variance
 
   Stack* {.acyclic.} = ref object
     imports*: Array[Stack]
@@ -203,6 +210,7 @@ type
     VariableGet
     VariableSet
     FromImportedStack
+    SetAddress
     ArmStack
     # goto
     If
@@ -216,6 +224,7 @@ type
     BuildList
     BuildSet
     BuildTable
+    BuildComposite
     # custom
     AddInt, SubInt, MulInt, DivInt
     AddFloat, SubFloat, MulFloat, DivFloat
@@ -245,6 +254,9 @@ type
     of FromImportedStack:
       importedStackIndex*: int
       importedStackInstruction*: Instruction
+    of SetAddress:
+      setAddress*: Array[int]
+      setAddressValue*: Instruction
     of ArmStack:
       armStackFunction*: Instruction
     of If:
@@ -261,6 +273,8 @@ type
       elements*: Array[Instruction]
     of BuildTable:
       entries*: Array[tuple[key, value: Instruction]]
+    of BuildComposite:
+      composite*: Array[tuple[key: string, value: Instruction]]
     of low(UnaryInstructionKind) .. high(UnaryInstructionKind):
       unary*: Instruction
     of low(BinaryInstructionKind) .. high(BinaryInstructionKind):
@@ -278,6 +292,7 @@ type
     skVariableGet
     skVariableSet
     skFromImportedStack
+    skSetAddress
     skArmStack
     # goto
     skIf
@@ -291,6 +306,7 @@ type
     skList
     skSet
     skTable
+    skComposite
     # custom instructions
     skUnaryInstruction
     skBinaryInstruction
@@ -318,6 +334,9 @@ type
     of skFromImportedStack:
       importedStackIndex*: int
       importedStackStatement*: Statement
+    of skSetAddress:
+      setAddress*: VariableAddress
+      setAddressValue*: Statement
     of skArmStack:
       armStackFunction*: Statement
     of skIf:
@@ -334,6 +353,8 @@ type
       elements*: seq[Statement]
     of skTable:
       entries*: seq[tuple[key, value: Statement]]
+    of skComposite:
+      composite*: seq[tuple[key: string, value: Statement]]
     of skUnaryInstruction:
       unaryInstructionKind*: UnaryInstructionKind
       unary*: Instruction
@@ -374,37 +395,12 @@ type
 static:
   doAssert sizeof(Value) <= 2 * sizeof(int)
 
-const
-  allTypeKinds* = {low(TypeKind)..high(TypeKind)}
-  concreteTypeKinds* = {tyNoneValue..tyType}
-  typeclassTypeKinds* = {tyAny..tyWithProperty}
-  matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
-  atomicTypes* = {tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
-    tyString, tyExpression, tyStatement, tyScope}
-
 proc get*(stack: Stack, index: int): lent Value {.inline.} =
   stack.stack[index]
 proc set*(stack: Stack, index: int, value: sink Value) {.inline.} =
   stack.stack[index] = value
 
-import macrocache
-
-proc unique*[T](x: sink T): Unique[T] {.gcsafe.} =
-  const uniqueIdCounter = CacheCounter"bazy.vm.unique"
-  when nimvm:
-    result.id = uniqueIdCounter.value.uint
-    inc uniqueIdCounter
-  else:
-    var counter {.global.}: uint = static(uniqueIdCounter.value.uint)
-    result.id = counter
-    inc counter
-  result.value = x
-
 template Ty*(name): Type = Type(kind: `ty name`)
-
-let
-  Template* = unique Value(kind: vkNone)
-  TypedTemplate* = unique Value(kind: vkNone)
 
 proc shallowRefresh*(stack: Stack): Stack =
   result = Stack(imports: stack.imports)
@@ -429,13 +425,11 @@ template mix(x) =
   mixin hash
   result = result !& hash(x)
 
-proc hash*[T](p: Unique[T]): Hash =
-  mix p.id
-  result = !$ result
-
 proc hash*(p: PropertyTag): Hash =
   mix cast[pointer](p)
   result = !$ result
+
+proc `==`*(a, b: PropertyTag): bool = same(a, b)
 
 proc hash*(v: Value): Hash {.noSideEffect.}
 proc hash*(v: Type): Hash {.noSideEffect.}
@@ -503,11 +497,6 @@ proc hash*(v: InstructionObj): Hash =
     else:
       mix f
   result = !$ result
-
-proc `==`*[T](p1, p2: Unique[T]): bool {.inline.} =
-  p1.id == p2.id
-
-defineRefEquality Unique
 
 proc `==`*(a, b: Value): bool {.noSideEffect.}
 proc `==`*(a, b: Type): bool {.noSideEffect.}

@@ -15,10 +15,11 @@ proc `$`*(value: Value): string =
     s[^1] = ')'
     s
   of vkReference: ($value.referenceValue[])
-  of vkUnique: "unique " & $value.uniqueValue[].id
   of vkComposite:
     var s = "("
     for k, v in value.compositeValue[]:
+      if s.len != len"(":
+        s.add(", ")
       s.add(k)
       s.add(": ")
       s.add($v)
@@ -54,12 +55,12 @@ proc toValue*(x: sink Array[Value]): Value = Value(kind: vkArray, tupleValue: to
 proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
 proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
+proc toValue*(x: sink Table[string, Value]): Value = withkindref(composite, x)
 proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkind(nativeFunction, x)
 proc toValue*(x: Function): Value = withkind(function, x)
 proc toValue*(x: Expression): Value = withkind(expression, x)
 proc toValue*(x: Statement): Value = withkind(statement, x)
 proc toValue*(x: Scope): Value = withkind(scope, x)
-proc toValue*(x: Unique[Value]): Value = withkindref(unique, x)
 
 proc toType*(x: Value): Type =
   case x.kind
@@ -74,24 +75,24 @@ proc toType*(x: Value): Type =
   of vkStatement: result = Ty(Statement)
   of vkScope: result = Ty(Scope)
   of vkArray:
-    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](x.tupleValue.unref.len)))
+    let val = x.tupleValue.unref
+    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](val.len)))
     for i in 0 ..< x.tupleValue.unref.len:
-      result.elements[][i] = x.tupleValue.unref[i].toType
+      result.elements[][i] = val[i].toType
   of vkReference:
     result = Type(kind: tyReference, elementType: toRef(x.referenceValue[].toType))
-  of vkUnique:
-    result = Type(kind: tyReference, elementType: toRef(x.uniqueValue.value.toType))
   of vkComposite:
-    result = Type(kind: tyComposite, fields: initTable[string, Type](x.compositeValue[].len))
-    for k, v in x.compositeValue[]:
+    let val = x.compositeValue[]
+    result = Type(kind: tyComposite, fields: initTable[string, Type](val.len))
+    for k, v in val:
       result.fields[k] = v.toType
   of vkPropertyReference:
     result = toType(x.propertyRefValue.value)
-    result.properties.incl(x.propertyRefValue.properties)
+    result.properties = x.propertyRefValue.properties
   of vkType:
     result = Type(kind: tyType, typeValue: x.typeValue)
   of vkFunction, vkNativeFunction:
-    result = Ty(Function) # XXX no signature
+    result = Ty(Function) # XXX (4) no signature
   of vkEffect:
     result = x.effectValue[].toType # XXX do what here
   of vkSet:
@@ -109,7 +110,7 @@ proc toType*(x: Value): Type =
 proc copy*(value: Value): Value =
   case value.kind
   of vkNone, vkInteger, vkBoolean, vkUnsigned, vkFloat,
-    vkReference, vkUnique, vkType, vkFunction, vkNativeFunction: value
+    vkReference, vkType, vkFunction, vkNativeFunction: value
   of vkList:
     var newSeq = newSeq[Value](value.listValue[].len)
     for i in 0 ..< newSeq.len:
@@ -145,7 +146,6 @@ proc fromValueObj*(v: ValueObj): PointerTaggedValue =
       of vkString: fromPtr string
       of vkArray: cast[pointer](v.tupleValue).tagPointer(v.kind.uint16)
       of vkReference: fromPtr reference
-      of vkUnique: fromPtr unique
       of vkComposite: fromPtr composite
       of vkPropertyReference: fromPtr propertyRef
       of vkType: fromPtr type
@@ -175,7 +175,6 @@ proc toValueObj*(p: PointerTaggedValue): ValueObj =
     of vkString: castPointer string
     of vkArray: result.tupleValue = cast[typeof(result.tupleValue)](untagPointer(val))
     of vkReference: castPointer reference
-    of vkUnique: castPointer unique
     of vkComposite: castPointer composite
     of vkPropertyReference: castPointer propertyRef
     of vkType: castPointer type

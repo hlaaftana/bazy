@@ -69,6 +69,14 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     stack.set(ins.variableSetIndex, result)
   of FromImportedStack:
     result = run(ins.importedStackInstruction, stack.imports[ins.importedStackIndex])
+  of SetAddress:
+    result = run ins.setAddressValue
+    var s = stack
+    var i = ins.setAddress.len
+    while i > 1:
+      dec i
+      s = s.imports[ins.setAddress[i]]
+    s.set(ins.setAddress[0], result)
   of ArmStack:
     result = run ins.armStackFunction
     result.functionValue.stack.imports[0] = stack
@@ -134,6 +142,11 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     var arr = initTable[Value, Value](ins.entries.len)
     for k, v in ins.entries.items:
       arr[run k] = run v
+    result = toValue(arr)
+  of BuildComposite:
+    var arr = initTable[string, Value](ins.composite.len)
+    for k, v in ins.composite.items:
+      arr[k] = run v
     result = toValue(arr)
   of AddInt:
     let a = run ins.binary1

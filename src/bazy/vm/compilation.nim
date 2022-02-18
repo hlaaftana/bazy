@@ -97,6 +97,10 @@ proc toInstruction*(st: Statement): Instruction =
     Instruction(kind: FromImportedStack,
       importedStackIndex: st.importedStackIndex,
       importedStackInstruction: map st.importedStackStatement)
+  of skSetAddress:
+    Instruction(kind: SetAddress,
+      setAddress: map st.setAddress.indices,
+      setAddressValue: map st.setAddressValue)
   of skArmStack:
     Instruction(kind: ArmStack, armStackFunction: map st.armStackFunction)
   of skIf:
@@ -121,6 +125,8 @@ proc toInstruction*(st: Statement): Instruction =
     Instruction(kind: BuildSet, elements: map st.elements)
   of skTable:
     Instruction(kind: BuildTable, entries: map st.entries)
+  of skComposite:
+    Instruction(kind: BuildComposite, composite: map st.composite)
   of skUnaryInstruction:
     Instruction(kind: st.unaryInstructionKind, unary: map st.unary)
   of skBinaryInstruction:
@@ -201,15 +207,10 @@ proc variableGet*(r: VariableReference): Statement =
 
 proc variableSet*(r: VariableReference, value: Statement): Statement =
   let t = r.variable.cachedType
-  result = Statement(kind: skVariableSet,
-    variableSetIndex: r.address.indices[0],
-    variableSetValue: value,
+  result = Statement(kind: skSetAddress,
+    setAddress: r.address,
+    setAddressValue: value,
     cachedType: t)
-  for i in 1 ..< r.address.indices.len:
-    result = Statement(kind: skFromImportedStack,
-      importedStackIndex: r.address.indices[i],
-      importedStackStatement: result,
-      cachedType: t)
 
 template constant*(value: Value, ty: Type): Statement =
   Statement(kind: skConstant, constant: value, cachedType: ty)
@@ -228,6 +229,8 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
     compile(scope, ex, bound)
   template forward(ex: Expression): Statement =
     compile(scope, ex, bound)
+  proc isSingleColon(e: Expression): bool =
+    e.kind == Symbol and e.symbol == short":"
   case ex.kind
   of None: result = Statement(kind: skNone, cachedType: Ty(None))
   of Number:
@@ -250,18 +253,8 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
     result = constant(ex.str)
   of Wrapped:
     result = forward(ex.wrapped)
-  of Name:
-    let overloads = overloads(scope, ex.identifier, bound)
-    if overloads.len == 0:
-      raise (ref NoOverloadFoundError)(
-        expression: ex,
-        bound: bound,
-        scope: scope,
-        msg: "no overloads with bound " & $bound & " for " & $ex)
-    # XXX warn on ambiguity, thankfully recency is accounted for
-    result = variableGet(overloads[0])
-  of Symbol:
-    let overloads = overloads(scope, $ex.symbol, bound)
+  of Name, Symbol:
+    let overloads = overloads(scope, if ex.kind == Symbol: $ex.symbol else: ex.identifier, bound)
     if overloads.len == 0:
       raise (ref NoOverloadFoundError)(
         expression: ex,
@@ -297,21 +290,21 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
         Expression(kind: PathCall,
           address: Expression(kind: Name, identifier: "."),
           arguments: @[ex.left, ex.right]))
-  of OpenCall, Infix, Prefix, Postfix, PathCall, PathInfix, PathPrefix, PathPostfix:
+  of CallKinds:
     # move this out to a proc
-    # XXX (1) expanded templates with partial typing and mixed expressions/statements, probably with some kind of signature property
-    # XXX named arguments with said signature property
+    # XXX (1) expanded templates with partial typing and mixed expressions/statements with Meta signature property
     # XXX (3) pass type bound as well as scope, to pass both to a compile proc
+    # XXX (4) named arguments with signature property
     # template: (scope, expressions -> statement)
     if ex.address.isIdentifier(name):
       var argTypes = toRef(newSeq[Type](ex.arguments.len + 1))
       argTypes[][0] = Ty(Scope)
       for i in 0 ..< ex.arguments.len:
         argTypes[][i + 1] = Ty(Expression)
-      let templateFunctionType = Type(kind: tyFunction,
+      let templateType = Type(kind: tyFunction,
         returnType: toRef(Ty(Statement)),
-        arguments: argTypes)
-      let templateType = Type(kind: tyWithProperty, typeWithProperty: toRef(templateFunctionType), withProperty: toValue(Template))
+        arguments: argTypes,
+        properties: properties(Template))
       let overloads = overloads(scope, name, +templateType)
       if overloads.len != 0:
         let templ = overloads[0]
@@ -329,10 +322,10 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       argTypes[][0] = Ty(Scope)
       for i in 0 ..< ex.arguments.len:
         argTypes[][i + 1] = Ty(Statement)
-      let typedTemplateFunctionType = Type(kind: tyFunction,
+      let typedTemplateType = Type(kind: tyFunction,
         returnType: toRef(Ty(Statement)),
-        arguments: argTypes)
-      let typedTemplateType = Type(kind: tyWithProperty, typeWithProperty: toRef(typedTemplateFunctionType), withProperty: toValue(TypedTemplate))
+        arguments: argTypes,
+        properties: properties(TypedTemplate))
       let overloads = overloads(scope, name, +typedTemplateType)
       if overloads.len != 0:
         let templ = overloads[0]
@@ -377,7 +370,6 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
               bound.boundType)
           let subs = overloads(scope, name, +functionType)
           if subs.len != 0:
-            #echo "dispatching: ", subs, " against: ", functionType
             var dispatchees = newSeq[(seq[Type], Statement)](subs.len)
             for i, d in dispatchees.mpairs:
               let t = subs[i].variable.cachedType
@@ -386,7 +378,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
                 let pt = t.paramType(i)
                 if matchBound(-argumentTypes[i], pt):
                   d[0][i] = Ty(Any) # optimize checking types we know match
-                  # XXX do this recursively
+                  # XXX do this recursively?
                 else:
                   d[0][i] = pt
               d[1] = variableGet(subs[i])
@@ -430,18 +422,36 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   of Colon:
     assert false, "cannot compile lone colon expression"
   of Comma, Tuple:
-    # XXX composites
-    if bound.boundType.kind == tyTuple:
-      assert bound.boundType.elements[].len == ex.elements.len, "tuple bound type lengths do not match"
-    result = Statement(kind: skTuple, cachedType:
-      Type(kind: tyTuple, elements: toRef(newSeqOfCap[Type](ex.elements.len))))
-    for i, e in ex.elements:
-      let element = if bound.boundType.kind == tyTuple:
-        map(e, bound.boundType.elements[][i] * bound.variance)
-      else:
-        map e
-      result.elements.add(element)
-      result.cachedType.elements[].add(element.cachedType)
+    if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
+      ex.elements[0].isSingleColon):
+      if bound.boundType.kind == tyComposite:
+        assert bound.boundType.fields.len == ex.elements.len, "tuple bound type lengths do not match"
+      result = Statement(kind: skComposite, cachedType:
+        Type(kind: tyComposite, fields: initTable[string, Type](ex.elements.len)))
+      for e in ex.elements:
+        if e.isSingleColon: continue
+        assert e.kind == Colon, "composite literal must only have colon expressions"
+        assert e.left.kind == Name, "composite literal has non-name left hand side on colon expression"
+        let k = e.left.identifier
+        let bv = if bound.boundType.kind == tyComposite and k in bound.boundType.fields:
+          bound.boundType.fields[k] * bound.variance
+        else:
+          defaultBound
+        let v = map(e.right, bv)
+        result.composite.add((key: k, value: v))
+        result.cachedType.fields[k] = v.cachedType
+    else:
+      if bound.boundType.kind == tyTuple:
+        assert bound.boundType.elements[].len == ex.elements.len, "tuple bound type lengths do not match"
+      result = Statement(kind: skTuple, cachedType:
+        Type(kind: tyTuple, elements: toRef(newSeqOfCap[Type](ex.elements.len))))
+      for i, e in ex.elements:
+        let element = if bound.boundType.kind == tyTuple:
+          map(e, bound.boundType.elements[][i] * bound.variance)
+        else:
+          map e
+        result.elements.add(element)
+        result.cachedType.elements[].add(element.cachedType)
   of ExpressionKind.Array:
     result = Statement(kind: skList, cachedType: Ty(List))
     var boundSet = bound.boundType.kind == tyList 
@@ -459,12 +469,10 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
         b = +element.cachedType
         boundSet = true
   of Set:
-    proc isSingleColon(e: Expression): bool =
-      e.kind == Symbol and e.symbol == short":"
     if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
       ex.elements[0].isSingleColon):
       result = Statement(kind: skTable, cachedType: Ty(Table))
-      var boundSet = bound.boundType.kind == tyList 
+      var boundSet = bound.boundType.kind == tyTable
       var (bk, bv) =
         if boundSet:
           (bound.boundType.keyType[] * bound.variance,

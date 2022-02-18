@@ -1,7 +1,6 @@
 import number, shortstring, ../defines
 
 type
-  # TODO: add shortword/shortsymbol tokens with shortstrings for faster operator/keyword handling
   TokenKind* = enum
     tkNone, tkWhitespace, tkIndent, tkIndentBack, tkNewLine
     tkBackslash, tkDot, tkComma, tkColon, tkSemicolon

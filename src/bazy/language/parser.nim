@@ -265,7 +265,7 @@ proc recordSingle*(parser: var Parser, info: TokenInfo): Expression =
       else:
         result = (case ex.kind
         of Tuple:
-          if result.kind == Dot:
+          if result.kind == Dot and not lastDot:
             Expression(kind: PathCall, address: result.right, arguments: @[result.left] & ex.elements)
           else:
             Expression(kind: PathCall, address: result, arguments: ex.elements)

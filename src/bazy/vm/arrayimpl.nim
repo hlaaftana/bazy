@@ -27,7 +27,7 @@ when arraysEmbedLength:
   template length(arr: Array): untyped = arr.info.length
 
 when arraysEmbedLength:
-  # XXX very fragile, memory corruption with nesting of any kind
+  # very fragile, memory corruption with nesting of any kind
   when false:
     proc `=destroy`*[T](arr: var Array[T]) =
       if not arr.info.isNil:

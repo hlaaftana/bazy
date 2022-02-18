@@ -22,8 +22,6 @@ test "compile success":
   failing "1 + 1.0"
 
 test "eval values":
-  check toValue(Template) == toValue(Template)
-
   let tests = {
     "a = \"abcd\"; a": toValue("abcd"), # breaks arc
     # gc bugs:
@@ -77,6 +75,41 @@ fibo(i: Int): Int =
 
 [fibo(3), fibo(4), fibo(5)]""": toValue(@[toValue(2), toValue(3), toValue(5)]),
     "a = 1; foo() = (b = 2; bar() = (c = 3; (a, b, c)); bar()); foo()": toValue(toArray([toValue(1), toValue(2), toValue(3)])),
+    """
+foo() =
+  x = 1
+  (getter: (() => x),
+  setter: ((y: Int) => x = y)) 
+a = foo()
+_ = a.setter.(3)
+a.getter.()""": toValue(3),
+    """
+foo() =
+  x = 1
+  (getter: (() => x),
+  setter: ((y: Int,) => x := y)) 
+a = foo()
+_ = a.setter.(3)
+_ = a.getter.()""": toValue(1),
+    """
+foo() =
+  x = 1
+  (getter: (
+    () => x),
+  setter: (
+    (y: Int) => x = y)) 
+static a = foo()
+_ = a.setter.(3)
+a.getter.()""": toValue(3),
+    """
+foo() =
+  x = 1
+  (getter: (() => x),
+  setter: ((y: Int) => x = y)) 
+static
+  a = foo()
+  _ = a.setter.(3)
+a.getter.()""": toValue(3),
   }
   
   for inp, outp in tests.items:

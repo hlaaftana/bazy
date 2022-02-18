@@ -1,4 +1,4 @@
-import ".."/[primitives, compilation, types, values], ../../language/expressions, std/[sets]
+import ".."/[primitives, compilation, types], ../../language/expressions, std/[tables]
 
 proc define*(scope: Scope, n: string, typ: Type): Variable =
   result = Variable(name: n, cachedType: typ)
@@ -26,11 +26,11 @@ proc templType*(arity: int): Type {.inline.} =
   for i in 0 ..< arity:
     args[i + 1] = Ty(Expression)
   result = funcType(Ty(Statement), args)
-  result.properties.incl(toValue(Template))
+  result.properties = properties(Template)
 
 template templ*(body): untyped =
   (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
-    let scope {.inject.} = valueArgs[0].scopeValue
+    let scope {.inject, used.} = valueArgs[0].scopeValue
     var args {.inject.} = newSeq[Expression](valueArgs.len - 1)
     for i in 0 ..< args.len:
       args[i] = valueArgs[i + 1].expressionValue
@@ -42,11 +42,11 @@ proc typedTemplType*(arity: int): Type {.inline.} =
   for i in 0 ..< arity:
     args[i + 1] = Ty(Statement)
   result = funcType(Ty(Statement), args)
-  result.properties.incl(toValue(TypedTemplate))
+  result.properties = properties(TypedTemplate)
 
 template typedTempl*(body): untyped =
   (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
-    let scope {.inject.} = valueArgs[0].scopeValue
+    let scope {.inject, used.} = valueArgs[0].scopeValue
     var args {.inject.} = newSeq[Statement](valueArgs.len - 1)
     for i in 0 ..< args.len:
       args[i] = valueArgs[i + 1].statementValue

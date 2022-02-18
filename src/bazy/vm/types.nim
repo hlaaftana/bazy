@@ -1,5 +1,59 @@
 import "."/[primitives, values], std/[tables, sets]
 
+proc hasTag*(properties: Properties, property: PropertyTag): bool {.inline.} =
+  properties.table.hasKey(property)
+
+proc getArguments*(properties: Properties, property: PropertyTag): seq[Value] {.inline.} =
+  properties.table[property]
+
+iterator items*(properties: Properties): Property =
+  for p, args in properties.table:
+    yield Property(tag: p, arguments: args)
+
+proc property*(tag: PropertyTag, args: varargs[Value]): Property {.inline.} =
+  assert tag.argumentTypes.len == args.len, "argument length has to match"
+  Property(tag: tag, arguments: @args)
+
+proc property*(prop: Property): Property {.inline.} = prop
+
+proc properties*(ps: varargs[Property, property]): Properties =
+  result.table = initTable[PropertyTag, seq[Value]](ps.len)
+  for p in ps:
+    result.table[p.tag] = p.arguments
+
+{.pragma: single, global.} # can change to threadvar
+proc templateProperty: PropertyTag =
+  var prop {.single.}: PropertyTag
+  if prop.isNil:
+    prop = PropertyTag(name: "Template", argumentTypes: @[],
+      typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
+        if t.properties.hasTag(prop): tmEqual else: tmAlmostEqual)
+  result = prop
+
+proc typedTemplateProperty: PropertyTag =
+  var prop {.single.}: PropertyTag
+  if prop.isNil:
+    prop = PropertyTag(name: "TypedTemplate", argumentTypes: @[],
+      typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
+        if t.properties.hasTag(prop): tmEqual else: tmAlmostEqual)
+  result = prop
+
+template Template*: PropertyTag = templateProperty()
+template TypedTemplate*: PropertyTag = typedTemplateProperty()
+
+proc `$`*(p: PropertyTag): string =
+  p.name
+
+proc `$`*(p: Property): string =
+  result = $p.tag
+  if p.arguments.len != 0:
+    result.add('(')
+    for i, a in p.arguments:
+      if i != 0:
+        result.add(", ")
+      result.add($a)
+    result.add(')')
+
 proc `$`*(t: Type): string =
   proc `$`(s: seq[Type]): string =
     for t in s:
@@ -26,7 +80,6 @@ proc `$`*(t: Type): string =
   of tySet: "Set " & $t.elementType[]
   of tyTable: "Table(" & $t.keyType[] & ", " & $t.valueType[] & ")"
   of tyComposite: "Composite" & $t.fields
-  of tyUnique: "Unique " & t.name & " " & $t.uniqueType.value
   of tyType: "Type " & $t.typeValue[]
   of tyUnion: "Union(" & $t.operands[] & ")"
   of tyIntersection: "Intersection(" & $t.operands[] & ")"
@@ -34,26 +87,11 @@ proc `$`*(t: Type): string =
   of tyBaseType: "BaseType " & $t.baseKind
   of tyWithProperty: "WithProperty(" & $t.typeWithProperty[] & ", " & $t.withProperty & ")"
   of tyCustomMatcher: "Custom"
-  if t.properties.card != 0:
-    result.add(" " & $t.properties)
-
-proc paramType*(t: Type, i: int): Type =
-  assert t.kind == tyFunction
-  t.arguments[i]
-
-type
-  TypeMatch* = enum
-    # in order of strength
-    tmUnknown, tmNone, tmFiniteFalse, tmFalse, tmTrue, tmFiniteTrue, tmAlmostEqual, tmEqual
-
-  Variance* = enum
-    Covariant
-    Contravariant
-    Invariant
-  
-  TypeBound* = object
-    boundType*: Type
-    variance*: Variance
+  if t.properties.table.len != 0:
+    result.add(" {") 
+    for tag, args in t.properties.table:
+      result.add($Property(tag: tag, arguments: args))
+    result.add('}')
 
 proc `$`*(tb: TypeBound): string =
   (case tb.variance
@@ -62,8 +100,18 @@ proc `$`*(tb: TypeBound): string =
   of Invariant: '~') & $tb.boundType
 
 const
+  allTypeKinds* = {low(TypeKind)..high(TypeKind)}
+  concreteTypeKinds* = {tyNoneValue..tyType}
+  typeclassTypeKinds* = {tyAny..tyWithProperty}
+  matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
+  atomicTypes* = {tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
+    tyString, tyExpression, tyStatement, tyScope}
   highestNonMatching* = tmFalse
   lowestMatching* = tmTrue
+
+proc paramType*(t: Type, i: int): Type =
+  assert t.kind == tyFunction
+  t.arguments[i]
 
 proc matches*(tm: TypeMatch): bool {.inline.} =
   tm >= lowestMatching
@@ -80,7 +128,7 @@ proc `+`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Cov
 proc `-`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Contravariant)
 proc `*`*(t: Type, variance: Variance): TypeBound {.inline.} = TypeBound(boundType: t, variance: variance)
 
-proc `-`*(tm: TypeMatch): TypeMatch =
+proc converse*(tm: TypeMatch): TypeMatch =
   case tm
   of tmEqual, tmNone, tmAlmostEqual, tmUnknown: tm
   of tmTrue: tmFalse
@@ -95,11 +143,11 @@ proc match*(b: TypeBound, t: Type): TypeMatch =
   of Covariant:
     result = b.boundType.match(t)
     if result == tmUnknown:
-      result = -t.match(b.boundType)
+      result = converse t.match(b.boundType)
   of Contravariant:
     result = t.match(b.boundType)
     if result == tmUnknown:
-      result = -b.boundType.match(t)
+      result = converse b.boundType.match(t)
   of Invariant:
     result = b.boundType.match(t)
     if result == tmUnknown:
@@ -155,8 +203,6 @@ proc match*(matcher, t: Type): TypeMatch =
           if m <= tmNone: return m
           elif m < result: result = m
       tableMatch(matcher.fields, t.fields)
-    of tyUnique:
-      tmNone
     of tyType:
       match(+matcher.typeValue[], t.typeValue[])
     of allTypeKinds - concreteTypeKinds: tmUnknown # unreachable
@@ -185,12 +231,20 @@ proc match*(matcher, t: Type): TypeMatch =
   of tyBaseType:
     boolMatch t.kind == matcher.baseKind
   of tyCustomMatcher:
-    boolMatch matcher.typeMatcher(t)
+    if matcher.typeMatcher.isNil:
+      tmNone
+    else:
+      matcher.typeMatcher(t)
   of tyWithProperty:
     min(
-      if matcher.withProperty notin t.properties: tmFiniteFalse else: tmAlmostEqual,
+      if not t.properties.hasTag(matcher.withProperty): tmFiniteFalse else: tmAlmostEqual,
       match(+matcher.typeWithProperty[], t))
   result = min(result, tmAlmostEqual)
+  if result.matches:
+    for p, args in matcher.properties.table:
+      if not p.typeMatcher.isNil:
+        result = min(result, p.typeMatcher(t, args))
+        if result <= tmNone: return result
 
 proc compare*(m1, m2: TypeMatch): int {.inline.} =
   ord(m1) - ord(m2)
@@ -251,14 +305,14 @@ proc checkType*(value: Value, t: Type): bool =
       if not checkType(key, kt) or not checkType(value, vt):
         yes = false; break
     yes
-  case t.kind
+  result = case t.kind
   of tyNoneValue: value.kind == vkNone
   of tyInteger: value.kind == vkInteger
   of tyUnsigned: value.kind == vkUnsigned
   of tyFloat: value.kind == vkFloat
   of tyBoolean: value.kind == vkBoolean
   of tyFunction:
-    # XXX no information about signature
+    # XXX (4) no information about signature
     value.kind in {vkFunction, vkNativeFunction}
   of tyTuple:
     value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements[])
@@ -277,7 +331,6 @@ proc checkType*(value: Value, t: Type): bool =
   of tyScope: value.kind == vkScope
   of tyComposite:
     value.kind == vkComposite and value.compositeValue[].eachAreTable(t.fields)
-  of tyUnique: true
   of tyType: value.kind == vkType and t.typeValue[].match(value.typeValue[]).matches
   of tyAny: true
   of tyNone: false
@@ -298,5 +351,10 @@ proc checkType*(value: Value, t: Type): bool =
   of tyNot: not value.checkType(t.notType[])
   of tyBaseType: value.toType.kind == t.baseKind # XXX toType here is expensive
   of tyWithProperty:
-    value.checkType(t.typeWithProperty[]) and t.withProperty in value.toType.properties
-  of tyCustomMatcher: t.valueMatcher(value)
+    value.checkType(t.typeWithProperty[]) and value.toType.properties.hasTag(t.withProperty)
+  of tyCustomMatcher: not t.valueMatcher.isNil and t.valueMatcher(value)
+  if result:
+    for p, args in t.properties.table:
+      if not p.valueMatcher.isNil:
+        result = result and p.valueMatcher(value, args)
+        if not result: return result

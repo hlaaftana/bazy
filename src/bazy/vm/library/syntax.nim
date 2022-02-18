@@ -6,6 +6,9 @@ module syntax:
   templ "block", 2:
     let sc = scope.childScope()
     result = toValue sc.compile(args[0], +Ty(Any))
+  templ "static", 1:
+    let st = scope.compile(args[0], +Ty(Any))
+    result = toValue constant(scope.context.evaluateStatic(st.toInstruction), st.cachedType)
   proc makeFn(scope: Scope, arguments: seq[Expression], body: Expression,
     name: string, returnBound: TypeBound, returnBoundSet: bool): Statement =
     let context = scope.context.childContext()
@@ -35,7 +38,7 @@ module syntax:
     result = Statement(kind: skArmStack,
       cachedType: fnType,
       armStackFunction: constant(fun, fnType))
-  templ "fn", 2:
+  templ "=>", 2:
     var lhs = args[0]
     var body = args[1]
     let (bound, typeSet) =
@@ -45,16 +48,15 @@ module syntax:
         (+t, true)
       else:
         (+Ty(Any), false)
-    var arguments: seq[Expression]
-    let name =
+    let (name, arguments) =
       if lhs.kind in CallKinds:
-        arguments = lhs.arguments
-        $lhs.address
+        ($lhs.address, lhs.arguments)
+      elif lhs.kind == Wrapped:
+        ("", @[lhs.wrapped])
       else:
-        arguments = lhs.elements
-        ""
+        ("", lhs.elements)
     result = toValue makeFn(scope, arguments, body, name, bound, typeSet)
-  templ "=", 2:
+  templ ":=", 2:
     var lhs = args[0]
     let rhs = args[1]
     let (bound, typeSet) =
@@ -73,23 +75,30 @@ module syntax:
     of CallKinds:
       result = toValue makeFn(scope, lhs.arguments, rhs, $lhs.address, bound, typeSet)
     else: assert false, $lhs
-  when false:
-    templ ":=", 2:
-      # todo unfinished
-      var lhs = args[0]
-      let rhs = args[1]
-      case lhs.kind
-      of Name, Symbol:
-        let name = $lhs
-        if (let a = scope.overloads(name, +Ty(Any)); a.len != 0):
-          let v = a[0]
-          let value = compile(scope, rhs, +v.variable.cachedType)
-          result = toValue variableSet(v, value)
-        else:
-          let value = compile(scope, rhs, +Ty(Any))
-          let v = scope.define(name, value.cachedType)
-          result = toValue variableSet(v.shallowReference, value)
-      else: assert false, $lhs
+  templ "=", 2:
+    var lhs = args[0]
+    let rhs = args[1]
+    let (bound, typeSet) =
+      if lhs.kind == Colon:
+        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: toRef(Ty(Any)))).typeValue[]
+        lhs = lhs.left
+        (+t, true)
+      else:
+        (+Ty(Any), false)
+    case lhs.kind
+    of Name, Symbol:
+      let name = $lhs
+      if (let a = scope.overloads(name, bound); a.len != 0):
+        let v = a[0]
+        let value = compile(scope, rhs, +v.variable.cachedType)
+        result = toValue variableSet(v, value)
+      else:
+        let value = compile(scope, rhs, bound)
+        let v = scope.define(name, value.cachedType)
+        result = toValue variableSet(v.shallowReference, value)
+    of CallKinds:
+      result = toValue makeFn(scope, lhs.arguments, rhs, $lhs.address, bound, typeSet)
+    else: assert false, $lhs
   templ "if", 2:
     let sc = scope.childScope()
     result = toValue Statement(kind: skIf,
@@ -113,7 +122,7 @@ module syntax:
     result = toValue Statement(kind: skWhile,
       whileCond: sc.compile(args[0], +Ty(Boolean)),
       whileBody: sc.compile(args[1], -Type(kind: tyUnion, operands: toRef(seq[Type] @[]))))
-  when false:
+  when false: # this has to be a typed template
     fn ".[]", [Type(kind: tyBaseType, baseKind: tyTuple), Ty(Integer)], Ty(Any):
       args[0].tupleValue.unref[args[1].integerValue]
-  # todo: static, let/for
+  # todo: let/for

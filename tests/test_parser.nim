@@ -108,16 +108,16 @@ d""": """(
     """if a, b,
 else: (do
   c
-  d)""": """if(a, b, (else: ((
+  d)""": """if(a, b, else: ((
   c;
   d
-))))""",
+)))""",
     "permutation(n: Int, r: Int) = product n - r + 1 .. n":
       # command syntax with infixes
-      "(permutation((n: Int), (r: Int)) = product((((n - r) + 1) .. n)))",
+      "(permutation(n: Int, r: Int) = product((((n - r) + 1) .. n)))",
     "factorial(n: Int) = permutation n, n":
       # consequence
-      "((factorial((n: Int)) = permutation(n)), n)",
+      "((factorial(n: Int) = permutation(n)), n)",
     "a =\n  b": "(a = b)", # postfix expansion
     "\\(foo a, b)": "foo(a, b)",
     """
@@ -131,9 +131,9 @@ if (a
       c)
   c
 """: "if((a(b(c))), c)",
-    "a: b = c": "((a: b) = c)",
-    "a(b): c = d": "((a(b): c) = d)",
-    "a(b): c =\n  d": "((a(b): c) = d)",
+    "a: b = c": "(a: b = c)",
+    "a(b): c = d": "(a(b): c = d)",
+    "a(b): c =\n  d": "(a(b): c = d)",
     """
 if a
   if b
@@ -142,7 +142,7 @@ if a
     d
 else do
   e
-""": "if(a, if(b, c, (else: d)), (else: e))",
+""": "if(a, if(b, c, else: d), else: e)",
     """
 if a
   if b
@@ -152,10 +152,10 @@ if a
     e
 else do
   f
-""": """if(a, if(b, c, (else: (
+""": """if(a, if(b, c, else: (
   d;
   e
-))), (else: f))""",
+)), else: f)""",
     """
 if a
   if b
@@ -164,7 +164,7 @@ if a
     d
 else
   e
-""": "if(a, if(b, c, (else: d)), (else: e))",
+""": "if(a, if(b, c, else: d), else: e)",
     """
 if a
   if b
@@ -182,7 +182,7 @@ if a
     d
 \else:
   e
-""": "if(a, if(b, c, (else: d)), (else: e))",
+""": "if(a, if(b, c, else: d), else: e)",
     """
 if a
   if b
@@ -192,10 +192,10 @@ if a
     e
 else
   f
-""": """if(a, if(b, c, (else: (
+""": """if(a, if(b, c, else: (
   d;
   e
-))), (else: f))""",
+)), else: f)""",
     "foo(a \"a\" \"abcd\")": "foo(a(\"a\"(\"abcd\")))",
   }
 

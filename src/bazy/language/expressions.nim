@@ -144,7 +144,7 @@ proc `$`*(ex: Expression): string =
   of Subscript: $ex.address & "[" & ex.arguments.join(", ") & "]"
   of CurlySubscript: $ex.address & "{" & ex.arguments.join(", ") & "}"
   of Dot: $ex.left & "." & $ex.right
-  of Colon: "(" & $ex.left & ": " & $ex.right & ")"
+  of Colon: $ex.left & ": " & $ex.right
   of Comma, Tuple: "(" & ex.elements.join(", ") & ")"
   of Array: "[" & ex.elements.join(", ") & "]"
   of Set: "{" & ex.elements.join(", ") & "}"
@@ -291,9 +291,7 @@ proc binary*(ex: Expression): string =
     result.add(char s.len and 0xFF)
     result.add(s)
   of Symbol:
-    # TODO make this single int
     let s = $ex.symbol
-    result.add(char (s.len shr 8) and 0xFF)
     result.add(char s.len and 0xFF)
     result.add(s)
   of Wrapped:
