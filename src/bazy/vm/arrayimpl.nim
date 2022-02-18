@@ -1,57 +1,114 @@
-type
-  ArrayInfo[T] = ptr object
-    length: int
-    data: UncheckedArray[T]
-  
-  Array*[T] = object
-    info: ArrayInfo[T]
+import ../defines
+
+when arraysEmbedLength:
+  type
+    ArrayInfo[T] = ptr object
+      length: int
+      data: UncheckedArray[T]
+    
+    Array*[T] = object
+      info: ArrayInfo[T]
+else:
+  type
+    Array*[T] = object
+      length: int
+      data: ptr UncheckedArray[T]
 
 template initarr*(arr, L, allocProc): untyped =
-  arr.info = cast[typeof(arr.info)](allocProc(sizeof(arr.info.length) + L * sizeof(T)))
-  arr.info.length = L
+  when arraysEmbedLength:
+    arr.info = cast[typeof(arr.info)](allocProc(sizeof(arr.info.length) + L * sizeof(T)))
+    arr.info.length = L
+  else:
+    arr.length = L
+    arr.data = cast[typeof(arr.data)](allocProc(L * sizeof(T)))
 
-when false:
+when arraysEmbedLength:
+  template data(arr: Array): untyped = arr.info.data
+  template length(arr: Array): untyped = arr.info.length
+
+when arraysEmbedLength:
   # XXX very fragile, memory corruption with nesting of any kind
-  proc `=destroy`*[T](arr: var Array[T]) =
-    if not arr.info.isNil:
-      let len = arr.info.length
-      for i in 0 ..< len:
-        `=destroy`(arr.info.data[i])
-      dealloc(arr.info)
-      arr.info = nil
+  when false:
+    proc `=destroy`*[T](arr: var Array[T]) =
+      if not arr.info.isNil:
+        let len = arr.info.length
+        for i in 0 ..< len:
+          when compiles(GC_unref(arr.info.data[i])):
+            GC_unref(arr.info.data[i])
+          else:
+            `=destroy`(arr.info.data[i])
+        dealloc(arr.info)
+        arr.info = nil
 
-proc `=copy`*[T](a: var Array[T], b: Array[T]) #[{.error.}]# =
-  a.info = b.info
+    proc `=copy`*[T](a: var Array[T], b: Array[T]) =
+      if not b.info.isNil:
+        let L = b.info.length
+        a.info = cast[typeof(a.info)](alloc(sizeof(a.info.length) + L * sizeof(T)))
+        a.info.length = L
+        for i in 0 ..< L:
+          `=copy`(a.info.data[i], b.info.data[i])
+          when compiles(GC_ref(a.info.data[i])):
+            GC_ref(a.info.data[i])
 
-proc `=trace`[T](arr: var Array[T]; env: pointer) =
-  if arr.info != nil:
-    for i in 0 ..< arr.info.length:
-      `=trace`(arr.info.data[i], env)
+  proc `=trace`*[T](arr: var Array[T]; env: pointer) =
+    if arr.info != nil:
+      for i in 0 ..< arr.info.length:
+        `=trace`(arr.info.data[i], env)
+else:
+  when false:
+    proc `=destroy`*[T](arr: var Array[T]) =
+      if not arr.data.isNil:
+        for i in 0 ..< arr.length:
+          when compiles(GC_unref(arr.data[i])):
+            GC_unref(arr.data[i])
+          else:
+            `=destroy`(arr.data[i])
+        dealloc(arr.data)
+        arr.data = nil
+
+    proc `=copy`*[T](a: var Array[T], b: Array[T]) =
+      let L = b.length
+      a.length = L
+      if not b.data.isNil:
+        a.data = cast[typeof(a.data)](alloc(L * sizeof(T)))
+        for i in 0 ..< L:
+          when compiles(GC_ref(b.data[i])):
+            GC_ref(b.data[i])
+          a.data[i] = b.data[i]
+
+  proc `=trace`*[T](arr: var Array[T]; env: pointer) =
+    for i in 0 ..< arr.length:
+      `=trace`(arr.data[i], env)
 
 proc len*[T](x: Array[T]): int {.inline.} =
-  if x.info.isNil:
-    0
+  when arraysEmbedLength:
+    if x.info.isNil:
+      0
+    else:
+      x.info.length
   else:
-    x.info.length
+    x.length
 
 proc `[]`*[T](x: Array[T], i: int): lent T {.inline.} =
-  x.info.data[i]
+  x.data[i]
 
 proc `[]`*[T](x: var Array[T], i: int): var T {.inline.} =
-  x.info.data[i]
+  x.data[i]
 
 proc `[]=`*[T](x: var Array[T], i: int, val: sink T) {.inline.} =
-  x.info.data[i] = val
+  x.data[i] = val
+  when compiles(GC_ref(val)):
+    GC_ref(x.data[i])
 
 iterator items*[T](x: Array[T]): T =
   let L = x.len
   for i in 0 ..< L:
-    yield x[i]
+    yield x.data[i]
 
 iterator mitems*[T](x: var Array[T]): var T =
   let L = x.len
   for i in 0 ..< L:
-    yield x[i]
+    yield x.data[i]
 
 proc newArrayUninitialized*[T](length: int): Array[T] =
   initarr result, length, alloc
@@ -65,7 +122,7 @@ proc toArray*[T](arr: sink openarray[T]): Array[T] =
     result[i] = arr[i]
 
 template toOpenArray*[T](x: Array[T], first, last: int): auto =
-  (addr x.info.data).toOpenArray(first, last)
+  toOpenArray(when arraysEmbedLength: addr x.info.data else: x.data, first, last)
 
 proc `$`*[T](x: Array[T]): string =
   result = "Array("

@@ -110,6 +110,14 @@ type
   
   Value* = ValueObj
 
+  PropertyTag* = ref object
+    name*: string
+    argumentTypes*: seq[Type]
+
+  Property* = object
+    tag*: PropertyTag
+    arguments*: seq[Value]
+
   TypeKind* = enum
     # maybe add unknown type for values with unknown type at runtime
     # concrete
@@ -423,6 +431,10 @@ template mix(x) =
 
 proc hash*[T](p: Unique[T]): Hash =
   mix p.id
+  result = !$ result
+
+proc hash*(p: PropertyTag): Hash =
+  mix cast[pointer](p)
   result = !$ result
 
 proc hash*(v: Value): Hash {.noSideEffect.}

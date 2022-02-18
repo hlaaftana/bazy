@@ -6,3 +6,4 @@ const
   doLineColumn* = block: (const bazyDoLineColumn {.booldefine.} = true; bazyDoLineColumn)
   refToken* = block: (const bazyRefToken {.booldefine.} = defined(js); bazyRefToken)
   useArrays* = block: (const bazyUseArrays {.booldefine.} = false; bazyUseArrays)
+  arraysEmbedLength* = block: (const bazyArraysEmbedLength {.booldefine.} = false; bazyArraysEmbedLength)

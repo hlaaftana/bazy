@@ -3,6 +3,29 @@ import "."/[primitives, arrays, runtime, types, values], ../language/[expression
 proc `$`*(variable: Variable): string =
   variable.name & ": " & $variable.cachedType
 
+proc `$`*(context: Context): string =
+  result = "context\n"
+  for v in context.allVariables:
+    result.add("  " & $v & "\n")
+  result.add("imports\n")
+  for c in context.imports:
+    for line in splitLines($c):
+      result.add("  " & line & "\n")
+
+proc `$`*(scope: Scope): string =
+  result = "scope\n"
+  for v in scope.variables:
+    result.add("  " & $v & "\n")
+  if scope.parent.isNil:
+    result.add("imports\n")
+    for c in scope.context.imports:
+      for line in splitLines($c):
+        result.add("  " & line & "\n")
+  else:
+    result.add("parent ")
+    for line in splitLines($scope.parent):
+      result.add("  " & line & "\n")
+
 proc newContext*(imports: seq[Context]): Context =
   result = Context(stack: Stack(), imports: imports)
   result.top = Scope(context: result)

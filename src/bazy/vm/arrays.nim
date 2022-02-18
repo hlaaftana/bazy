@@ -3,8 +3,16 @@ import ../defines
 when useArrays:
   import arrayimpl
   export arrayimpl
-  type ArrayRef*[T] = Array[T]
-  template toArrayRef*(foo): ArrayRef = toArray(foo)
+  when arraysEmbedLength:
+    type ArrayRef*[T] = Array[T]
+    template toArrayRef*(foo): ArrayRef = toArray(foo)
+  else:
+    type ArrayRef*[T] = ref Array[T]
+    template toArrayRef*(foo): ArrayRef =
+      var r: ref typeof(toArray(foo))
+      new(r)
+      r[] = toArray(foo)
+      r
 else:
   template distinctSeq(name) {.dirty.} =
     type `name`*[T] = distinct seq[T]

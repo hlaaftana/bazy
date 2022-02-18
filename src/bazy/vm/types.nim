@@ -1,8 +1,12 @@
 import "."/[primitives, values], std/[tables, sets]
 
 proc `$`*(t: Type): string =
-  # not recursive
-  case t.kind
+  proc `$`(s: seq[Type]): string =
+    for t in s:
+      if result.len != 0:
+        result.add(", ")
+      result.add($t)
+  result = case t.kind
   of tyNoneValue: "NoneValue"
   of tyInteger: "Int"
   of tyUnsigned: "Unsigned"
@@ -15,21 +19,23 @@ proc `$`*(t: Type): string =
   of tyAny: "Any"
   of tyNone: "None"
   of tyFunction:
-    "Function" & $(t.returnType[], t.arguments[]) 
+    "Function(" & $t.arguments[] & ") -> " & $t.returnType[]
   of tyTuple: "Tuple " & $t.elements[]
   of tyReference: "Reference " & $t.elementType[]
   of tyList: "List " & $t.elementType[]
   of tySet: "Set " & $t.elementType[]
-  of tyTable: "Table" & $(t.keyType[], t.valueType[])
+  of tyTable: "Table(" & $t.keyType[] & ", " & $t.valueType[] & ")"
   of tyComposite: "Composite" & $t.fields
   of tyUnique: "Unique " & t.name & " " & $t.uniqueType.value
   of tyType: "Type " & $t.typeValue[]
-  of tyUnion: "Union " & $t.operands[]
-  of tyIntersection: "Intersection" & $t.operands[]
+  of tyUnion: "Union(" & $t.operands[] & ")"
+  of tyIntersection: "Intersection(" & $t.operands[] & ")"
   of tyNot: "Not " & $t.notType[]
   of tyBaseType: "BaseType " & $t.baseKind
-  of tyWithProperty: "WithProperty" & $(t.typeWithProperty[], t.withProperty)
+  of tyWithProperty: "WithProperty(" & $t.typeWithProperty[] & ", " & $t.withProperty & ")"
   of tyCustomMatcher: "Custom"
+  if t.properties.card != 0:
+    result.add(" " & $t.properties)
 
 proc paramType*(t: Type, i: int): Type =
   assert t.kind == tyFunction
