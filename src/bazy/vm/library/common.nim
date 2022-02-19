@@ -1,4 +1,4 @@
-import ".."/[primitives, compilation, types], ../../language/expressions, std/[tables]
+import ".."/[primitives, compilation, types, values], ../../language/expressions, std/[tables]
 
 proc define*(scope: Scope, n: string, typ: Type): Variable =
   result = Variable(name: n, cachedType: typ)
@@ -17,18 +17,17 @@ proc define*(context: Context, n: string, typ: Type, x: Value) =
   context.refreshStack()
   context.stack.set(variable.stackIndex, x)
 
-proc funcType*(returnType: Type, arguments: varargs[Type]): Type {.inline.} =
-  Type(kind: tyFunction, returnType: toRef(returnType), arguments: toRef(@arguments))
-
 proc templType*(arity: int): Type {.inline.} =
   var args = newSeq[Type](arity + 1)
+  var bArgs = newSeq[Type](arity)
   args[0] = Ty(Scope)
   for i in 0 ..< arity:
     args[i + 1] = Ty(Expression)
+    bArgs[i] = Ty(Any)
   result = funcType(Ty(Statement), args)
-  result.properties = properties(Template)
+  result.properties = properties(property(Meta, @[toValue funcType(Ty(Any), bArgs)]))
 
-template templ*(body): untyped =
+template doTempl*(body): untyped =
   (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
     let scope {.inject, used.} = valueArgs[0].scopeValue
     var args {.inject.} = newSeq[Expression](valueArgs.len - 1)
@@ -38,13 +37,23 @@ template templ*(body): untyped =
 
 proc typedTemplType*(arity: int): Type {.inline.} =
   var args = newSeq[Type](arity + 1)
+  var bArgs = newSeq[Type](arity)
   args[0] = Ty(Scope)
   for i in 0 ..< arity:
     args[i + 1] = Ty(Statement)
+    bArgs[i] = Ty(Any)
   result = funcType(Ty(Statement), args)
-  result.properties = properties(TypedTemplate)
+  result.properties = properties(property(Meta, @[toValue funcType(Ty(Any), bArgs)]))
 
-template typedTempl*(body): untyped =
+proc typedTemplType*(realArgs: openarray[Type], returnType: Type): Type {.inline.} =
+  var args = newSeq[Type](realArgs.len + 1)
+  args[0] = Ty(Scope)
+  for i in 0 ..< realArgs.len:
+    args[i + 1] = Ty(Statement)
+  result = funcType(Ty(Statement), args)
+  result.properties = properties(property(Meta, @[toValue funcType(returnType, realArgs)]))
+
+template doTypedTempl*(body): untyped =
   (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
     let scope {.inject, used.} = valueArgs[0].scopeValue
     var args {.inject.} = newSeq[Statement](valueArgs.len - 1)
@@ -52,7 +61,7 @@ template typedTempl*(body): untyped =
       args[i] = valueArgs[i + 1].statementValue
     body)
 
-template fn*(body): untyped =
+template doFn*(body): untyped =
   (proc (args {.inject.}: openarray[Value]): Value {.nimcall.} =
     body)
 
@@ -69,9 +78,12 @@ template module*(moduleName, definitions): untyped {.dirty.} =
     template define(n: string, x) {.used.} =
       define(n, toValue(x))
     template templ(n: string, arity: int, body: untyped) {.used.} =
-      define n, templType(arity), templ(body)
+      define n, templType(arity), doTempl(body)
     template typedTempl(n: string, arity: int, body: untyped) {.used.} =
-      define n, typedTemplType(arity), typedTempl(body)
+      define n, typedTemplType(arity), doTypedTempl(body)
+    template typedTempl(n: string, realArgs: openarray[Type], returnType: Type, body: untyped) {.used.} =
+      define n, typedTemplType(realArgs, returnType), doTypedTempl(body)
     template fn(n: string, arguments: openarray[Type], returnType: Type, body: untyped) {.used.} =
-      define n, funcType(returnType, arguments), fn(body)
+      bind funcType
+      define n, funcType(returnType, arguments), doFn(body)
     definitions

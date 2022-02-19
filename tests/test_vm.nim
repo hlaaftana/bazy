@@ -7,6 +7,15 @@ import bazy, bazy/vm/[primitives, values, types, compilation, arrays]
 
 test "type relation":
   check {Ty(Integer).match(Ty(Float)), Ty(Float).match(Ty(Integer))} == {tmNone}
+  let a1 = Type(kind: tyTuple, elements: @[Ty(Scope)], varargs: toRef(Ty(Expression)))
+  let a2 = Type(kind: tyTuple, elements: @[Ty(Scope), Ty(Expression), Ty(Expression)])
+  check {a1.match(a2), a2.match(a1)} == {tmAlmostEqual}
+  let a3 = Type(kind: tyTuple, elements: @[Ty(Scope)], varargs: toRef(Ty(Any)))
+  let a4 = Type(kind: tyTuple, elements: @[Ty(Scope)])
+  check a1.match(a3) == tmFalse
+  check a3.match(a1) == tmTrue
+  check {a1.match(a4), a4.match(a1), a3.match(a4), a4.match(a3)} == {tmAlmostEqual}
+  check a1 < a3
 
 test "compile success":
   template working(a) =
@@ -110,6 +119,11 @@ static
   a = foo()
   _ = a.setter.(3)
 a.getter.()""": toValue(3),
+    "(true and false, true and true, false and true, false and false)": toValue(toArray([toValue(false), toValue(true), toValue(false), toValue(false)])),
+    """
+a = 0
+(true and (a = a + 1; false), true and (a = a + 1; true), false and (a = a + 1; true), false and (a = a + 1; false), a)""": toValue(toArray([toValue(false), toValue(true), toValue(false), toValue(false), toValue(2)])),
+    "i = 5; while(i > 0, i = i - 1); i": toValue(0),
   }
   
   for inp, outp in tests.items:
@@ -121,3 +135,26 @@ a.getter.()""": toValue(3),
       if getCurrentException() of ref NoOverloadFoundError:
         echo (ref NoOverloadFoundError)(getCurrentException()).scope.variables
       raise
+
+import bazy/vm/library/common
+
+module withVarargsFn:
+  define "max", funcTypeWithVarargs(Ty(Integer), [], Ty(Integer)), (doFn do:
+    var res = args[0].integerValue
+    for i in 1 ..< args.len:
+      let el = args[i].integerValue
+      if el > res: res = el
+    toValue(res))
+
+test "varargs function":
+  let libraries = @[Prelude, withVarargsFn()]
+  let compiled = compile("""
+max(3, 7, 4, 5)
+""", libraries)
+  check compiled.run() == toValue(7)
+  check:
+    try:
+      discard compile("max(3.0, 4.0, 5.0)", libraries)
+      false
+    except NoOverloadFoundError:
+      true

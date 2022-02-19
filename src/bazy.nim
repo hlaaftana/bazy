@@ -9,8 +9,8 @@ import bazy/vm/[compilation, primitives, library/prelude]
 
 let Prelude* = prelude()
 
-proc compile*(code: string): Program =
-  compile(parse(code), @[Prelude])
+proc compile*(code: string, libraries = @[Prelude]): Program =
+  compile(parse(code), libraries)
 
 proc evaluate*(code: string): Value =
   run(compile(code))

@@ -16,12 +16,18 @@ module numbers:
   template unarySingle(op: static string, k) =
     fn op, [Ty(`k`)], Ty(`k`):
       toValue callOp(`op`, args[0].`k Value`)
+  template unarySingleAlias(name, op: static string, k) =
+    fn op, [Ty(`k`)], Ty(`k`):
+      toValue callOp(`op`, args[0].`k Value`)
   template unary(op: static string) {.used.} =
     unarySingle op, integer
     unarySingle op, unsigned
     unarySingle op, float
   template binarySingle(op: static string, k) =
     fn op, [Ty(`k`), Ty(`k`)], Ty(`k`):
+      toValue callOp(`op`, args[0].`k Value`, args[1].`k Value`)
+  template binarySingleAlias(name, op: static string, k) =
+    fn name, [Ty(`k`), Ty(`k`)], Ty(`k`):
       toValue callOp(`op`, args[0].`k Value`, args[1].`k Value`)
   template binary(op: static string) =
     binarySingle op, integer
@@ -39,6 +45,7 @@ module numbers:
   unarySingle "-", integer
   unarySingle "-", float
   binary "+"
+  binarySingle "+", unsigned
   binary "-"
   binary "*"
   binarySingle "div", integer
@@ -48,17 +55,38 @@ module numbers:
       toValue args[0].`k Value` / args[1].`k Value`
   floatDivide integer
   floatDivide float
-  when false:
-    template instr(name, instructionName, k) =
-      typedTempl name, [Ty(`k`), Ty(`k`)], Ty(`k`):
-        toValue Statement(kind: skBinaryInstruction,
-          instructionKind: instructionName,
-          binary1: scope.compile(args[0]),
-          binary2: scope.compile(args[1]),
-          cachedType: Ty(`k`))
-    instr "+", AddInt, integer
+  template instr(name, instructionName, k) =
+    typedTempl name, [Ty(`k`), Ty(`k`)], Ty(`k`):
+      toValue Statement(kind: skBinaryInstruction,
+        binaryInstructionKind: instructionName,
+        binary1: args[0].toInstruction,
+        binary2: args[1].toInstruction,
+        cachedType: Ty(`k`))
+  instr "+", AddInt, integer
+  instr "+", AddFloat, float
+  instr "-", SubInt, integer
+  instr "-", SubFloat, float
+  instr "*", MulInt, integer
+  instr "*", MulFloat, float
+  instr "div", DivInt, integer
+  instr "/", DivFloat, float
   binary "mod"
   binaryBool "=="
-  # todo: add bools, logic, bitwise, comparison
-  # conversions, hex, binary, instructions
-  # maybe bool not as property yet 
+  binaryBool "<"
+  binaryBool "<="
+  binaryBool ">"
+  binaryBool ">="
+  unarySingleAlias "!", "not", unsigned
+  unarySingleAlias "!", "not", integer
+  binarySingleAlias "&", "and", unsigned
+  binarySingleAlias "&", "and", integer
+  binarySingleAlias "|", "or", unsigned
+  binarySingleAlias "|", "or", integer
+  binarySingleAlias ">>", "shr", unsigned
+  binarySingleAlias ">>", "shr", integer
+  binarySingleAlias "<<", "shl", unsigned
+  binarySingleAlias "<<", "shl", integer
+  binarySingle "xor", unsigned
+  binarySingle "xor", integer
+  # todo: conversions, hex, binary
+  # maybe more instructions

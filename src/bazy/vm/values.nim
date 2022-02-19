@@ -1,41 +1,5 @@
 import "."/[primitives, pointertag, arrays], ../language/expressions, std/[sets, tables]
 
-proc `$`*(value: Value): string =
-  case value.kind
-  of vkNone: "()"
-  of vkInteger: $value.integerValue
-  of vkBoolean: $bool(value.integerValue)
-  of vkUnsigned: $value.unsignedValue
-  of vkFloat: $value.floatValue
-  of vkList: ($value.listValue[])[1..^1]
-  of vkString: value.stringValue[]
-  of vkArray:
-    var s = ($value.tupleValue.unref)[1..^1]
-    s[0] = '('
-    s[^1] = ')'
-    s
-  of vkReference: ($value.referenceValue[])
-  of vkComposite:
-    var s = "("
-    for k, v in value.compositeValue[]:
-      if s.len != len"(":
-        s.add(", ")
-      s.add(k)
-      s.add(": ")
-      s.add($v)
-    s.add(')')
-    s
-  of vkPropertyReference: $value.propertyRefValue[].value
-  of vkType: $value.typeValue[]
-  of vkFunction: "<function>"
-  of vkNativeFunction: "<native function>"
-  of vkEffect: $value.effectValue[]
-  of vkSet: $value.setValue[]
-  of vkTable: $value.tableValue[]
-  of vkExpression: $value.expressionValue[]
-  of vkStatement: $value.statementValue[]
-  of vkScope: $value.scopeValue[]
-
 template withkind(k, val): Value =
   Value(kind: `vk k`, `k Value`: val)
 template withkindrefv(vk, kv, val) =
@@ -76,9 +40,9 @@ proc toType*(x: Value): Type =
   of vkScope: result = Ty(Scope)
   of vkArray:
     let val = x.tupleValue.unref
-    result = Type(kind: tyTuple, elements: toRef(newSeq[Type](val.len)))
+    result = Type(kind: tyTuple, elements: newSeq[Type](val.len))
     for i in 0 ..< x.tupleValue.unref.len:
-      result.elements[][i] = val[i].toType
+      result.elements[i] = val[i].toType
   of vkReference:
     result = Type(kind: tyReference, elementType: toRef(x.referenceValue[].toType))
   of vkComposite:
@@ -92,7 +56,7 @@ proc toType*(x: Value): Type =
   of vkType:
     result = Type(kind: tyType, typeValue: x.typeValue)
   of vkFunction, vkNativeFunction:
-    result = Ty(Function) # XXX (4) no signature
+    result = Ty(Function) # XXX (2) no signature
   of vkEffect:
     result = x.effectValue[].toType # XXX do what here
   of vkSet:

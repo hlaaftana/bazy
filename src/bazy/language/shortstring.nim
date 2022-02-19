@@ -25,7 +25,7 @@ proc `[]=`*(ss: var ShortString, i: int, c: char) {.inline.} =
   set(ss, i, c)
 
 proc len*(ss: ShortString): int =
-  when false:
+  when true: # this is faster
     # unrolled loop
     {.push rangeChecks: off.}
     template doIndex(i: int) =
@@ -203,20 +203,13 @@ template short*(s: static string): ShortString =
   toShortString(s)
 
 when isMainModule:
-  for s in ["", "a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh"]:
-    block:
-      let ss = s.toShortString
-      assert $ss == s
-      for i in 0 ..< s.len:
-        assert s[i] == ss[i]
-    block:
-      let ss = s.toShortString(optimized = false)
-      assert $ss == s
-      for i in 0 ..< s.len:
-        assert s[i] == ss[i]
-  assert short"ab" < short"abc"
-  assert short"ab" < short"ac"
-  assert short"ab" < short"bb"
-  assert toShortString"ab" < toShortString"abc"
-  assert toShortString"ab" < toShortString"ac"
-  assert toShortString"ab" < toShortString"bb"
+  import times
+  template bench(body) =
+    let a = cpuTime()
+    body
+    let b = cpuTime()
+    echo "took ", b - a
+  bench:
+    for i in 1..100000000:
+      for s in ["", "a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh"]:
+        discard s.toShortString.len

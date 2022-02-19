@@ -1,30 +1,23 @@
 import "."/[primitives, arrays, runtime, types, values], ../language/[expressions, number, shortstring], std/[tables, sets, strutils]
 
-proc `$`*(variable: Variable): string =
-  variable.name & ": " & $variable.cachedType
+template defineMetaProperty(recurWith: untyped): PropertyTag =
+  PropertyTag(name: "Meta", argumentTypes: @[Type(kind: tyBaseType, baseKind: tyFunction)],
+    typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
+      if t.properties.hasTag(recurWith):
+        match(args[0].typeValue[], t.properties.table[recurWith][0].typeValue[])
+      else:
+        tmFalse)
 
-proc `$`*(context: Context): string =
-  result = "context\n"
-  for v in context.allVariables:
-    result.add("  " & $v & "\n")
-  result.add("imports\n")
-  for c in context.imports:
-    for line in splitLines($c):
-      result.add("  " & line & "\n")
-
-proc `$`*(scope: Scope): string =
-  result = "scope\n"
-  for v in scope.variables:
-    result.add("  " & $v & "\n")
-  if scope.parent.isNil:
-    result.add("imports\n")
-    for c in scope.context.imports:
-      for line in splitLines($c):
-        result.add("  " & line & "\n")
-  else:
-    result.add("parent ")
-    for line in splitLines($scope.parent):
-      result.add("  " & line & "\n")
+when defined(gcDestructors):
+  var Meta*: PropertyTag
+  Meta = defineMetaProperty(Meta)
+else:
+  proc metaProperty: PropertyTag =
+    var prop {.global.}: PropertyTag
+    if prop.isNil:
+      prop = defineMetaProperty(prop)
+    result = prop
+  template Meta*: PropertyTag = metaProperty()
 
 proc newContext*(imports: seq[Context]): Context =
   result = Context(stack: Stack(), imports: imports)
@@ -292,80 +285,160 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           arguments: @[ex.left, ex.right]))
   of CallKinds:
     # move this out to a proc
-    # XXX (1) expanded templates with partial typing and mixed expressions/statements with Meta signature property
-    # XXX (3) pass type bound as well as scope, to pass both to a compile proc
-    # XXX (4) named arguments with signature property
-    # template: (scope, expressions -> statement)
+    # XXX pass type bound as well as scope, to pass both to a compile proc
+    # XXX (1) named arguments with signature property
+    var argumentStatements = newSeq[Statement](ex.arguments.len)
     if ex.address.isIdentifier(name):
-      var argTypes = toRef(newSeq[Type](ex.arguments.len + 1))
-      argTypes[][0] = Ty(Scope)
-      for i in 0 ..< ex.arguments.len:
-        argTypes[][i + 1] = Ty(Expression)
-      let templateType = Type(kind: tyFunction,
-        returnType: toRef(Ty(Statement)),
-        arguments: argTypes,
-        properties: properties(Template))
-      let overloads = overloads(scope, name, +templateType)
-      if overloads.len != 0:
-        let templ = overloads[0]
-        var arguments = newSeq[Statement](ex.arguments.len + 1)
-        arguments[0] = constant(scope, Ty(Scope))
+      var argumentTypes = newSeq[Type](ex.arguments.len)
+      for t in argumentTypes.mitems: t = Ty(Any)
+      var realArgumentTypes = newSeq[Type](ex.arguments.len + 1)
+      realArgumentTypes[0] = Ty(Scope)
+      for i in 1 ..< realArgumentTypes.len:
+        realArgumentTypes[i] = union(Ty(Expression), Ty(Statement))
+      # get all metas first and type statements accordingly
+      var allMetas = overloads(scope, name,
+        *funcType(Ty(Statement), realArgumentTypes).withProperties(
+          property(Meta, @[toValue funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)])))
+      if allMetas.len != 0:
+        var makeStatement = newSeq[bool](ex.arguments.len)
+        var metaTypes = newSeq[Type](allMetas.len)
+        for i, v in allMetas:
+          let ty = v.variable.cachedType
+          let metaTy = v.variable.cachedType.properties.getArguments(Meta)[0].typeValue[]
+          metaTypes[i] = metaTy
+          for i in 0 ..< ex.arguments.len:
+            if matchBound(+Ty(Statement), ty.param(i + 1)):
+              makeStatement[i] = true
+              argumentTypes[i] = commonType(argumentTypes[i], metaTy.param(i))
+        for i, x in makeStatement:
+          if x:
+            try:
+              argumentStatements[i] = map(ex.arguments[i], +argumentTypes[i])
+            except NoOverloadFoundError as e:
+              if same(e.expression, ex.arguments[i]):
+                reset(allMetas)
+                break
+            except TypeBoundMatchError as e:
+              if same(e.expression, ex.arguments[i]):
+                reset(allMetas)
+                break
+            argumentTypes[i] = commonType(argumentTypes[i], argumentStatements[i].cachedType)
+        var superMetas, subMetas: typeof(allMetas)
+        for i, m in allMetas:
+          let mt = metaTypes[i]
+          if matchBound(+mt,
+            funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)):
+            superMetas.add(m)
+          if matchBound(
+            +funcType(if bound.variance == Covariant: union() else: bound.boundType, argumentTypes),
+            mt):
+            subMetas.add(m)
+        superMetas.sort(
+          cmp = proc (a, b: VariableReference): int =
+            compare(a.variable.cachedType, b.variable.cachedType),
+          order = Descending)
+        subMetas.sort(
+          cmp = proc (a, b: VariableReference): int =
+            compare(a.variable.cachedType, b.variable.cachedType),
+          order = Ascending)
+        if superMetas.len != 0:
+          let meta = superMetas[0]
+          let ty = meta.variable.cachedType
+          var arguments = newSeq[Statement](ex.arguments.len + 1)
+          arguments[0] = constant(scope, Ty(Scope))
+          for i in 0 ..< ex.arguments.len:
+            if matchBound(+Ty(Statement), ty.param(i + 1)):
+              arguments[i + 1] = constant(argumentStatements[i], Ty(Statement))
+            else:
+              arguments[i + 1] = constant(copy ex.arguments[i], Ty(Expression))
+          let call = Statement(kind: skFunctionCall,
+            callee: variableGet(meta),
+            arguments: arguments).toInstruction
+          result = scope.context.evaluateStatic(call).statementValue
+        else:
+          for d in subMetas:
+            var arguments = newArray[Value](ex.arguments.len + 1)
+            arguments[0] = toValue scope
+            for i in 0 ..< ex.arguments.len:
+              if matchBound(+Ty(Statement), d.variable.cachedType.param(i + 1)):
+                arguments[i + 1] = toValue argumentStatements[i]
+              else:
+                arguments[i + 1] = toValue copy ex.arguments[i]
+            if checkType(toValue arguments, d.variable.cachedType.arguments[]):
+              var argumentStatement = newSeq[Statement](arguments.len)
+              for i, a in arguments: argumentStatement[i] = constant(a, a.toType)
+              let call = Statement(kind: skFunctionCall,
+                callee: variableGet(d),
+                arguments: argumentStatement).toInstruction
+              result = scope.context.evaluateStatic(call).statementValue
+              break
+    when false:
+      # template: (scope, expressions -> statement)
+      if result.isNil and ex.address.isIdentifier(name):
+        var argTypes = newSeq[Type](ex.arguments.len + 1)
+        argTypes[0] = Ty(Scope)
         for i in 0 ..< ex.arguments.len:
-          arguments[i + 1] = constant(copy ex.arguments[i], Ty(Expression))
-        let call = Statement(kind: skFunctionCall,
-          callee: variableGet(templ),
-          arguments: arguments).toInstruction
-        result = scope.context.evaluateStatic(call).statementValue
-    # typed template: (scope, statements -> statement)
-    if result.isNil and ex.address.isIdentifier(name):
-      var argTypes = toRef(newSeq[Type](ex.arguments.len + 1))
-      argTypes[][0] = Ty(Scope)
-      for i in 0 ..< ex.arguments.len:
-        argTypes[][i + 1] = Ty(Statement)
-      let typedTemplateType = Type(kind: tyFunction,
-        returnType: toRef(Ty(Statement)),
-        arguments: argTypes,
-        properties: properties(TypedTemplate))
-      let overloads = overloads(scope, name, +typedTemplateType)
-      if overloads.len != 0:
-        let templ = overloads[0]
-        var arguments = newSeq[Statement](ex.arguments.len + 1)
-        arguments[0] = constant(scope, Ty(Scope))
+          argTypes[i + 1] = Ty(Expression)
+        let templateType = Type(kind: tyFunction,
+          returnType: toRef(Ty(Statement)),
+          arguments: (ref Type)(kind: tyTuple, elements: argTypes),
+          properties: properties(Template))
+        let overloads = overloads(scope, name, +templateType)
+        if overloads.len != 0:
+          let templ = overloads[0]
+          var arguments = newSeq[Statement](ex.arguments.len + 1)
+          arguments[0] = constant(scope, Ty(Scope))
+          for i in 0 ..< ex.arguments.len:
+            arguments[i + 1] = constant(copy ex.arguments[i], Ty(Expression))
+          let call = Statement(kind: skFunctionCall,
+            callee: variableGet(templ),
+            arguments: arguments).toInstruction
+          result = scope.context.evaluateStatic(call).statementValue
+      # typed template: (scope, statements -> statement)
+      if result.isNil and ex.address.isIdentifier(name):
+        var argTypes = newSeq[Type](ex.arguments.len + 1)
+        argTypes[0] = Ty(Scope)
         for i in 0 ..< ex.arguments.len:
-          arguments[i + 1] = Statement(kind: skConstant,
-            cachedType: Ty(Statement),
-            constant: Value(kind: vkStatement, statementValue: map(ex.arguments[i])))
-        let call = Statement(kind: skFunctionCall,
-          callee: variableGet(templ),
-          arguments: arguments).toInstruction
-        result = scope.context.evaluateStatic(call).statementValue
+          argTypes[i + 1] = Ty(Statement)
+        let typedTemplateType = Type(kind: tyFunction,
+          returnType: toRef(Ty(Statement)),
+          arguments: (ref Type)(kind: tyTuple, elements: argTypes),
+          properties: properties(TypedTemplate))
+        let overloads = overloads(scope, name, +typedTemplateType)
+        if overloads.len != 0:
+          let templ = overloads[0]
+          var arguments = newSeq[Statement](ex.arguments.len + 1)
+          arguments[0] = constant(scope, Ty(Scope))
+          for i in 0 ..< ex.arguments.len:
+            if argumentStatements[i].isNil:
+              argumentStatements[i] = map(ex.arguments[i])
+            arguments[i + 1] = Statement(kind: skConstant,
+              cachedType: Ty(Statement),
+              constant: Value(kind: vkStatement, statementValue: argumentStatements[i]))
+          let call = Statement(kind: skFunctionCall,
+            callee: variableGet(templ),
+            arguments: arguments).toInstruction
+          result = scope.context.evaluateStatic(call).statementValue
     if result.isNil:
-      var arguments = newSeq[Statement](ex.arguments.len)
-      var argumentTypes = toRef(newSeq[Type](ex.arguments.len))
-      for i in 0 ..< arguments.len:
-        let b =
-          if bound.boundType.kind == tyFunction:
-            bound.boundType.arguments[i] * bound.variance
-          else:
-            defaultBound
-        arguments[i] = map(ex.arguments[i], b)
-        argumentTypes[][i] = arguments[i].cachedType
-      var functionType = Type(kind: tyFunction,
-        returnType: toRef(if bound.variance == Covariant: Ty(Any) else: bound.boundType),
-        arguments: argumentTypes)
+      var argumentTypes = newSeq[Type](ex.arguments.len)
+      for i in 0 ..< ex.arguments.len:
+        if argumentStatements[i].isNil:
+          argumentStatements[i] = map(ex.arguments[i])
+        argumentTypes[i] = argumentStatements[i].cachedType
+      var functionType = funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)
       # lowest supertype function:
       try:
         let callee = map(ex.address, -functionType)
         result = Statement(kind: skFunctionCall,
           cachedType: callee.cachedType.returnType[],
           callee: callee,
-          arguments: arguments)
+          arguments: argumentStatements)
       except NoOverloadFoundError as e:
         # dispatch lowest subtype functions in order:
         if same(e.expression, ex.address) and ex.address.isIdentifier(name):
           functionType.returnType = toRef(
             if bound.variance == Covariant:
-              Type(kind: tyUnion, operands: toRef(seq[Type](@[])))
+              union()
             else:
               bound.boundType)
           let subs = overloads(scope, name, +functionType)
@@ -373,9 +446,9 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
             var dispatchees = newSeq[(seq[Type], Statement)](subs.len)
             for i, d in dispatchees.mpairs:
               let t = subs[i].variable.cachedType
-              d[0].newSeq(arguments.len)
-              for i in 0 ..< arguments.len:
-                let pt = t.paramType(i)
+              d[0].newSeq(argumentStatements.len)
+              for i in 0 ..< argumentStatements.len:
+                let pt = t.param(i)
                 if matchBound(-argumentTypes[i], pt):
                   d[0][i] = Ty(Any) # optimize checking types we know match
                   # XXX do this recursively?
@@ -385,31 +458,29 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
             result = Statement(kind: skDispatch,
               cachedType: functionType.returnType[], # we could calculate a union here but it's not worth dealing with a typeclass
               dispatchees: dispatchees,
-              dispatchArguments: arguments)
+              dispatchArguments: argumentStatements)
       # .call, should recurse but compiled arguments should be reused:
       if result.isNil:
         let callee = map ex.address
-        arguments.insert(callee, 0)
-        argumentTypes[].insert(callee.cachedType, 0)
-        functionType = Type(kind: tyFunction,
-          returnType: toRef(if bound.variance == Covariant: Ty(Any) else: bound.boundType),
-          arguments: argumentTypes)
+        argumentStatements.insert(callee, 0)
+        argumentTypes.insert(callee.cachedType, 0)
+        functionType = funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)
         let overs = overloads(scope, ".call", -functionType)
         if overs.len != 0:
           let dotCall = variableGet(overs[0])
           result = Statement(kind: skFunctionCall,
             cachedType: dotCall.cachedType.returnType[],
             callee: callee,
-            arguments: arguments)
+            arguments: argumentStatements)
         else:
           raise (ref CannotCallError)(
             expression: ex.address,
             bound: bound,
             scope: scope,
-            argumentTypes: argumentTypes[],
+            argumentTypes: argumentTypes,
             type: callee.cachedType,
             msg: "no way to call " & $ex.address & " of type " & $callee.cachedType &
-              " found for argument types " & $argumentTypes[])
+              " found for argument types " & $argumentTypes)
   of Subscript:
     # what specialization can go here
     result = forward(Expression(kind: PathCall,
@@ -442,16 +513,16 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
         result.cachedType.fields[k] = v.cachedType
     else:
       if bound.boundType.kind == tyTuple:
-        assert bound.boundType.elements[].len == ex.elements.len, "tuple bound type lengths do not match"
+        assert bound.boundType.elements.len == ex.elements.len, "tuple bound type lengths do not match"
       result = Statement(kind: skTuple, cachedType:
-        Type(kind: tyTuple, elements: toRef(newSeqOfCap[Type](ex.elements.len))))
+        Type(kind: tyTuple, elements: newSeqOfCap[Type](ex.elements.len)))
       for i, e in ex.elements:
         let element = if bound.boundType.kind == tyTuple:
-          map(e, bound.boundType.elements[][i] * bound.variance)
+          map(e, bound.boundType.elements[i] * bound.variance)
         else:
           map e
         result.elements.add(element)
-        result.cachedType.elements[].add(element.cachedType)
+        result.cachedType.elements.add(element.cachedType)
   of ExpressionKind.Array:
     result = Statement(kind: skList, cachedType: Ty(List))
     var boundSet = bound.boundType.kind == tyList 
@@ -516,7 +587,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
         if i == ex.statements.high:
           bound
         else:
-          -Type(kind: tyUnion, operands: toRef[seq[Type]](@[])) #-Ty(None) # like void
+          -union() #-Ty(None) # like void
       let element = map(e, bound = b)
       result.sequence.add(element)
       if i == ex.statements.high:

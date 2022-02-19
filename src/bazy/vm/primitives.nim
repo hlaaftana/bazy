@@ -27,6 +27,7 @@ type
     vkPropertyReference
       ## references with some type properties attached at runtime
       ## which are also runtime values
+      # XXX actually use and account for this without losing performance
     vkType
       ## type value
     vkNativeFunction
@@ -148,13 +149,13 @@ type
       tyAny, tyNone:
       discard
     of tyFunction:
-      # XXX (4) ideally signature is a property, it behaves exactly like it
-      arguments*: ref seq[Type] # XXX tuple type (maybe signature goes here)
-      # having multiple non-ref seq fields makes the compiler abort compilation for some reason
+      # XXX (2) signature can be a property but it might not be worth it
+      arguments*: ref Type # tuple type
       returnType*: ref Type
     of tyTuple:
-      # XXX (2) add varargs (and maybe allow names in a property to reflect regular named tuples)
-      elements*: ref seq[Type]
+      # XXX (1) maybe allow names in a property to reflect regular named tuples which would then extend to named arguments
+      elements*: seq[Type]
+      varargs*: ref Type # for now only trailing
     of tyReference, tyList, tySet:
       elementType*: ref Type
     of tyTable:
@@ -165,6 +166,7 @@ type
       typeValue*: ref Type
     of tyUnion, tyIntersection:
       operands*: ref seq[Type]
+      # this not being ref seq aborted compilation for some reason
     of tyNot:
       notType*: ref Type
     of tyBaseType:
@@ -185,6 +187,7 @@ type
     Covariant
     Contravariant
     Invariant
+    Ultravariant
   
   TypeBound* = object
     boundType*: Type
@@ -563,3 +566,128 @@ proc `==`*(a, b: typeof(Statement()[])): bool =
       if aField != bField:
         return false
   return true
+
+import strutils
+
+proc `$`*(t: Type): string
+
+proc `$`*(value: Value): string =
+  case value.kind
+  of vkNone: "()"
+  of vkInteger: $value.integerValue
+  of vkBoolean: $bool(value.integerValue)
+  of vkUnsigned: $value.unsignedValue
+  of vkFloat: $value.floatValue
+  of vkList: ($value.listValue[])[1..^1]
+  of vkString: value.stringValue[]
+  of vkArray:
+    var s = ($value.tupleValue.unref)[1..^1]
+    s[0] = '('
+    s[^1] = ')'
+    s
+  of vkReference: ($value.referenceValue[])
+  of vkComposite:
+    var s = "("
+    for k, v in value.compositeValue[]:
+      if s.len != len"(":
+        s.add(", ")
+      s.add(k)
+      s.add(": ")
+      s.add($v)
+    s.add(')')
+    s
+  of vkPropertyReference: $value.propertyRefValue[].value
+  of vkType: $value.typeValue[]
+  of vkFunction: "<function>"
+  of vkNativeFunction: "<native function>"
+  of vkEffect: $value.effectValue[]
+  of vkSet: $value.setValue[]
+  of vkTable: $value.tableValue[]
+  of vkExpression: $value.expressionValue[]
+  of vkStatement: $value.statementValue[]
+  of vkScope: $value.scopeValue[]
+
+proc `$`*(p: PropertyTag): string =
+  p.name
+
+proc `$`*(p: Property): string =
+  result = $p.tag
+  if p.arguments.len != 0:
+    result.add('(')
+    for i, a in p.arguments:
+      if i != 0:
+        result.add(", ")
+      result.add($a)
+    result.add(')')
+
+proc `$`*(t: Type): string =
+  proc `$`(s: seq[Type]): string =
+    for t in s:
+      if result.len != 0:
+        result.add(", ")
+      result.add($t)
+  result = case t.kind
+  of tyNoneValue: "NoneValue"
+  of tyInteger: "Int"
+  of tyUnsigned: "Unsigned"
+  of tyFloat: "Float"
+  of tyBoolean: "Boolean"
+  of tyString: "String"
+  of tyExpression: "Expression"
+  of tyStatement: "Statement"
+  of tyScope: "Scope"
+  of tyAny: "Any"
+  of tyNone: "None"
+  of tyFunction:
+    "Function(" & $t.arguments[] & ") -> " & $t.returnType[]
+  of tyTuple: "Tuple(" & $t.elements & (if t.varargs.isNil: ")" else: ", " & $t.varargs[] & "...)")
+  of tyReference: "Reference(" & $t.elementType[] & ")"
+  of tyList: "List(" & $t.elementType[] & ")"
+  of tySet: "Set(" & $t.elementType[] & ")"
+  of tyTable: "Table(" & $t.keyType[] & ", " & $t.valueType[] & ")"
+  of tyComposite: "Composite" & $t.fields
+  of tyType: "Type " & $t.typeValue[]
+  of tyUnion: "Union(" & $t.operands[] & ")"
+  of tyIntersection: "Intersection(" & $t.operands[] & ")"
+  of tyNot: "Not " & $t.notType[]
+  of tyBaseType: "BaseType " & $t.baseKind
+  of tyWithProperty: "WithProperty(" & $t.typeWithProperty[] & ", " & $t.withProperty & ")"
+  of tyCustomMatcher: "Custom"
+  if t.properties.table.len != 0:
+    result.add(" {") 
+    for tag, args in t.properties.table:
+      result.add($Property(tag: tag, arguments: args))
+    result.add('}')
+
+proc `$`*(tb: TypeBound): string =
+  (case tb.variance
+  of Covariant: '+'
+  of Contravariant: '-'
+  of Invariant: '~'
+  of Ultravariant: '*') & $tb.boundType
+
+proc `$`*(variable: Variable): string =
+  variable.name & ": " & $variable.cachedType
+
+proc `$`*(context: Context): string =
+  result = "context\n"
+  for v in context.allVariables:
+    result.add("  " & $v & "\n")
+  result.add("imports\n")
+  for c in context.imports:
+    for line in splitLines($c):
+      result.add("  " & line & "\n")
+
+proc `$`*(scope: Scope): string =
+  result = "scope\n"
+  for v in scope.variables:
+    result.add("  " & $v & "\n")
+  if scope.parent.isNil:
+    result.add("imports\n")
+    for c in scope.context.imports:
+      for line in splitLines($c):
+        result.add("  " & line & "\n")
+  else:
+    result.add("parent ")
+    for line in splitLines($scope.parent):
+      result.add("  " & line & "\n")

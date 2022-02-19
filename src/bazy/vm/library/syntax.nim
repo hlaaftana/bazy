@@ -1,9 +1,9 @@
-import ".."/[primitives, compilation, types, values], ../../language/expressions
+import ".."/[primitives, compilation, types, values, arrays], ../../language/expressions
 
 import common
 
 module syntax:
-  templ "block", 2:
+  templ "block", 1:
     let sc = scope.childScope()
     result = toValue sc.compile(args[0], +Ty(Any))
   templ "static", 1:
@@ -22,7 +22,7 @@ module syntax:
       else:
         argTypes[i] = Ty(Any)
       discard bodyScope.define($arg, argTypes[i])
-    var fnType = Type(kind: tyFunction, returnType: toRef(returnBound.boundType), arguments: toRef(argTypes))
+    var fnType = funcType(returnBound.boundType, argTypes)
     var v: Variable
     if name.len != 0:
       v = scope.define(name, fnType)
@@ -99,30 +99,47 @@ module syntax:
     of CallKinds:
       result = toValue makeFn(scope, lhs.arguments, rhs, $lhs.address, bound, typeSet)
     else: assert false, $lhs
-  templ "if", 2:
-    let sc = scope.childScope()
+  define "if", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Expression)]).withProperties(
+    property(Meta, toValue funcType(Ty(Any), [Ty(Boolean), Ty(Any)]))
+  ), toValue proc (valueArgs: openarray[Value]): Value = 
+    let sc = valueArgs[0].scopeValue.childScope()
     result = toValue Statement(kind: skIf,
-      ifCond: sc.compile(args[0], +Ty(Boolean)),
-      ifTrue: sc.compile(args[1], +Ty(Any)),
+      ifCond: valueArgs[1].statementValue,
+      ifTrue: sc.compile(valueArgs[2].expressionValue, +Ty(Any)),
       ifFalse: Statement(kind: skNone))
-  templ "if", 3:
-    var els = args[2]
+  define "if", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Expression), Ty(Expression)]).withProperties(
+    property(Meta, toValue funcType(Ty(Any), [Ty(Boolean), Ty(Any), Ty(Any)]))
+  ), toValue proc (valueArgs: openarray[Value]): Value = 
+    var els = valueArgs[3].expressionValue
     if els.kind == Colon and els.left.isIdentifier(ident) and ident == "else":
       els = els.right
+    let scope = valueArgs[0].scopeValue
     let sc = scope.childScope()
     let elsesc = scope.childScope()
     var res = Statement(kind: skIf,
-      ifCond: sc.compile(args[0], +Ty(Boolean)),
-      ifTrue: sc.compile(args[1], +Ty(Any)),
+      ifCond: valueArgs[1].statementValue,
+      ifTrue: sc.compile(valueArgs[2].expressionValue, +Ty(Any)),
       ifFalse: elsesc.compile(els, +Ty(Any)))
     res.cachedType = commonType(res.ifTrue.cachedType, res.ifFalse.cachedType)
     result = toValue(res)
-  templ "while", 2:
-    let sc = scope.childScope()
+  define "while", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Expression)]).withProperties(
+    property(Meta, toValue funcType(union(), [Ty(Boolean), union()]))
+  ), toValue proc (valueArgs: openarray[Value]): Value = 
+    let sc = valueArgs[0].scopeValue.childScope()
     result = toValue Statement(kind: skWhile,
-      whileCond: sc.compile(args[0], +Ty(Boolean)),
-      whileBody: sc.compile(args[1], -Type(kind: tyUnion, operands: toRef(seq[Type] @[]))))
-  when false: # this has to be a typed template
-    fn ".[]", [Type(kind: tyBaseType, baseKind: tyTuple), Ty(Integer)], Ty(Any):
-      args[0].tupleValue.unref[args[1].integerValue]
+      whileCond: valueArgs[1].statementValue,
+      whileBody: sc.compile(valueArgs[2].expressionValue, -union()))
+  define ".[]", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Statement)]).withProperties(
+    property(Meta, toValue funcType(Ty(Any), [Type(kind: tyBaseType, baseKind: tyTuple), Ty(Integer)]))
+  ), toValue proc (valueArgs: openarray[Value]): Value =
+    let scope = valueArgs[0].scopeValue
+    let index = scope.context.evaluateStatic(valueArgs[2].statementValue.toInstruction)
+    let nthType = valueArgs[1].statementValue.cachedType.nth(index.integerValue)
+    result = toValue Statement(kind: skFunctionCall,
+      cachedType: nthType,
+      callee: constant(
+        Value(kind: vkNativeFunction, nativeFunctionValue: proc (args: openarray[Value]): Value {.nimcall.} =
+          args[0].tupleValue[][args[1].integerValue]),
+        tyNone),
+      arguments: @[valueArgs[1].statementValue, constant(index, Ty(Integer))])
   # todo: let/for

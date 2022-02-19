@@ -21,83 +21,44 @@ proc properties*(ps: varargs[Property, property]): Properties =
   for p in ps:
     result.table[p.tag] = p.arguments
 
-{.pragma: single, global.} # can change to threadvar
-proc templateProperty: PropertyTag =
-  var prop {.single.}: PropertyTag
-  if prop.isNil:
-    prop = PropertyTag(name: "Template", argumentTypes: @[],
-      typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
-        if t.properties.hasTag(prop): tmEqual else: tmAlmostEqual)
-  result = prop
+proc withProperties*(ty: sink Type, ps: varargs[Property, property]): Type {.inline.} =
+  ty.properties = properties(ps)
+  ty
 
-proc typedTemplateProperty: PropertyTag =
-  var prop {.single.}: PropertyTag
-  if prop.isNil:
-    prop = PropertyTag(name: "TypedTemplate", argumentTypes: @[],
-      typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
-        if t.properties.hasTag(prop): tmEqual else: tmAlmostEqual)
-  result = prop
+when false:
+  proc templateProperty: PropertyTag =
+    var prop {.global.}: PropertyTag
+    if prop.isNil:
+      prop = PropertyTag(name: "Template", argumentTypes: @[],
+        typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
+          if t.properties.hasTag(prop): tmEqual else: tmAlmostEqual)
+    result = prop
 
-template Template*: PropertyTag = templateProperty()
-template TypedTemplate*: PropertyTag = typedTemplateProperty()
+  proc typedTemplateProperty: PropertyTag =
+    var prop {.global.}: PropertyTag
+    if prop.isNil:
+      prop = PropertyTag(name: "TypedTemplate", argumentTypes: @[],
+        typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
+          if t.properties.hasTag(prop): tmEqual else: tmAlmostEqual)
+    result = prop
 
-proc `$`*(p: PropertyTag): string =
-  p.name
+  template Template*: PropertyTag = templateProperty()
+  template TypedTemplate*: PropertyTag = typedTemplateProperty()
 
-proc `$`*(p: Property): string =
-  result = $p.tag
-  if p.arguments.len != 0:
-    result.add('(')
-    for i, a in p.arguments:
-      if i != 0:
-        result.add(", ")
-      result.add($a)
-    result.add(')')
+proc tupleType*(s: varargs[Type]): Type =
+  Type(kind: tyTuple, elements: @s)
 
-proc `$`*(t: Type): string =
-  proc `$`(s: seq[Type]): string =
-    for t in s:
-      if result.len != 0:
-        result.add(", ")
-      result.add($t)
-  result = case t.kind
-  of tyNoneValue: "NoneValue"
-  of tyInteger: "Int"
-  of tyUnsigned: "Unsigned"
-  of tyFloat: "Float"
-  of tyBoolean: "Boolean"
-  of tyString: "String"
-  of tyExpression: "Expression"
-  of tyStatement: "Statement"
-  of tyScope: "Scope"
-  of tyAny: "Any"
-  of tyNone: "None"
-  of tyFunction:
-    "Function(" & $t.arguments[] & ") -> " & $t.returnType[]
-  of tyTuple: "Tuple " & $t.elements[]
-  of tyReference: "Reference " & $t.elementType[]
-  of tyList: "List " & $t.elementType[]
-  of tySet: "Set " & $t.elementType[]
-  of tyTable: "Table(" & $t.keyType[] & ", " & $t.valueType[] & ")"
-  of tyComposite: "Composite" & $t.fields
-  of tyType: "Type " & $t.typeValue[]
-  of tyUnion: "Union(" & $t.operands[] & ")"
-  of tyIntersection: "Intersection(" & $t.operands[] & ")"
-  of tyNot: "Not " & $t.notType[]
-  of tyBaseType: "BaseType " & $t.baseKind
-  of tyWithProperty: "WithProperty(" & $t.typeWithProperty[] & ", " & $t.withProperty & ")"
-  of tyCustomMatcher: "Custom"
-  if t.properties.table.len != 0:
-    result.add(" {") 
-    for tag, args in t.properties.table:
-      result.add($Property(tag: tag, arguments: args))
-    result.add('}')
+proc funcType*(returnType: Type, arguments: varargs[Type]): Type {.inline.} =
+  Type(kind: tyFunction, returnType: toRef(returnType), arguments: toRef(tupleType(arguments)))
 
-proc `$`*(tb: TypeBound): string =
-  (case tb.variance
-  of Covariant: '+'
-  of Contravariant: '-'
-  of Invariant: '~') & $tb.boundType
+proc tupleTypeWithVarargs*(s: varargs[Type], varargs: Type): Type =
+  Type(kind: tyTuple, elements: @s, varargs: toRef(varargs))
+
+proc funcTypeWithVarargs*(returnType: Type, arguments: varargs[Type], varargs: Type): Type {.inline.} =
+  Type(kind: tyFunction, returnType: toRef(returnType), arguments: toRef(tupleTypeWithVarargs(arguments, varargs)))
+
+proc union*(s: varargs[Type]): Type =
+  Type(kind: tyUnion, operands: toRef(@s))
 
 const
   allTypeKinds* = {low(TypeKind)..high(TypeKind)}
@@ -109,9 +70,20 @@ const
   highestNonMatching* = tmFalse
   lowestMatching* = tmTrue
 
-proc paramType*(t: Type, i: int): Type =
+proc hasNth*(t: Type, i: int): bool {.inline.} =
+  assert t.kind == tyTuple
+  i < t.elements.len or not t.varargs.isNil
+
+proc nth*(t: Type, i: int): Type {.inline.} =
+  assert t.kind == tyTuple
+  if i < t.elements.len or t.varargs.isNil:
+    t.elements[i]
+  else:
+    t.varargs[]
+
+proc param*(t: Type, i: int): Type {.inline.} =
   assert t.kind == tyFunction
-  t.arguments[i]
+  t.arguments[].nth(i)
 
 proc matches*(tm: TypeMatch): bool {.inline.} =
   tm >= lowestMatching
@@ -126,6 +98,8 @@ template min*(a, b: TypeMatch): TypeMatch =
 
 proc `+`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Covariant)
 proc `-`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Contravariant)
+proc `~`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Invariant)
+proc `*`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Ultravariant)
 proc `*`*(t: Type, variance: Variance): TypeBound {.inline.} = TypeBound(boundType: t, variance: variance)
 
 proc converse*(tm: TypeMatch): TypeMatch =
@@ -149,9 +123,11 @@ proc match*(b: TypeBound, t: Type): TypeMatch =
     if result == tmUnknown:
       result = converse b.boundType.match(t)
   of Invariant:
+    result = min(b.boundType.match(t), converse t.match(b.boundType))
+  of Ultravariant:
     result = b.boundType.match(t)
-    if result == tmUnknown:
-      result = t.match(b.boundType)
+    if result != tmNone:
+      result = max(result, converse t.match(b.boundType))
 
 proc matchBound*(b: TypeBound, t: Type): bool {.inline.} =
   b.match(t).matches
@@ -162,13 +138,6 @@ proc match*(matcher, t: Type): TypeMatch =
   # otherwise either order can give none, in which the non-none result matters
   # otherwise generally should be anticommutative, but this is not necessary
   # properties do not have effect on default types besides dropping equal to almost equal
-  proc reduceMatch(s1, s2: seq[Type]): TypeMatch =
-    if s1.len != s2.len: return tmNone
-    result = tmEqual
-    for i in 0 ..< s1.len:
-      let m = match(+s1[i], s2[i])
-      if m <= tmNone: return m
-      elif m < result: result = m
   if matcher == t: return tmEqual
   result = case matcher.kind
   of concreteTypeKinds:
@@ -184,11 +153,24 @@ proc match*(matcher, t: Type): TypeMatch =
     of tyReference, tyList, tySet:
       match(+matcher.elementType[], t.elementType[])
     of tyTuple:
-      reduceMatch(matcher.elements[], t.elements[])
+      if matcher.elements.len != t.elements.len and matcher.varargs.isNil and t.varargs.isNil:
+        return tmNone
+      var max = t.elements.len
+      if matcher.elements.len > t.elements.len and (max = matcher.elements.len; t.varargs.isNil):
+        return tmNone
+      var res = tmAlmostEqual
+      for i in 0 ..< max:
+        let m = match(+matcher.nth(i), t.nth(i))
+        if m < res: res = m
+        if res <= tmNone: return res
+      if not matcher.varargs.isNil and not t.varargs.isNil:
+        let vm = match(+matcher.varargs[], t.varargs[])
+        if vm < res: res = vm
+      res
     of tyFunction:
       min(
         match(-matcher.returnType[], t.returnType[]),
-        reduceMatch(matcher.arguments[], t.arguments[]))
+        match(+matcher.arguments[], t.arguments[]))
     of tyTable:
       min(
         match(+matcher.keyType[], t.keyType[]),
@@ -274,7 +256,7 @@ proc commonType*(a, b: Type): Type =
   elif m1 == tmEqual:
     a
   else:
-    Type(kind: tyUnion, operands: toRef(@[a, b]))
+    union(a, b)
 
 import arrays
 
@@ -293,7 +275,7 @@ proc checkType*(value: Value, t: Type): bool =
         yes = false; break
     yes
   template eachAreTable[T](iter; types: Table[T, Type]): untyped =
-    let ts = types; var yes = true;var i = 0
+    let ts = types; var yes = true; var i = 0
     for key, value in iter:
       if (i >= ts.len) or (not checkType(value, ts[key])):
         yes = false; break
@@ -312,10 +294,10 @@ proc checkType*(value: Value, t: Type): bool =
   of tyFloat: value.kind == vkFloat
   of tyBoolean: value.kind == vkBoolean
   of tyFunction:
-    # XXX (4) no information about signature
+    # XXX (2) no information about signature
     value.kind in {vkFunction, vkNativeFunction}
   of tyTuple:
-    value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements[])
+    value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements)
   of tyReference:
     value.kind == vkReference and (value.referenceValue.isNil or
       value.referenceValue[].checkType(t.elementType[]))

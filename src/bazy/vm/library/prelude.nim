@@ -6,6 +6,6 @@ proc prelude*: Context =
   result = newContext(@[syntax(), numbers(), logic(), types()])
   # todo:
   # reflection, modules, types,
-  # functions, logic, errors,
+  # functions, errors,
   # comparison, strings, collections/iterators,
   # random, json, times
