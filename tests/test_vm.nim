@@ -29,6 +29,8 @@ test "compile success":
         true)
   working "1 + 1"
   failing "1 + 1.0"
+  working "while true, ()"
+  failing "while 1.0, ()"
 
 test "eval values":
   let tests = {

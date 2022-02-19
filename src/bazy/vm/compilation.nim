@@ -372,53 +372,6 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
                 arguments: argumentStatement).toInstruction
               result = scope.context.evaluateStatic(call).statementValue
               break
-    when false:
-      # template: (scope, expressions -> statement)
-      if result.isNil and ex.address.isIdentifier(name):
-        var argTypes = newSeq[Type](ex.arguments.len + 1)
-        argTypes[0] = Ty(Scope)
-        for i in 0 ..< ex.arguments.len:
-          argTypes[i + 1] = Ty(Expression)
-        let templateType = Type(kind: tyFunction,
-          returnType: toRef(Ty(Statement)),
-          arguments: (ref Type)(kind: tyTuple, elements: argTypes),
-          properties: properties(Template))
-        let overloads = overloads(scope, name, +templateType)
-        if overloads.len != 0:
-          let templ = overloads[0]
-          var arguments = newSeq[Statement](ex.arguments.len + 1)
-          arguments[0] = constant(scope, Ty(Scope))
-          for i in 0 ..< ex.arguments.len:
-            arguments[i + 1] = constant(copy ex.arguments[i], Ty(Expression))
-          let call = Statement(kind: skFunctionCall,
-            callee: variableGet(templ),
-            arguments: arguments).toInstruction
-          result = scope.context.evaluateStatic(call).statementValue
-      # typed template: (scope, statements -> statement)
-      if result.isNil and ex.address.isIdentifier(name):
-        var argTypes = newSeq[Type](ex.arguments.len + 1)
-        argTypes[0] = Ty(Scope)
-        for i in 0 ..< ex.arguments.len:
-          argTypes[i + 1] = Ty(Statement)
-        let typedTemplateType = Type(kind: tyFunction,
-          returnType: toRef(Ty(Statement)),
-          arguments: (ref Type)(kind: tyTuple, elements: argTypes),
-          properties: properties(TypedTemplate))
-        let overloads = overloads(scope, name, +typedTemplateType)
-        if overloads.len != 0:
-          let templ = overloads[0]
-          var arguments = newSeq[Statement](ex.arguments.len + 1)
-          arguments[0] = constant(scope, Ty(Scope))
-          for i in 0 ..< ex.arguments.len:
-            if argumentStatements[i].isNil:
-              argumentStatements[i] = map(ex.arguments[i])
-            arguments[i + 1] = Statement(kind: skConstant,
-              cachedType: Ty(Statement),
-              constant: Value(kind: vkStatement, statementValue: argumentStatements[i]))
-          let call = Statement(kind: skFunctionCall,
-            callee: variableGet(templ),
-            arguments: arguments).toInstruction
-          result = scope.context.evaluateStatic(call).statementValue
     if result.isNil:
       var argumentTypes = newSeq[Type](ex.arguments.len)
       for i in 0 ..< ex.arguments.len:

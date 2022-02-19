@@ -25,26 +25,6 @@ proc withProperties*(ty: sink Type, ps: varargs[Property, property]): Type {.inl
   ty.properties = properties(ps)
   ty
 
-when false:
-  proc templateProperty: PropertyTag =
-    var prop {.global.}: PropertyTag
-    if prop.isNil:
-      prop = PropertyTag(name: "Template", argumentTypes: @[],
-        typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
-          if t.properties.hasTag(prop): tmEqual else: tmAlmostEqual)
-    result = prop
-
-  proc typedTemplateProperty: PropertyTag =
-    var prop {.global.}: PropertyTag
-    if prop.isNil:
-      prop = PropertyTag(name: "TypedTemplate", argumentTypes: @[],
-        typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
-          if t.properties.hasTag(prop): tmEqual else: tmAlmostEqual)
-    result = prop
-
-  template Template*: PropertyTag = templateProperty()
-  template TypedTemplate*: PropertyTag = typedTemplateProperty()
-
 proc tupleType*(s: varargs[Type]): Type =
   Type(kind: tyTuple, elements: @s)
 
