@@ -119,7 +119,21 @@ proc toInstruction*(st: Statement): Instruction =
   of skTable:
     Instruction(kind: BuildTable, entries: map st.entries)
   of skComposite:
-    Instruction(kind: BuildComposite, composite: map st.composite)
+    Instruction(kind: BuildComposite, composite: toCompositeArray(map st.composite))
+  of skGetComposite:
+    Instruction(kind: GetComposite, getComposite: map st.getComposite,
+      getCompositeId: st.getCompositeName.getCompositeNameId)
+  of skSetComposite:
+    Instruction(kind: SetComposite, setComposite: map st.setComposite,
+      setCompositeId: st.setCompositeName.getCompositeNameId,
+      setCompositeValue: map st.setCompositeValue)
+  of skGetIndex:
+    Instruction(kind: GetIndex, getIndexAddress: map st.getIndexAddress,
+      getIndex: st.getIndex)
+  of skSetIndex:
+    Instruction(kind: SetIndex, setIndexAddress: map st.setIndexAddress,
+      setIndex: st.setIndex,
+      setIndexValue: map st.setCompositeValue)
   of skUnaryInstruction:
     Instruction(kind: st.unaryInstructionKind, unary: map st.unary)
   of skBinaryInstruction:
@@ -261,13 +275,10 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       let lhs = map ex.left
       let name = ex.right.identifier
       if lhs.cachedType.kind == tyComposite and lhs.cachedType.fields.hasKey(name):
-        result = Statement(kind: skFunctionCall,
+        result = Statement(kind: skGetComposite,
           cachedType: lhs.cachedType.fields[name],
-          callee: constant(
-            Value(kind: vkNativeFunction, nativeFunctionValue: proc (args: openarray[Value]): Value {.nimcall.} =
-              args[0].compositeValue[args[1].stringValue[]]),
-            tyNone),
-          arguments: @[lhs, constant(name)])
+          getComposite: lhs,
+          getCompositeName: name)
       else:
         let ident = Expression(kind: Name, identifier: "." & name)
         try:

@@ -38,7 +38,7 @@ proc funcTypeWithVarargs*(returnType: Type, arguments: varargs[Type], varargs: T
   Type(kind: tyFunction, returnType: toRef(returnType), arguments: toRef(tupleTypeWithVarargs(arguments, varargs)))
 
 proc union*(s: varargs[Type]): Type =
-  Type(kind: tyUnion, operands: toRef(@s))
+  Type(kind: tyUnion, operands: @s)
 
 const
   allTypeKinds* = {low(TypeKind)..high(TypeKind)}
@@ -172,7 +172,7 @@ proc match*(matcher, t: Type): TypeMatch =
   of tyNone: tmUnknown
   of tyUnion:
     var max = tmFiniteFalse
-    for a in matcher.operands[]:
+    for a in matcher.operands:
       let m = match(+a, t)
       if m > max: max = m
       if max >= tmFiniteTrue:
@@ -181,7 +181,7 @@ proc match*(matcher, t: Type): TypeMatch =
     max
   of tyIntersection:
     var min = tmFiniteTrue
-    for a in matcher.operands[]:
+    for a in matcher.operands:
       let m = match(+a, t)
       if m < min: min = m
       if min <= tmFiniteFalse:
@@ -254,13 +254,6 @@ proc checkType*(value: Value, t: Type): bool =
       if not checkType(it, ty):
         yes = false; break
     yes
-  template eachAreTable[T](iter; types: Table[T, Type]): untyped =
-    let ts = types; var yes = true; var i = 0
-    for key, value in iter:
-      if (i >= ts.len) or (not checkType(value, ts[key])):
-        yes = false; break
-      inc i
-    yes and i == types.len
   template eachAreTable(iter; kty, vty: Type): untyped =
     let kt = kty; let vt = vty; var yes = true
     for key, value in iter:
@@ -292,20 +285,27 @@ proc checkType*(value: Value, t: Type): bool =
   of tyStatement: value.kind == vkStatement
   of tyScope: value.kind == vkScope
   of tyComposite:
-    value.kind == vkComposite and value.compositeValue[].eachAreTable(t.fields)
+    value.kind == vkComposite and (block:
+      var res = false
+      var i = 0
+      for key, value in value.compositeValue[]:#.items:
+        if (i >= value.compositeValue[].len) or (not checkType(value, t.fields[key.getCompositeName])):
+          res = false; break
+        inc i
+      i == t.fields.len and res)
   of tyType: value.kind == vkType and t.typeValue[].match(value.typeValue[]).matches
   of tyAny: true
   of tyNone: false
   of tyUnion:
     var res = false
-    for ty in t.operands[]:
+    for ty in t.operands:
       if value.checkType(ty):
         res = true
         break
     res
   of tyIntersection:
     var res = true
-    for ty in t.operands[]:
+    for ty in t.operands:
       if not value.checkType(ty):
         res = false
         break

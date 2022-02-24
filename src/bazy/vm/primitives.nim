@@ -47,6 +47,8 @@ type
   RuntimePropertyObj* = object
     properties*: Properties
     value*: Value
+  
+  CompositeNameId* = int
 
   ValueObj* = object # could be cyclic
     # entire thing can be pointer tagged, but would need GC hooks
@@ -69,10 +71,8 @@ type
     of vkReference:
       referenceValue*: ref Value
     of vkComposite:
-      # supposed to be represented more efficiently
-      # short string instead of string
-      # compare composite keys by hashing keys and caching it
-      compositeValue*: ref Table[string, Value]
+      compositeValue*: ref Table[CompositeNameId, Value]#ArrayRef[tuple[id: CompositeNameId, value: Value]]
+      # ^ arrayref version here crashes orc compiler
     of vkPropertyReference:
       propertyRefValue*: ref RuntimePropertyObj
     of vkType:
@@ -165,8 +165,7 @@ type
     of tyType:
       typeValue*: ref Type
     of tyUnion, tyIntersection:
-      operands*: ref seq[Type]
-      # this not being ref seq aborted compilation for some reason
+      operands*: seq[Type]
     of tyNot:
       notType*: ref Type
     of tyBaseType:
@@ -228,9 +227,14 @@ type
     BuildSet
     BuildTable
     BuildComposite
-    # custom
+    GetComposite
+    SetComposite
+    GetIndex
+    SetIndex
+    # binary
     AddInt, SubInt, MulInt, DivInt
     AddFloat, SubFloat, MulFloat, DivFloat
+    # unary
     NegInt, NegFloat
   
   BinaryInstructionKind* = range[AddInt .. DivFloat]
@@ -277,7 +281,21 @@ type
     of BuildTable:
       entries*: Array[tuple[key, value: Instruction]]
     of BuildComposite:
-      composite*: Array[tuple[key: string, value: Instruction]]
+      composite*: Array[tuple[id: CompositeNameId, value: Instruction]]
+    of GetComposite:
+      getComposite*: Instruction
+      getCompositeId*: CompositeNameId
+    of SetComposite:
+      setComposite*: Instruction
+      setCompositeId*: CompositeNameId
+      setCompositeValue*: Instruction
+    of GetIndex:
+      getIndexAddress*: Instruction
+      getIndex*: int
+    of SetIndex:
+      setIndexAddress*: Instruction
+      setIndex*: int
+      setIndexValue*: Instruction
     of low(UnaryInstructionKind) .. high(UnaryInstructionKind):
       unary*: Instruction
     of low(BinaryInstructionKind) .. high(BinaryInstructionKind):
@@ -310,6 +328,10 @@ type
     skSet
     skTable
     skComposite
+    skGetComposite
+    skSetComposite
+    skGetIndex
+    skSetIndex
     # custom instructions
     skUnaryInstruction
     skBinaryInstruction
@@ -358,6 +380,20 @@ type
       entries*: seq[tuple[key, value: Statement]]
     of skComposite:
       composite*: seq[tuple[key: string, value: Statement]]
+    of skGetComposite:
+      getComposite*: Statement
+      getCompositeName*: string
+    of skSetComposite:
+      setComposite*: Statement
+      setCompositeName*: string
+      setCompositeValue*: Instruction
+    of skGetIndex:
+      getIndexAddress*: Statement
+      getIndex*: int
+    of skSetIndex:
+      setIndexAddress*: Statement
+      setIndex*: int
+      setIndexValue*: Statement
     of skUnaryInstruction:
       unaryInstructionKind*: UnaryInstructionKind
       unary*: Instruction
@@ -397,6 +433,62 @@ type
 
 static:
   doAssert sizeof(Value) <= 2 * sizeof(int)
+
+var
+  compositeNameIdTable*: Table[string, CompositeNameId]
+  compositeNames*: seq[string]
+
+proc getCompositeNameId*(name: string): CompositeNameId =
+  compositeNameIdTable.withValue(name, id):
+    result = id[]
+  do:
+    result = CompositeNameId(compositeNames.len)
+    compositeNameIdTable[name] = result
+    compositeNames.add(name)
+
+proc getCompositeName*(id: CompositeNameId): string =
+  compositeNames[id.int]
+
+when false:
+  import algorithm
+
+  proc toCompositeArray*[T](table: Array[tuple[key: string, value: T]]): Array[tuple[id: CompositeNameId, value: T]] =
+    result = newArray[typeof result[0]](table.len)
+    for i, (k, v) in table:
+      let id = k.getCompositeNameId
+      result[i] = (id, v)
+    seq[typeof result[0]](result).sort(proc (a, b: auto): int = cmp(a[0], b[0]))
+
+  proc toCompositeArray*[T](table: Table[string, T]): Array[tuple[id: CompositeNameId, value: T]] =
+    result = newArray[typeof result[0]](table.len)
+    var i = 0
+    for k, v in table:
+      let id = k.getCompositeNameId
+      result[i] = (id, v)
+      inc i
+    seq[typeof result[0]](result).sort(proc (a, b: typeof(result[0])): int = cmp(a[0], b[0]))
+
+  proc get*[T](arr: Array[tuple[id: CompositeNameId, value: T]], id: CompositeNameId): T =
+    arr[binarySearch(seq[typeof arr[0]](arr), id,
+      proc (item: typeof(arr[0]), id: CompositeNameId): int = cmp(item[0], id))][1]
+
+  proc set*[T](arr: var Array[tuple[id: CompositeNameId, value: T]], id: CompositeNameId, val: T) =
+    arr[binarySearch(seq[typeof arr[0]](arr), id,
+      proc (item: typeof(arr[0]), id: CompositeNameId): int = cmp(item[0], id))][1] =
+        val
+else:
+  import algorithm
+  proc toCompositeArray*[T](table: Array[tuple[key: string, value: T]]): Array[tuple[id: CompositeNameId, value: T]] =
+    result = newArray[typeof result[0]](table.len)
+    for i, (k, v) in table:
+      let id = k.getCompositeNameId
+      result[i] = (id, v)
+    seq[typeof result[0]](result).sort(proc (a, b: auto): int = cmp(a[0], b[0]))
+
+  proc toCompositeArray*[T](table: Table[string, T]): Table[CompositeNameId, T] =
+    for k, v in table:
+      let id = k.getCompositeNameId
+      result[id] = v
 
 proc get*(stack: Stack, index: int): lent Value {.inline.} =
   stack.stack[index]
@@ -588,10 +680,10 @@ proc `$`*(value: Value): string =
   of vkReference: ($value.referenceValue[])
   of vkComposite:
     var s = "("
-    for k, v in value.compositeValue[]:
+    for k, v in value.compositeValue[]:#.items:
       if s.len != len"(":
         s.add(", ")
-      s.add(k)
+      s.add(k.getCompositeName)
       s.add(": ")
       s.add($v)
     s.add(')')
@@ -647,8 +739,8 @@ proc `$`*(t: Type): string =
   of tyTable: "Table(" & $t.keyType[] & ", " & $t.valueType[] & ")"
   of tyComposite: "Composite" & $t.fields
   of tyType: "Type " & $t.typeValue[]
-  of tyUnion: "Union(" & $t.operands[] & ")"
-  of tyIntersection: "Intersection(" & $t.operands[] & ")"
+  of tyUnion: "Union(" & $t.operands & ")"
+  of tyIntersection: "Intersection(" & $t.operands & ")"
   of tyNot: "Not " & $t.notType[]
   of tyBaseType: "BaseType " & $t.baseKind
   of tyWithProperty: "WithProperty(" & $t.typeWithProperty[] & ", " & $t.withProperty & ")"

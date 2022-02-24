@@ -19,7 +19,8 @@ proc toValue*(x: sink Array[Value]): Value = Value(kind: vkArray, tupleValue: to
 proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
 proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
-proc toValue*(x: sink Table[string, Value]): Value = withkindref(composite, x)
+proc toValue*(x: sink Table[CompositeNameId, Value]#[Array[(CompositeNameId, Value)]]#): Value = withkindref(composite, x)
+proc toValue*(x: sink Table[string, Value]): Value = toValue(toCompositeArray(x))
 proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkind(nativeFunction, x)
 proc toValue*(x: Function): Value = withkind(function, x)
 proc toValue*(x: Expression): Value = withkind(expression, x)
@@ -46,10 +47,10 @@ proc toType*(x: Value): Type =
   of vkReference:
     result = Type(kind: tyReference, elementType: toRef(x.referenceValue[].toType))
   of vkComposite:
-    let val = x.compositeValue[]
+    let val = x.compositeValue.unref
     result = Type(kind: tyComposite, fields: initTable[string, Type](val.len))
-    for k, v in val:
-      result.fields[k] = v.toType
+    for k, v in val:#.items:
+      result.fields[k.getCompositeName] = v.toType
   of vkPropertyReference:
     result = toType(x.propertyRefValue.value)
     result.properties = x.propertyRefValue.properties
@@ -87,10 +88,12 @@ proc copy*(value: Value): Value =
       newArray[i] = copy value.tupleValue.unref[i]
     toValue(newArray)
   of vkComposite:
-    var newTable = newTable[string, Value](value.compositeValue[].len)
-    for k, v in value.compositeValue[]:
-      newTable[k] = copy v
-    Value(kind: vkComposite, compositeValue: newTable)
+    var newTable = newTable[CompositeNameId, Value](value.compositeValue[].len)#newArray[(CompositeNameId, Value)](value.compositeValue[].len)
+    #var i = 0
+    for k, v in value.compositeValue[]:#.items:
+      newTable[k] = copy v#i] = (k, copy v)
+      #inc i
+    Value(kind: vkComposite, compositeValue: newTable)#toValue(newTable)
   of vkPropertyReference, vkEffect,
     vkSet, vkTable, vkExpression, vkStatement, vkScope:
     # unimplemented

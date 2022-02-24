@@ -144,10 +144,36 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
       arr[run k] = run v
     result = toValue(arr)
   of BuildComposite:
-    var arr = initTable[string, Value](ins.composite.len)
+    var arr = initTable[CompositeNameId, Value](ins.composite.len)#newArray[(CompositeNameId, Value)](ins.composite.len)
+    #var i = 0
     for k, v in ins.composite.items:
-      arr[k] = run v
+      arr[k] = run v#arr[i] = (k, run v)
+      #inc i
     result = toValue(arr)
+  of GetComposite:
+    let x = run ins.getComposite
+    result = x.compositeValue[ins.getCompositeId]#.unref.get(ins.getCompositeId)
+  of SetComposite:
+    let x = run ins.setComposite
+    result = run ins.setCompositeValue
+    x.compositeValue[ins.setCompositeId] = result#.unref.set(ins.setCompositeId, result)
+  of GetIndex:
+    let x = run ins.getIndexAddress
+    case x.kind
+    of vkList:
+      result = x.listValue.unref[ins.getIndex]
+    of vkArray:
+      result = x.tupleValue.unref[ins.getIndex]
+    else: discard # error
+  of SetIndex:
+    let x = run ins.setIndexAddress
+    result = run ins.setIndexValue
+    case x.kind
+    of vkList:
+      x.listValue.unref[ins.setIndex] = result
+    of vkArray:
+      x.tupleValue.unref[ins.setIndex] = result
+    else: discard # error
   of AddInt:
     let a = run ins.binary1
     let b = run ins.binary2
