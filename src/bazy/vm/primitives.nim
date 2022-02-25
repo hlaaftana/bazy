@@ -136,10 +136,14 @@ type
     tyUnion, tyIntersection, tyNot,
     tyBaseType,
     tyWithProperty,
-    # matcher
     tyCustomMatcher
-    # maybe add parametrized types as a typeclass
-    # (could use custom matcher instead)
+    # XXX generics: generic type + mechanism that instantiates symbols with generic types
+    # only works with symbols meaning only symbol resolving logic has to deal with the instantiation
+    # otherwise generic type by itself can work
+    #tyParameter,
+    #tyGeneric
+
+  #ParameterType* = ref object
   
   Type* {.acyclic.} = object # could be cyclic
     properties*: Properties

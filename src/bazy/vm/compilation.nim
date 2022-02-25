@@ -238,6 +238,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
     compile(scope, ex, bound)
   proc isSingleColon(e: Expression): bool =
     e.kind == Symbol and e.symbol == short":"
+  # move some things out to procs
   case ex.kind
   of None: result = Statement(kind: skNone, cachedType: Ty(None))
   of Number:
@@ -295,13 +296,12 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           address: Expression(kind: Name, identifier: "."),
           arguments: @[ex.left, ex.right]))
   of CallKinds:
-    # move this out to a proc
-    # XXX pass type bound as well as scope, to pass both to a compile proc
-    # XXX (1) named arguments with signature property
+    # XXX (1) named arguments with signature property (instead of composite?)
     var argumentStatements = newSeq[Statement](ex.arguments.len)
     if ex.address.isIdentifier(name):
       var argumentTypes = newSeq[Type](ex.arguments.len)
       for t in argumentTypes.mitems: t = Ty(Any)
+      # XXX pass type bound as well as scope, to pass both to a compile proc
       var realArgumentTypes = newSeq[Type](ex.arguments.len + 1)
       realArgumentTypes[0] = Ty(Scope)
       for i in 1 ..< realArgumentTypes.len:
@@ -414,8 +414,9 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
               for i in 0 ..< argumentStatements.len:
                 let pt = t.param(i)
                 if matchBound(-argumentTypes[i], pt):
-                  d[0][i] = Ty(Any) # optimize checking types we know match
+                  # optimize checking types we know match
                   # XXX do this recursively?
+                  d[0][i] = Ty(Any)
                 else:
                   d[0][i] = pt
               d[1] = variableGet(subs[i])

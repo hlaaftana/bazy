@@ -25,6 +25,16 @@ proc withProperties*(ty: sink Type, ps: varargs[Property, property]): Type {.inl
   ty.properties = properties(ps)
   ty
 
+const
+  allTypeKinds* = {low(TypeKind)..high(TypeKind)}
+  concreteTypeKinds* = {tyNoneValue..tyType}
+  typeclassTypeKinds* = {tyAny..tyWithProperty}
+  matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
+  atomicTypes* = {tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
+    tyString, tyExpression, tyStatement, tyScope}
+  highestNonMatching* = tmFalse
+  lowestMatching* = tmTrue
+
 proc tupleType*(s: varargs[Type]): Type =
   Type(kind: tyTuple, elements: @s)
 
@@ -40,26 +50,86 @@ proc funcTypeWithVarargs*(returnType: Type, arguments: varargs[Type], varargs: T
 proc union*(s: varargs[Type]): Type =
   Type(kind: tyUnion, operands: @s)
 
-const
-  allTypeKinds* = {low(TypeKind)..high(TypeKind)}
-  concreteTypeKinds* = {tyNoneValue..tyType}
-  typeclassTypeKinds* = {tyAny..tyWithProperty}
-  matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
-  atomicTypes* = {tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
-    tyString, tyExpression, tyStatement, tyScope}
-  highestNonMatching* = tmFalse
-  lowestMatching* = tmTrue
+const definiteTypeLengths*: array[TypeKind, int] = [
+  tyNoneValue: 0,
+  tyInteger: 0,
+  tyUnsigned: 0,
+  tyFloat: 0,
+  tyBoolean: 0,
+  tyFunction: 2,
+  tyTuple: -1,
+  tyReference: 1,
+  tyList: 1,
+  tyString: 0,
+  tySet: 1,
+  tyTable: 2,
+  tyExpression: 0,
+  tyStatement: 0,
+  tyScope: 0,
+  tyComposite: -1,
+  tyType: 1,
+  tyAny: 0,
+  tyNone: 0,
+  tyUnion: -1,
+  tyIntersection: -1,
+  tyNot: 1,
+  tyBaseType: -1,
+  tyWithProperty: -1,
+  tyCustomMatcher: 0
+]
+
+proc len*(t: Type): int =
+  result = definiteTypeLengths[t.kind]
+  if result < 0:
+    case t.kind
+    of tyTuple:
+      if t.varargs.isNil:
+        result = t.elements.len
+    of tyUnion, tyIntersection:
+      result = t.operands.len
+    else: discard
 
 proc hasNth*(t: Type, i: int): bool {.inline.} =
-  assert t.kind == tyTuple
-  i < t.elements.len or not t.varargs.isNil
+  i < t.len or (t.kind == tyTuple and not t.varargs.isNil)
 
-proc nth*(t: Type, i: int): Type {.inline.} =
-  assert t.kind == tyTuple
-  if i < t.elements.len or t.varargs.isNil:
-    t.elements[i]
-  else:
-    t.varargs[]
+proc nth*(t: Type, i: int): Type =
+  case t.kind
+  of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
+    tyString, tyExpression, tyStatement, tyScope,
+    tyAny, tyNone:
+    discard # inapplicable
+  of tyFunction:
+    if i == 0:
+      result = t.arguments[]
+    else:
+      result = t.returnType[]
+  of tyTuple:
+    if i < t.elements.len or t.varargs.isNil:
+      result = t.elements[i]
+    else:
+      result = t.varargs[]
+  of tyReference, tyList, tySet:
+    result = t.elementType[]
+  of tyTable:
+    if i == 0:
+      result = t.keyType[]
+    else:
+      result = t.valueType[]
+  of tyComposite:
+    discard # inapplicable
+  of tyType:
+    result = t.typeValue[]
+  of tyUnion, tyIntersection:
+    # this is actually not supposed to happen
+    result = t.operands[i]
+  of tyNot:
+    result = t.notType[]
+  of tyBaseType:
+    discard # inapplicable
+  of tyWithProperty:
+    discard # inapplicable
+  of tyCustomMatcher:
+    discard # inapplicable
 
 proc param*(t: Type, i: int): Type {.inline.} =
   assert t.kind == tyFunction
