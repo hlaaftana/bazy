@@ -3,6 +3,12 @@ import std/[tables, sets, hashes], "."/[arrays, pointertag], ../language/express
 # type system should exist for both static and runtime dispatch
 # runtime-only types should only be subtypes of static-only types
 
+template minimal(T): untyped =
+  when sizeof(T) == sizeof(int):
+    T
+  else:
+    ref T
+
 type
   ValueKind* = enum
     vkNone
@@ -52,8 +58,7 @@ type
 
   ValueObj* = object # could be cyclic
     # entire thing can be pointer tagged, but would need GC hooks
-    # todo: interning for some pointer types
-    # todo: separate string (array) from mutable string (nim string)
+    # maybe interning for some pointer types
     case kind*: ValueKind
     of vkNone: discard
     of vkInteger, vkBoolean:
@@ -63,16 +68,17 @@ type
     of vkFloat:
       floatValue*: float
     of vkList:
-      listValue*: ref seq[Value]
+      listValue*: minimal seq[Value]
     of vkString:
-      stringValue*: ref string
+      stringValue*: minimal string
     of vkArray:
-      tupleValue*: ArrayRef[Value]
+      tupleValue*: minimal Array[Value]
     of vkReference:
       referenceValue*: ref Value
     of vkComposite:
-      compositeValue*: ref Table[CompositeNameId, Value]#ArrayRef[tuple[id: CompositeNameId, value: Value]]
+      compositeValue*: minimal Table[CompositeNameId, Value]#ArrayRef[tuple[id: CompositeNameId, value: Value]]
       # ^ arrayref version here crashes orc compiler
+      # XXX probably better than table to use seq
     of vkPropertyReference:
       propertyRefValue*: ref RuntimePropertyObj
     of vkType:
@@ -137,13 +143,16 @@ type
     tyBaseType,
     tyWithProperty,
     tyCustomMatcher
-    # XXX generics: generic type + mechanism that instantiates symbols with generic types
+    # XXX (0) generics: generic type + mechanism that instantiates symbols with generic types
     # only works with symbols meaning only symbol resolving logic has to deal with the instantiation
     # otherwise generic type by itself can work
-    #tyParameter,
-    #tyGeneric
+    # ^ maybe remove tyGeneric and put the parameter list in Variable
+    tyParameter,
+    tyGeneric
 
-  #ParameterType* = ref object
+  ParameterType* = ref object
+    name*: string
+    bound*: TypeBound
   
   Type* {.acyclic.} = object # could be cyclic
     properties*: Properties
@@ -153,11 +162,14 @@ type
       tyAny, tyNone:
       discard
     of tyFunction:
-      # XXX (2) signature can be a property but it might not be worth it
-      arguments*: ref Type # tuple type
+      # XXX (2) signature with argument names and default values can be a property
+      # only considered at callsite like nim, no semantic value
+      # argument types could go in type or part of the property (good for runtime checking)
+      arguments*: ref Type # tuple type, includes varargs
       returnType*: ref Type
     of tyTuple:
       # XXX (1) maybe allow names in a property to reflect regular named tuples which would then extend to named arguments
+      # maybe signature property instead, ordered names can be accessors instead of like composite
       elements*: seq[Type]
       varargs*: ref Type # for now only trailing
     of tyReference, tyList, tySet:
@@ -181,10 +193,15 @@ type
       typeMatcher*: proc (t: Type): TypeMatch
       valueMatcher*: proc (v: Value): bool
       # could add custom compare
+    of tyParameter:
+      parameter*: ParameterType
+    of tyGeneric:
+      parameters*: Table[ParameterType, TypeBound]
+      genericPattern*: ref Type
     
   TypeMatch* = enum
     # in order of strength
-    tmUnknown, tmNone, tmFiniteFalse, tmFalse, tmTrue, tmFiniteTrue, tmAlmostEqual, tmEqual
+    tmUnknown, tmNone, tmFiniteFalse, tmFalse, tmTrue, tmFiniteTrue, tmGeneric, tmAlmostEqual, tmEqual
 
   Variance* = enum
     Covariant
@@ -514,9 +531,9 @@ template toRef*[T](x: T): ref T =
   res[] = x
   res
 
-template unref*[T](x: ref T): T = x[]
+template unref*[T](x: ref T): untyped = x[]
 
-template unref*[T](x: T): T = x
+template unref*[T](x: T): untyped = x
 
 import ../util/objects
 
@@ -529,6 +546,12 @@ proc hash*(p: PropertyTag): Hash =
   result = !$ result
 
 proc `==`*(a, b: PropertyTag): bool = same(a, b)
+
+proc hash*(p: ParameterType): Hash =
+  mix cast[pointer](p)
+  result = !$ result
+
+proc `==`*(a, b: ParameterType): bool = same(a, b)
 
 proc hash*(v: Value): Hash {.noSideEffect.}
 proc hash*(v: Type): Hash {.noSideEffect.}
@@ -674,8 +697,8 @@ proc `$`*(value: Value): string =
   of vkBoolean: $bool(value.integerValue)
   of vkUnsigned: $value.unsignedValue
   of vkFloat: $value.floatValue
-  of vkList: ($value.listValue[])[1..^1]
-  of vkString: value.stringValue[]
+  of vkList: ($value.listValue.unref)[1..^1]
+  of vkString: value.stringValue.unref
   of vkArray:
     var s = ($value.tupleValue.unref)[1..^1]
     s[0] = '('
@@ -716,6 +739,8 @@ proc `$`*(p: Property): string =
       result.add($a)
     result.add(')')
 
+proc `$`*(tb: TypeBound): string
+
 proc `$`*(t: Type): string =
   proc `$`(s: seq[Type]): string =
     for t in s:
@@ -749,6 +774,15 @@ proc `$`*(t: Type): string =
   of tyBaseType: "BaseType " & $t.baseKind
   of tyWithProperty: "WithProperty(" & $t.typeWithProperty[] & ", " & $t.withProperty & ")"
   of tyCustomMatcher: "Custom"
+  of tyParameter: "Parameter(" & $t.parameter.name & ")"
+  of tyGeneric:
+    var s = "Generic["
+    var i = 0
+    for p, b in t.parameters:
+      if i != 0: s.add(", ")
+      else: inc i
+      s.add(p.name & ": " & $b)
+    s & "](" & $t.genericPattern[] & ")"
   if t.properties.table.len != 0:
     result.add(" {") 
     for tag, args in t.properties.table:

@@ -139,7 +139,7 @@ module syntax:
       cachedType: nthType,
       callee: constant(
         Value(kind: vkNativeFunction, nativeFunctionValue: proc (args: openarray[Value]): Value {.nimcall.} =
-          args[0].tupleValue[][args[1].integerValue]),
+          args[0].tupleValue.unref[args[1].integerValue]),
         tyNone),
       arguments: @[valueArgs[1].statementValue, constant(index, Ty(Integer))])
   # todo: let/for

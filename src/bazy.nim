@@ -15,30 +15,29 @@ proc compile*(code: string, libraries = @[Prelude]): Program =
 proc evaluate*(code: string): Value =
   run(compile(code))
 
-when isMainModule:
-  import bazy/vm/values
+when isMainModule and appType in ["lib", "staticlib"]:
+  type Binary* {.exportc, bycopy.} = object
+    data*: ptr byte
+    length*: cint
 
-  when appType in ["lib", "staticlib"]:
-    type Binary* {.exportc, bycopy.} = object
-      data*: ptr byte
-      length*: cint
+  proc toBinary*(str: string): Binary =
+    result.length = str.len.cint
+    result.data = cast[ptr byte](alloc(str.len))
+    for i in 0 ..< str.len:
+      cast[ptr byte](cast[int](result.data) + i)[] = str[i].byte
 
-    proc toBinary*(str: string): Binary =
-      result.length = str.len.cint
-      result.data = cast[ptr byte](alloc(str.len))
-      for i in 0 ..< str.len:
-        cast[ptr byte](cast[int](result.data) + i)[] = str[i].byte
+  proc parse*(input: cstring): Binary {.stdcall, exportc, dynlib.} =
+    toBinary binary(parse($input))
 
-    proc parse*(input: cstring): Binary {.stdcall, exportc, dynlib.} =
-      toBinary binary(parse($input))
+  proc evaluate*(input: cstring): cstring {.stdcall, exportc, dynlib.} =
+    try:
+      result = cstring $evaluate($input)
+    except Exception as e:
+      result = cstring e.msg
+elif isMainModule and appType == "console":
+  import os
 
-    proc evaluate*(input: cstring): cstring {.stdcall, exportc, dynlib.} =
-      try:
-        result = cstring $evaluate($input)
-      except Exception as e:
-        result = cstring e.msg
-  elif appType == "console":
-    import os
+  proc commandLine() =
     let params = commandLineParams()
     if params.len > 0:
       case params[0]
@@ -84,3 +83,5 @@ when isMainModule:
         if outputFile == "": stdout.write(res)
         else: writeFile(outputFile, res)
       else: discard
+  
+  commandLine()

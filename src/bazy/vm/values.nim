@@ -13,9 +13,9 @@ proc toValue*(x: int): Value = withkind(integer, x)
 proc toValue*(x: uint): Value = withkind(unsigned, x)
 proc toValue*(x: float): Value = withkind(float, x)
 proc toValue*(x: bool): Value = Value(kind: vkBoolean, integerValue: int(x))
-proc toValue*(x: sink seq[Value]): Value = withkindref(list, x)
-proc toValue*(x: sink string): Value = withkindref(string, x)
-proc toValue*(x: sink Array[Value]): Value = Value(kind: vkArray, tupleValue: toArrayRef x.toOpenArray(0, x.len - 1))
+proc toValue*(x: sink seq[Value]): Value = withkind(list, x)
+proc toValue*(x: sink string): Value = withkind(string, x)
+proc toValue*(x: sink Array[Value]): Value = Value(kind: vkArray, tupleValue: toArray x.toOpenArray(0, x.len - 1))
 proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
 proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
@@ -34,7 +34,7 @@ proc toType*(x: Value): Type =
   of vkUnsigned: result = Ty(Unsigned)
   of vkFloat: result = Ty(Float)
   of vkBoolean: result = Ty(Boolean)
-  of vkList: result = Type(kind: tyList, elementType: toRef(x.listValue[][0].toType))
+  of vkList: result = Type(kind: tyList, elementType: toRef(x.listValue.unref[0].toType))
   of vkString: result = Ty(String)
   of vkExpression: result = Ty(Expression)
   of vkStatement: result = Ty(Statement)
@@ -77,11 +77,11 @@ proc copy*(value: Value): Value =
   of vkNone, vkInteger, vkBoolean, vkUnsigned, vkFloat,
     vkReference, vkType, vkFunction, vkNativeFunction: value
   of vkList:
-    var newSeq = newSeq[Value](value.listValue[].len)
+    var newSeq = newSeq[Value](value.listValue.unref.len)
     for i in 0 ..< newSeq.len:
-      newSeq[i] = copy value.listValue[][i]
+      newSeq[i] = copy value.listValue.unref[i]
     toValue(newSeq)
-  of vkString: toValue(value.stringValue[])
+  of vkString: toValue(value.stringValue.unref)
   of vkArray:
     var newArray = newArray[Value](value.tupleValue.unref.len)
     for i in 0 ..< newArray.len:

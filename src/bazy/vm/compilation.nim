@@ -296,7 +296,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           address: Expression(kind: Name, identifier: "."),
           arguments: @[ex.left, ex.right]))
   of CallKinds:
-    # XXX (1) named arguments with signature property (instead of composite?)
+    # XXX (1) named & default arguments with signature property (instead of composite?)
     var argumentStatements = newSeq[Statement](ex.arguments.len)
     if ex.address.isIdentifier(name):
       var argumentTypes = newSeq[Type](ex.arguments.len)

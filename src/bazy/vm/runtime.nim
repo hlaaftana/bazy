@@ -164,15 +164,21 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
       result = x.listValue.unref[ins.getIndex]
     of vkArray:
       result = x.tupleValue.unref[ins.getIndex]
+    of vkString:
+      result = toValue(x.stringValue.unref[ins.getIndex].int)
     else: discard # error
   of SetIndex:
     let x = run ins.setIndexAddress
     result = run ins.setIndexValue
-    case x.kind
+    assert x.kind == vkReference
+    case x.referenceValue[].kind
     of vkList:
-      x.listValue.unref[ins.setIndex] = result
+      x.referenceValue[].listValue.unref[ins.setIndex] = result
     of vkArray:
-      x.tupleValue.unref[ins.setIndex] = result
+      x.referenceValue[].tupleValue.unref[ins.setIndex] = result
+    of vkString:
+      assert result.kind == vkInteger and result.integerValue >= 0 and result.integerValue <= 255
+      x.referenceValue[].stringValue.unref[ins.setIndex] = result.integerValue.char
     else: discard # error
   of AddInt:
     let a = run ins.binary1

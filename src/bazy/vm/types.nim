@@ -75,7 +75,9 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyNot: 1,
   tyBaseType: -1,
   tyWithProperty: -1,
-  tyCustomMatcher: 0
+  tyCustomMatcher: 0,
+  tyParameter: -1,
+  tyGeneric: -1
 ]
 
 proc len*(t: Type): int =
@@ -130,6 +132,12 @@ proc nth*(t: Type, i: int): Type =
     discard # inapplicable
   of tyCustomMatcher:
     discard # inapplicable
+  of tyParameter, tyGeneric:
+    discard # what
+
+proc matchAgainst*(t: Type, gt: Type): Type =
+  assert gt.kind == tyGeneric
+  
 
 proc param*(t: Type, i: int): Type {.inline.} =
   assert t.kind == tyFunction
@@ -157,7 +165,7 @@ proc converse*(tm: TypeMatch): TypeMatch =
   of tmEqual, tmNone, tmAlmostEqual, tmUnknown: tm
   of tmTrue: tmFalse
   of tmFalse: tmTrue
-  of tmFiniteTrue: tmFiniteFalse
+  of tmFiniteTrue, tmGeneric: tmFiniteFalse
   of tmFiniteFalse: tmFiniteTrue
 
 proc match*(matcher, t: Type): TypeMatch
@@ -271,6 +279,14 @@ proc match*(matcher, t: Type): TypeMatch =
     min(
       if not t.properties.hasTag(matcher.withProperty): tmFiniteFalse else: tmAlmostEqual,
       match(+matcher.typeWithProperty[], t))
+  of tyParameter:
+    min(
+      tmGeneric,
+      match(matcher.parameter.bound, t))
+  of tyGeneric:
+    min(
+      tmGeneric,
+      match(matcher.genericPattern[], t))
   result = min(result, tmAlmostEqual)
   if result.matches:
     for p, args in matcher.properties.table:
@@ -345,12 +361,12 @@ proc checkType*(value: Value, t: Type): bool =
     value.kind == vkReference and (value.referenceValue.isNil or
       value.referenceValue[].checkType(t.elementType[]))
   of tyList:
-    value.kind == vkList and value.listValue[].eachAre(t.elementType[])
+    value.kind == vkList and value.listValue.unref.eachAre(t.elementType[])
   of tyString: value.kind == vkString
   of tySet:
-    value.kind == vkSet and value.setValue[].eachAre(t.elementType[])
+    value.kind == vkSet and value.setValue.unref.eachAre(t.elementType[])
   of tyTable:
-    value.kind == vkTable and value.tableValue[].eachAreTable(t.keyType[], t.valueType[])
+    value.kind == vkTable and value.tableValue.unref.eachAreTable(t.keyType[], t.valueType[])
   of tyExpression: value.kind == vkExpression
   of tyStatement: value.kind == vkStatement
   of tyScope: value.kind == vkScope
@@ -385,6 +401,8 @@ proc checkType*(value: Value, t: Type): bool =
   of tyWithProperty:
     value.checkType(t.typeWithProperty[]) and value.toType.properties.hasTag(t.withProperty)
   of tyCustomMatcher: not t.valueMatcher.isNil and t.valueMatcher(value)
+  of tyParameter: value.checkType(t.parameter.bound.boundType)
+  of tyGeneric: value.checkType(t.genericPattern[])
   if result:
     for p, args in t.properties.table:
       if not p.valueMatcher.isNil:
