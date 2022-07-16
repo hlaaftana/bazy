@@ -8,14 +8,25 @@ template withkindrefv(vk, kv, val) =
   result.`kv`[] = val
 template withkindref(k, val) =
   withkindrefv(`vk k`, `k Value`, val)
+template withkindpossibleref(k, val): untyped =
+  when result.`k Value` is ref:
+    withkindref(k, val)
+  else:
+    withkind(k, val)
 
 proc toValue*(x: int): Value = withkind(integer, x)
 proc toValue*(x: uint): Value = withkind(unsigned, x)
 proc toValue*(x: float): Value = withkind(float, x)
 proc toValue*(x: bool): Value = Value(kind: vkBoolean, integerValue: int(x))
-proc toValue*(x: sink seq[Value]): Value = withkind(list, x)
-proc toValue*(x: sink string): Value = withkind(string, x)
-proc toValue*(x: sink Array[Value]): Value = Value(kind: vkArray, tupleValue: toArray x.toOpenArray(0, x.len - 1))
+proc toValue*(x: sink seq[Value]): Value = withkindpossibleref(list, x)
+proc toValue*(x: sink string): Value = withkindpossibleref(string, x)
+proc toValue*(x: sink Array[Value]): Value =
+  template arr(a: untyped): untyped =
+    when result.tupleValue is ArrayRef:
+      toArrayRef(a)
+    else:
+      toArray(a)
+  Value(kind: vkArray, tupleValue: arr x.toOpenArray(0, x.len - 1))
 proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
 proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)

@@ -77,7 +77,7 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyWithProperty: -1,
   tyCustomMatcher: 0,
   tyParameter: -1,
-  tyGeneric: -1
+  #tyGeneric: -1
 ]
 
 proc len*(t: Type): int =
@@ -132,11 +132,12 @@ proc nth*(t: Type, i: int): Type =
     discard # inapplicable
   of tyCustomMatcher:
     discard # inapplicable
-  of tyParameter, tyGeneric:
+  of tyParameter:#, tyGeneric:
     discard # what
 
-proc matchAgainst*(t: Type, gt: Type): Type =
-  assert gt.kind == tyGeneric
+proc matchParameters*(pattern, t: Type, ): Type =
+  #assert gt.kind == tyGeneric
+  discard
   
 
 proc param*(t: Type, i: int): Type {.inline.} =
@@ -283,10 +284,10 @@ proc match*(matcher, t: Type): TypeMatch =
     min(
       tmGeneric,
       match(matcher.parameter.bound, t))
-  of tyGeneric:
-    min(
-      tmGeneric,
-      match(matcher.genericPattern[], t))
+  #of tyGeneric:
+  #  min(
+  #    tmGeneric,
+  #    match(matcher.genericPattern[], t))
   result = min(result, tmAlmostEqual)
   if result.matches:
     for p, args in matcher.properties.table:
@@ -402,7 +403,7 @@ proc checkType*(value: Value, t: Type): bool =
     value.checkType(t.typeWithProperty[]) and value.toType.properties.hasTag(t.withProperty)
   of tyCustomMatcher: not t.valueMatcher.isNil and t.valueMatcher(value)
   of tyParameter: value.checkType(t.parameter.bound.boundType)
-  of tyGeneric: value.checkType(t.genericPattern[])
+  #of tyGeneric: value.checkType(t.genericPattern[])
   if result:
     for p, args in t.properties.table:
       if not p.valueMatcher.isNil:

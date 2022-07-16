@@ -230,37 +230,329 @@ template constant*(value: int): Statement = constant(value, tyInteger)
 template constant*(value: uint): Statement = constant(value, tyUnsigned)
 template constant*(value: float): Statement = constant(value, tyFloat)
 
+proc compileNumber*(ex: Expression, bound: TypeBound): Statement =
+  let s = $ex.number
+  result = Statement(kind: skConstant)
+  case ex.number.kind
+  of Integer:
+    let val = parseInt(s)
+    if bound.boundType.kind == tyFloat:
+      result = constant(val.float)
+    elif val >= 0 and bound.boundType.kind == tyUnsigned:
+      result = constant(val.uint)
+    else:
+      result = constant(val)
+  of Floating:
+    result = constant(parseFloat(s))
+  of Unsigned:
+    result = constant(parseUInt(s))
+
+template defaultBound: untyped = +Ty(Any)
+template map(ex: Expression, bound = defaultBound): Statement =
+  compile(scope, ex, bound)
+template forward(ex: Expression): Statement =
+  compile(scope, ex, bound)
+proc isSingleColon(e: Expression): bool =
+  e.kind == Symbol and e.symbol == short":"
+
+proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
+  argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement
+
+proc compileProperty*(scope: Scope, ex: Expression, lhs: Statement, name: string, bound: TypeBound): Statement =
+  result = nil
+  if lhs.cachedType.kind == tyComposite and lhs.cachedType.fields.hasKey(name):
+    result = Statement(kind: skGetComposite,
+      cachedType: lhs.cachedType.fields[name],
+      getComposite: lhs,
+      getCompositeName: name)
+  else:
+    let ident = Expression(kind: Name, identifier: "." & name)
+    try:
+      result = compileCall(scope, ex, bound, argumentStatements = @[lhs])
+      #result = forward(
+      #  Expression(kind: PathCall,
+      #    address: ident,
+      #    arguments: @[ex.left]))
+    except NoOverloadFoundError as e:
+      if not same(ident, e.expression):
+        raise
+
+proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBound, argumentStatements: var seq[Statement]): Statement =
+  result = nil
+  var argumentTypes = newSeq[Type](ex.arguments.len)
+  for t in argumentTypes.mitems: t = Ty(Any)
+  # XXX pass type bound as well as scope, to pass both to a compile proc
+  var realArgumentTypes = newSeq[Type](ex.arguments.len + 1)
+  realArgumentTypes[0] = Ty(Scope)
+  for i in 1 ..< realArgumentTypes.len:
+    realArgumentTypes[i] = union(Ty(Expression), Ty(Statement))
+  # get all metas first and type statements accordingly
+  var allMetas = overloads(scope, name,
+    *funcType(Ty(Statement), realArgumentTypes).withProperties(
+      property(Meta, @[toValue funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)])))
+  if allMetas.len != 0:
+    var makeStatement = newSeq[bool](ex.arguments.len)
+    var metaTypes = newSeq[Type](allMetas.len)
+    for i, v in allMetas:
+      let ty = v.variable.cachedType
+      let metaTy = v.variable.cachedType.properties.getArguments(Meta)[0].typeValue[]
+      metaTypes[i] = metaTy
+      for i in 0 ..< ex.arguments.len:
+        if matchBound(+Ty(Statement), ty.param(i + 1)):
+          makeStatement[i] = true
+          argumentTypes[i] = commonType(argumentTypes[i], metaTy.param(i))
+    for i, x in makeStatement:
+      if x:
+        try:
+          argumentStatements[i] = map(ex.arguments[i], +argumentTypes[i])
+        except NoOverloadFoundError as e:
+          if same(e.expression, ex.arguments[i]):
+            reset(allMetas)
+            break
+        except TypeBoundMatchError as e:
+          if same(e.expression, ex.arguments[i]):
+            reset(allMetas)
+            break
+        argumentTypes[i] = commonType(argumentTypes[i], argumentStatements[i].cachedType)
+    var superMetas, subMetas: typeof(allMetas)
+    for i, m in allMetas:
+      let mt = metaTypes[i]
+      if matchBound(+mt,
+        funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)):
+        superMetas.add(m)
+      if matchBound(
+        +funcType(if bound.variance == Covariant: union() else: bound.boundType, argumentTypes),
+        mt):
+        subMetas.add(m)
+    superMetas.sort(
+      cmp = proc (a, b: VariableReference): int =
+        compare(a.variable.cachedType, b.variable.cachedType),
+      order = Descending)
+    subMetas.sort(
+      cmp = proc (a, b: VariableReference): int =
+        compare(a.variable.cachedType, b.variable.cachedType),
+      order = Ascending)
+    if superMetas.len != 0:
+      let meta = superMetas[0]
+      let ty = meta.variable.cachedType
+      var arguments = newSeq[Statement](ex.arguments.len + 1)
+      arguments[0] = constant(scope, Ty(Scope))
+      for i in 0 ..< ex.arguments.len:
+        if matchBound(+Ty(Statement), ty.param(i + 1)):
+          arguments[i + 1] = constant(argumentStatements[i], Ty(Statement))
+        else:
+          arguments[i + 1] = constant(copy ex.arguments[i], Ty(Expression))
+      let call = Statement(kind: skFunctionCall,
+        callee: variableGet(meta),
+        arguments: arguments).toInstruction
+      result = scope.context.evaluateStatic(call).statementValue
+    else:
+      for d in subMetas:
+        var arguments = newArray[Value](ex.arguments.len + 1)
+        arguments[0] = toValue scope
+        for i in 0 ..< ex.arguments.len:
+          if matchBound(+Ty(Statement), d.variable.cachedType.param(i + 1)):
+            arguments[i + 1] = toValue argumentStatements[i]
+          else:
+            arguments[i + 1] = toValue copy ex.arguments[i]
+        if checkType(toValue arguments, d.variable.cachedType.arguments[]):
+          var argumentStatement = newSeq[Statement](arguments.len)
+          for i, a in arguments: argumentStatement[i] = constant(a, a.toType)
+          let call = Statement(kind: skFunctionCall,
+            callee: variableGet(d),
+            arguments: argumentStatement).toInstruction
+          result = scope.context.evaluateStatic(call).statementValue
+          break
+
+proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
+  argumentStatements: var seq[Statement],
+  argumentTypes: var seq[Type], 
+  functionType: var Type): Statement =
+  result = nil
+  for i in 0 ..< ex.arguments.len:
+    if argumentStatements[i].isNil:
+      argumentStatements[i] = map(ex.arguments[i])
+    argumentTypes[i] = argumentStatements[i].cachedType
+  functionType = funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)
+  # lowest supertype function:
+  try:
+    let callee = map(ex.address, -functionType)
+    result = Statement(kind: skFunctionCall,
+      cachedType: callee.cachedType.returnType[],
+      callee: callee,
+      arguments: argumentStatements)
+  except NoOverloadFoundError as e:
+    # dispatch lowest subtype functions in order:
+    if same(e.expression, ex.address) and ex.address.isIdentifier(name):
+      functionType.returnType = toRef(
+        if bound.variance == Covariant:
+          union()
+        else:
+          bound.boundType)
+      let subs = overloads(scope, name, +functionType)
+      if subs.len != 0:
+        var dispatchees = newSeq[(seq[Type], Statement)](subs.len)
+        for i, d in dispatchees.mpairs:
+          let t = subs[i].variable.cachedType
+          d[0].newSeq(argumentStatements.len)
+          for i in 0 ..< argumentStatements.len:
+            let pt = t.param(i)
+            if matchBound(-argumentTypes[i], pt):
+              # optimize checking types we know match
+              # XXX do this recursively?
+              d[0][i] = Ty(Any)
+            else:
+              d[0][i] = pt
+          d[1] = variableGet(subs[i])
+        result = Statement(kind: skDispatch,
+          cachedType: functionType.returnType[], # we could calculate a union here but it's not worth dealing with a typeclass
+          dispatchees: dispatchees,
+          dispatchArguments: argumentStatements)
+
+proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
+  argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement =
+  # XXX (1) named & default arguments with signature property (instead of composite?) meaning handle colon expressions
+  if ex.address.isIdentifier(name):
+    result = compileMetaCall(scope, name, ex, bound, argumentStatements)
+  if result.isNil:
+    var argumentTypes = newSeq[Type](ex.arguments.len)
+    var functionType: Type
+    result = compileRuntimeCall(scope, ex, bound, argumentStatements, argumentTypes, functionType)
+    assert functionType.kind != tyNone
+    # .call, should recurse but compiled arguments should be reused:
+    if result.isNil:
+      let callee = map ex.address
+      argumentStatements.insert(callee, 0)
+      argumentTypes.insert(callee.cachedType, 0)
+      functionType = funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)
+      let overs = overloads(scope, ".call", -functionType)
+      if overs.len != 0:
+        let dotCall = variableGet(overs[0])
+        result = Statement(kind: skFunctionCall,
+          cachedType: dotCall.cachedType.returnType[],
+          callee: callee,
+          arguments: argumentStatements)
+      else:
+        raise (ref CannotCallError)(
+          expression: ex.address,
+          bound: bound,
+          scope: scope,
+          argumentTypes: argumentTypes,
+          type: callee.cachedType,
+          msg: "no way to call " & $ex.address & " of type " & $callee.cachedType &
+            " found for argument types " & $argumentTypes)
+
+proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
+  if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
+    ex.elements[0].isSingleColon):
+    if bound.boundType.kind == tyComposite:
+      assert bound.boundType.fields.len == ex.elements.len, "tuple bound type lengths do not match"
+    result = Statement(kind: skComposite, cachedType:
+      Type(kind: tyComposite, fields: initTable[string, Type](ex.elements.len)))
+    for e in ex.elements:
+      if e.isSingleColon: continue
+      assert e.kind == Colon, "composite literal must only have colon expressions"
+      assert e.left.kind == Name, "composite literal has non-name left hand side on colon expression"
+      let k = e.left.identifier
+      let bv = if bound.boundType.kind == tyComposite and k in bound.boundType.fields:
+        bound.boundType.fields[k] * bound.variance
+      else:
+        defaultBound
+      let v = map(e.right, bv)
+      result.composite.add((key: k, value: v))
+      result.cachedType.fields[k] = v.cachedType
+  else:
+    if bound.boundType.kind == tyTuple:
+      assert bound.boundType.elements.len == ex.elements.len, "tuple bound type lengths do not match"
+    result = Statement(kind: skTuple, cachedType:
+      Type(kind: tyTuple, elements: newSeqOfCap[Type](ex.elements.len)))
+    for i, e in ex.elements:
+      let element = if bound.boundType.kind == tyTuple:
+        map(e, bound.boundType.elements[i] * bound.variance)
+      else:
+        map e
+      result.elements.add(element)
+      result.cachedType.elements.add(element.cachedType)
+
+proc compileArrayExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
+  result = Statement(kind: skList, cachedType: Ty(List))
+  var boundSet = bound.boundType.kind == tyList 
+  var b =
+    if boundSet:
+      bound.boundType.elementType[] * bound.variance
+    else:
+      defaultBound
+  for e in ex.elements:
+    let element = map(e, b)
+    result.elements.add(element)
+    if result.cachedType.elementType.isNil or result.cachedType.elementType[] < element.cachedType:
+      result.cachedType.elementType = toRef(element.cachedType)
+    if not boundSet:
+      b = +element.cachedType
+      boundSet = true
+
+proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
+  if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
+    ex.elements[0].isSingleColon):
+    result = Statement(kind: skTable, cachedType: Ty(Table))
+    var boundSet = bound.boundType.kind == tyTable
+    var (bk, bv) =
+      if boundSet:
+        (bound.boundType.keyType[] * bound.variance,
+          bound.boundType.valueType[] * bound.variance)
+      else:
+        (defaultBound, defaultBound)
+    for e in ex.elements:
+      if e.isSingleColon: continue
+      assert e.kind == Colon, "table literal must only have colon expressions"
+      let k = map(e.left, bk)
+      let v = map(e.right, bv)
+      result.entries.add((key: k, value: v))
+      if result.cachedType.keyType.isNil or result.cachedType.keyType[] < k.cachedType:
+        result.cachedType.keyType = toRef(k.cachedType)
+      if result.cachedType.valueType.isNil or result.cachedType.valueType[] < v.cachedType:
+        result.cachedType.valueType = toRef(v.cachedType)
+      if not boundSet:
+        bk = +k.cachedType
+        bv = +v.cachedType
+        boundSet = true
+  else:
+    result = Statement(kind: skSet, cachedType: Ty(Set))
+    var boundSet = bound.boundType.kind == tySet 
+    var b =
+      if boundSet:
+        bound.boundType.elementType[] * bound.variance
+      else:
+        defaultBound
+    for e in ex.elements:
+      let element = map(e, b)
+      result.elements.add(element)
+      if result.cachedType.elementType.isNil or result.cachedType.elementType[] < element.cachedType:
+        result.cachedType.elementType = toRef(element.cachedType)
+      if not boundSet:
+        b = +element.cachedType
+        boundSet = true
+
+proc compileBlock*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
+  result = Statement(kind: skSequence)
+  for i, e in ex.statements:
+    let b =
+      if i == ex.statements.high:
+        bound
+      else:
+        -union() #-Ty(None) # like void
+    let element = map(e, bound = b)
+    result.sequence.add(element)
+    if i == ex.statements.high:
+      result.cachedType = element.cachedType
+
 proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
-  template defaultBound: untyped = +Ty(Any)
-  template map(ex: Expression, bound = defaultBound): Statement =
-    compile(scope, ex, bound)
-  template forward(ex: Expression): Statement =
-    compile(scope, ex, bound)
-  proc isSingleColon(e: Expression): bool =
-    e.kind == Symbol and e.symbol == short":"
   # move some things out to procs
   case ex.kind
   of None: result = Statement(kind: skNone, cachedType: Ty(None))
-  of Number:
-    let s = $ex.number
-    result = Statement(kind: skConstant)
-    case ex.number.kind
-    of Integer:
-      let val = parseInt(s)
-      if bound.boundType.kind == tyFloat:
-        result = constant(val.float)
-      elif val >= 0 and bound.boundType.kind == tyUnsigned:
-        result = constant(val.uint)
-      else:
-        result = constant(val)
-    of Floating:
-      result = constant(parseFloat(s))
-    of Unsigned:
-      result = constant(parseUInt(s))
-  of String:
-    result = constant(ex.str)
-  of Wrapped:
-    result = forward(ex.wrapped)
+  of Number: result = compileNumber(ex, bound)
+  of String: result = constant(ex.str)
+  of Wrapped: result = forward(ex.wrapped)
   of Name, Symbol:
     let overloads = overloads(scope, if ex.kind == Symbol: $ex.symbol else: ex.identifier, bound)
     if overloads.len == 0:
@@ -275,177 +567,13 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
     if ex.right.kind == Name:
       let lhs = map ex.left
       let name = ex.right.identifier
-      if lhs.cachedType.kind == tyComposite and lhs.cachedType.fields.hasKey(name):
-        result = Statement(kind: skGetComposite,
-          cachedType: lhs.cachedType.fields[name],
-          getComposite: lhs,
-          getCompositeName: name)
-      else:
-        let ident = Expression(kind: Name, identifier: "." & name)
-        try:
-          result = forward(
-            Expression(kind: PathCall,
-              address: ident,
-              arguments: @[ex.left]))
-        except NoOverloadFoundError as e:
-          if not same(ident, e.expression):
-            raise
+      result = compileProperty(scope, ex, lhs, name, bound)
     if result.isNil:
       result = forward(
         Expression(kind: PathCall,
           address: Expression(kind: Name, identifier: "."),
           arguments: @[ex.left, ex.right]))
-  of CallKinds:
-    # XXX (1) named & default arguments with signature property (instead of composite?)
-    var argumentStatements = newSeq[Statement](ex.arguments.len)
-    if ex.address.isIdentifier(name):
-      var argumentTypes = newSeq[Type](ex.arguments.len)
-      for t in argumentTypes.mitems: t = Ty(Any)
-      # XXX pass type bound as well as scope, to pass both to a compile proc
-      var realArgumentTypes = newSeq[Type](ex.arguments.len + 1)
-      realArgumentTypes[0] = Ty(Scope)
-      for i in 1 ..< realArgumentTypes.len:
-        realArgumentTypes[i] = union(Ty(Expression), Ty(Statement))
-      # get all metas first and type statements accordingly
-      var allMetas = overloads(scope, name,
-        *funcType(Ty(Statement), realArgumentTypes).withProperties(
-          property(Meta, @[toValue funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)])))
-      if allMetas.len != 0:
-        var makeStatement = newSeq[bool](ex.arguments.len)
-        var metaTypes = newSeq[Type](allMetas.len)
-        for i, v in allMetas:
-          let ty = v.variable.cachedType
-          let metaTy = v.variable.cachedType.properties.getArguments(Meta)[0].typeValue[]
-          metaTypes[i] = metaTy
-          for i in 0 ..< ex.arguments.len:
-            if matchBound(+Ty(Statement), ty.param(i + 1)):
-              makeStatement[i] = true
-              argumentTypes[i] = commonType(argumentTypes[i], metaTy.param(i))
-        for i, x in makeStatement:
-          if x:
-            try:
-              argumentStatements[i] = map(ex.arguments[i], +argumentTypes[i])
-            except NoOverloadFoundError as e:
-              if same(e.expression, ex.arguments[i]):
-                reset(allMetas)
-                break
-            except TypeBoundMatchError as e:
-              if same(e.expression, ex.arguments[i]):
-                reset(allMetas)
-                break
-            argumentTypes[i] = commonType(argumentTypes[i], argumentStatements[i].cachedType)
-        var superMetas, subMetas: typeof(allMetas)
-        for i, m in allMetas:
-          let mt = metaTypes[i]
-          if matchBound(+mt,
-            funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)):
-            superMetas.add(m)
-          if matchBound(
-            +funcType(if bound.variance == Covariant: union() else: bound.boundType, argumentTypes),
-            mt):
-            subMetas.add(m)
-        superMetas.sort(
-          cmp = proc (a, b: VariableReference): int =
-            compare(a.variable.cachedType, b.variable.cachedType),
-          order = Descending)
-        subMetas.sort(
-          cmp = proc (a, b: VariableReference): int =
-            compare(a.variable.cachedType, b.variable.cachedType),
-          order = Ascending)
-        if superMetas.len != 0:
-          let meta = superMetas[0]
-          let ty = meta.variable.cachedType
-          var arguments = newSeq[Statement](ex.arguments.len + 1)
-          arguments[0] = constant(scope, Ty(Scope))
-          for i in 0 ..< ex.arguments.len:
-            if matchBound(+Ty(Statement), ty.param(i + 1)):
-              arguments[i + 1] = constant(argumentStatements[i], Ty(Statement))
-            else:
-              arguments[i + 1] = constant(copy ex.arguments[i], Ty(Expression))
-          let call = Statement(kind: skFunctionCall,
-            callee: variableGet(meta),
-            arguments: arguments).toInstruction
-          result = scope.context.evaluateStatic(call).statementValue
-        else:
-          for d in subMetas:
-            var arguments = newArray[Value](ex.arguments.len + 1)
-            arguments[0] = toValue scope
-            for i in 0 ..< ex.arguments.len:
-              if matchBound(+Ty(Statement), d.variable.cachedType.param(i + 1)):
-                arguments[i + 1] = toValue argumentStatements[i]
-              else:
-                arguments[i + 1] = toValue copy ex.arguments[i]
-            if checkType(toValue arguments, d.variable.cachedType.arguments[]):
-              var argumentStatement = newSeq[Statement](arguments.len)
-              for i, a in arguments: argumentStatement[i] = constant(a, a.toType)
-              let call = Statement(kind: skFunctionCall,
-                callee: variableGet(d),
-                arguments: argumentStatement).toInstruction
-              result = scope.context.evaluateStatic(call).statementValue
-              break
-    if result.isNil:
-      var argumentTypes = newSeq[Type](ex.arguments.len)
-      for i in 0 ..< ex.arguments.len:
-        if argumentStatements[i].isNil:
-          argumentStatements[i] = map(ex.arguments[i])
-        argumentTypes[i] = argumentStatements[i].cachedType
-      var functionType = funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)
-      # lowest supertype function:
-      try:
-        let callee = map(ex.address, -functionType)
-        result = Statement(kind: skFunctionCall,
-          cachedType: callee.cachedType.returnType[],
-          callee: callee,
-          arguments: argumentStatements)
-      except NoOverloadFoundError as e:
-        # dispatch lowest subtype functions in order:
-        if same(e.expression, ex.address) and ex.address.isIdentifier(name):
-          functionType.returnType = toRef(
-            if bound.variance == Covariant:
-              union()
-            else:
-              bound.boundType)
-          let subs = overloads(scope, name, +functionType)
-          if subs.len != 0:
-            var dispatchees = newSeq[(seq[Type], Statement)](subs.len)
-            for i, d in dispatchees.mpairs:
-              let t = subs[i].variable.cachedType
-              d[0].newSeq(argumentStatements.len)
-              for i in 0 ..< argumentStatements.len:
-                let pt = t.param(i)
-                if matchBound(-argumentTypes[i], pt):
-                  # optimize checking types we know match
-                  # XXX do this recursively?
-                  d[0][i] = Ty(Any)
-                else:
-                  d[0][i] = pt
-              d[1] = variableGet(subs[i])
-            result = Statement(kind: skDispatch,
-              cachedType: functionType.returnType[], # we could calculate a union here but it's not worth dealing with a typeclass
-              dispatchees: dispatchees,
-              dispatchArguments: argumentStatements)
-      # .call, should recurse but compiled arguments should be reused:
-      if result.isNil:
-        let callee = map ex.address
-        argumentStatements.insert(callee, 0)
-        argumentTypes.insert(callee.cachedType, 0)
-        functionType = funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)
-        let overs = overloads(scope, ".call", -functionType)
-        if overs.len != 0:
-          let dotCall = variableGet(overs[0])
-          result = Statement(kind: skFunctionCall,
-            cachedType: dotCall.cachedType.returnType[],
-            callee: callee,
-            arguments: argumentStatements)
-        else:
-          raise (ref CannotCallError)(
-            expression: ex.address,
-            bound: bound,
-            scope: scope,
-            argumentTypes: argumentTypes,
-            type: callee.cachedType,
-            msg: "no way to call " & $ex.address & " of type " & $callee.cachedType &
-              " found for argument types " & $argumentTypes)
+  of CallKinds: result = compileCall(scope, ex, bound)
   of Subscript:
     # what specialization can go here
     result = forward(Expression(kind: PathCall,
@@ -458,105 +586,13 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   of Colon:
     assert false, "cannot compile lone colon expression"
   of Comma, Tuple:
-    if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
-      ex.elements[0].isSingleColon):
-      if bound.boundType.kind == tyComposite:
-        assert bound.boundType.fields.len == ex.elements.len, "tuple bound type lengths do not match"
-      result = Statement(kind: skComposite, cachedType:
-        Type(kind: tyComposite, fields: initTable[string, Type](ex.elements.len)))
-      for e in ex.elements:
-        if e.isSingleColon: continue
-        assert e.kind == Colon, "composite literal must only have colon expressions"
-        assert e.left.kind == Name, "composite literal has non-name left hand side on colon expression"
-        let k = e.left.identifier
-        let bv = if bound.boundType.kind == tyComposite and k in bound.boundType.fields:
-          bound.boundType.fields[k] * bound.variance
-        else:
-          defaultBound
-        let v = map(e.right, bv)
-        result.composite.add((key: k, value: v))
-        result.cachedType.fields[k] = v.cachedType
-    else:
-      if bound.boundType.kind == tyTuple:
-        assert bound.boundType.elements.len == ex.elements.len, "tuple bound type lengths do not match"
-      result = Statement(kind: skTuple, cachedType:
-        Type(kind: tyTuple, elements: newSeqOfCap[Type](ex.elements.len)))
-      for i, e in ex.elements:
-        let element = if bound.boundType.kind == tyTuple:
-          map(e, bound.boundType.elements[i] * bound.variance)
-        else:
-          map e
-        result.elements.add(element)
-        result.cachedType.elements.add(element.cachedType)
+    result = compileTupleExpression(scope, ex, bound)
   of ExpressionKind.Array:
-    result = Statement(kind: skList, cachedType: Ty(List))
-    var boundSet = bound.boundType.kind == tyList 
-    var b =
-      if boundSet:
-        bound.boundType.elementType[] * bound.variance
-      else:
-        defaultBound
-    for e in ex.elements:
-      let element = map(e, b)
-      result.elements.add(element)
-      if result.cachedType.elementType.isNil or result.cachedType.elementType[] < element.cachedType:
-        result.cachedType.elementType = toRef(element.cachedType)
-      if not boundSet:
-        b = +element.cachedType
-        boundSet = true
+    result = compileArrayExpression(scope, ex, bound)
   of Set:
-    if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
-      ex.elements[0].isSingleColon):
-      result = Statement(kind: skTable, cachedType: Ty(Table))
-      var boundSet = bound.boundType.kind == tyTable
-      var (bk, bv) =
-        if boundSet:
-          (bound.boundType.keyType[] * bound.variance,
-            bound.boundType.valueType[] * bound.variance)
-        else:
-          (defaultBound, defaultBound)
-      for e in ex.elements:
-        if e.isSingleColon: continue
-        assert e.kind == Colon, "table literal must only have colon expressions"
-        let k = map(e.left, bk)
-        let v = map(e.right, bv)
-        result.entries.add((key: k, value: v))
-        if result.cachedType.keyType.isNil or result.cachedType.keyType[] < k.cachedType:
-          result.cachedType.keyType = toRef(k.cachedType)
-        if result.cachedType.valueType.isNil or result.cachedType.valueType[] < v.cachedType:
-          result.cachedType.valueType = toRef(v.cachedType)
-        if not boundSet:
-          bk = +k.cachedType
-          bv = +v.cachedType
-          boundSet = true
-    else:
-      result = Statement(kind: skSet, cachedType: Ty(Set))
-      var boundSet = bound.boundType.kind == tySet 
-      var b =
-        if boundSet:
-          bound.boundType.elementType[] * bound.variance
-        else:
-          defaultBound
-      for e in ex.elements:
-        let element = map(e, b)
-        result.elements.add(element)
-        if result.cachedType.elementType.isNil or result.cachedType.elementType[] < element.cachedType:
-          result.cachedType.elementType = toRef(element.cachedType)
-        if not boundSet:
-          b = +element.cachedType
-          boundSet = true
+    result = compileSetExpression(scope, ex, bound)
   of Block, SemicolonBlock:
-    result = Statement(kind: skSequence)
-    for i, e in ex.statements:
-      let b =
-        if i == ex.statements.high:
-          bound
-        else:
-          -union() #-Ty(None) # like void
-      let element = map(e, bound = b)
-      result.sequence.add(element)
-      if i == ex.statements.high:
-        result.cachedType = element.cachedType
+    result = compileBlock(scope, ex, bound)
   if not bound.matchBound(result.cachedType):
     raise (ref TypeBoundMatchError)(
       expression: ex,

@@ -48,6 +48,7 @@ type
     vkExpression
     vkStatement
     vkScope
+    #vkOpaque
     # bigints can be added
 
   RuntimePropertyObj* = object
@@ -55,6 +56,8 @@ type
     value*: Value
   
   CompositeNameId* = int
+
+  #OpaqueValue* = ref object of RootObj 
 
   ValueObj* = object # could be cyclic
     # entire thing can be pointer tagged, but would need GC hooks
@@ -148,7 +151,7 @@ type
     # otherwise generic type by itself can work
     # ^ maybe remove tyGeneric and put the parameter list in Variable
     tyParameter,
-    tyGeneric
+    #tyGeneric
 
   ParameterType* = ref object
     name*: string
@@ -195,9 +198,9 @@ type
       # could add custom compare
     of tyParameter:
       parameter*: ParameterType
-    of tyGeneric:
-      parameters*: Table[ParameterType, TypeBound]
-      genericPattern*: ref Type
+    #of tyGeneric:
+    #  parameters*: Table[ParameterType, TypeBound]
+    #  genericPattern*: ref Type
     
   TypeMatch* = enum
     # in order of strength
@@ -422,11 +425,14 @@ type
       binaryInstructionKind*: BinaryInstructionKind
       binary1*, binary2*: Instruction
   
+  ParameterInstantiation* = Table[ParameterType, Type]
+  
   Variable* = ref object
     name*: string
     cachedType*: Type
     stackIndex*: int
     scope*: Scope
+    genericParams*: seq[ParameterType]
     lazyExpression*: Expression
     evaluated*: bool
 
@@ -775,14 +781,14 @@ proc `$`*(t: Type): string =
   of tyWithProperty: "WithProperty(" & $t.typeWithProperty[] & ", " & $t.withProperty & ")"
   of tyCustomMatcher: "Custom"
   of tyParameter: "Parameter(" & $t.parameter.name & ")"
-  of tyGeneric:
-    var s = "Generic["
-    var i = 0
-    for p, b in t.parameters:
-      if i != 0: s.add(", ")
-      else: inc i
-      s.add(p.name & ": " & $b)
-    s & "](" & $t.genericPattern[] & ")"
+  #of tyGeneric:
+  #  var s = "Generic["
+  #  var i = 0
+  #  for p, b in t.parameters:
+  #    if i != 0: s.add(", ")
+  #    else: inc i
+  #    s.add(p.name & ": " & $b)
+  #  s & "](" & $t.genericPattern[] & ")"
   if t.properties.table.len != 0:
     result.add(" {") 
     for tag, args in t.properties.table:
