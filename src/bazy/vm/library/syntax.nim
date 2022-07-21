@@ -120,7 +120,7 @@ module syntax:
       ifCond: valueArgs[1].statementValue,
       ifTrue: sc.compile(valueArgs[2].expressionValue, +Ty(Any)),
       ifFalse: elsesc.compile(els, +Ty(Any)))
-    res.cachedType = commonType(res.ifTrue.cachedType, res.ifFalse.cachedType)
+    res.cachedType = commonConcreteType(res.ifTrue.cachedType, res.ifFalse.cachedType)
     result = toValue(res)
   define "while", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Expression)]).withProperties(
     property(Meta, toValue funcType(union(), [Ty(Boolean), union()]))

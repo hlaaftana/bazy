@@ -42,8 +42,8 @@ proc refreshStack*(context: Context) =
     for i in context.stack.imports.len ..< context.imports.len:
       newImports[i] = context.imports[i].stack
     context.stack.imports = newImports
-  if context.allVariables.len != context.stack.stack.len:
-    var newStack = newArray[Value](context.allVariables.len)
+  if context.stackSize != context.stack.stack.len:
+    var newStack = newArray[Value](context.stackSize)
     for i in 0 ..< context.stack.stack.len:
       newStack[i] = context.stack.stack[i]
     context.stack.stack = newStack
@@ -52,9 +52,11 @@ proc evaluateStatic*(context: Context, instr: Instruction): Value =
   context.refreshStack()
   instr.evaluate(context.stack)
 
-proc define*(scope: Scope, variable: Variable) =
+proc define*(scope: Scope, variable: Variable, inMemory = true) =
   variable.scope = scope
-  variable.stackIndex = scope.context.allVariables.len
+  if inMemory:
+    variable.stackIndex = scope.context.stackSize
+    inc scope.context.stackSize
   scope.context.allVariables.add(variable)
   scope.variables.add(variable)
 
@@ -168,7 +170,7 @@ proc setStatic*(variable: Variable, expression: Expression) =
   variable.evaluated = true
 
 proc getType*(variable: Variable): Type =
-  if not variable.lazyExpression.isNil and not variable.evaluated:
+  if variable.cachedType.kind == tyNone and not variable.lazyExpression.isNil and not variable.evaluated:
     variable.setStatic(variable.lazyExpression)
   variable.cachedType
 
@@ -219,6 +221,77 @@ proc variableSet*(r: VariableReference, value: Statement): Statement =
     setAddressValue: value,
     cachedType: t)
 
+type
+  GenericMatchTable* = Table[TypeParameter, Type]
+
+  GenericMatchError* = object of CompileError
+    parameter*: TypeParameter
+    presumed*: Type
+    conflicting*: Type
+  
+  GenericUnmatchedError* = object of CompileError
+    allParameters*: seq[TypeParameter]
+    matchedParameters*: GenericMatchTable
+
+proc matchParameters*(pattern, t: Type, table: var GenericMatchTable) =
+  template match(a, b: Type) = matchParameters(a, b, table)
+  case pattern.kind
+  of tyParameter:
+    let param = pattern.parameter
+    if param in table:
+      let oldType = table[param]
+      let newType = commonConcreteType(oldType, t, doUnion = false)
+      if newType.kind == tyNone:
+        raise (ref GenericMatchError)(
+          msg: "param " & $param & " had type " & $newType & " but got " & $t,
+          parameter: param,
+          presumed: oldType,
+          conflicting: t)
+      table[param] = newType
+    else:
+      table[param] = t
+  of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
+    tyString, tyExpression, tyStatement, tyScope,
+    tyAny, tyNone:
+    discard # atoms
+  of tyFunction:
+    if t.kind == tyFunction:
+      match(pattern.arguments[], t.arguments[])
+      match(pattern.returnType[], t.returnType[])
+  of tyTuple:
+    if t.kind == tyTuple:
+      for i in 0 ..< t.elements.len:
+        match(pattern.nth(i), t.elements[i])
+      if pattern.elements.len > t.elements.len and not t.varargs.isNil:
+        for i in t.elements.len ..< pattern.elements.len:
+          match(pattern.elements[i], t.varargs[])
+        if not pattern.varargs.isNil:
+          match(pattern.varargs[], t.varargs[])
+  of tyReference, tyList, tySet:
+    if t.kind == pattern.kind:
+      match(pattern.elementType[], t.elementType[])
+  of tyTable:
+    if t.kind == pattern.kind:
+      match(pattern.keyType[], t.keyType[])
+      match(pattern.valueType[], t.valueType[])
+  of tyComposite:
+    discard # XXX todo
+  of tyType:
+    if t.kind == pattern.kind:
+      match(pattern.typeValue[], t.typeValue[])
+    else:
+      # wonky
+      match(pattern.typeValue[], t)
+  of tyUnion, tyIntersection, tyNot:
+    discard # XXX what
+  of tyWithProperty:
+    if t.kind == pattern.kind:
+      match(pattern.typeWithProperty[], t.typeWithProperty[])
+    else:
+      match(pattern.typeWithProperty[], t)
+  of tyBaseType, tyCustomMatcher:
+    discard # no type to traverse
+
 template constant*(value: Value, ty: Type): Statement =
   Statement(kind: skConstant, constant: value, cachedType: ty)
 template constant*(value: untyped, ty: Type): Statement =
@@ -254,6 +327,27 @@ template forward(ex: Expression): Statement =
   compile(scope, ex, bound)
 proc isSingleColon(e: Expression): bool =
   e.kind == Symbol and e.symbol == short":"
+
+proc resolve*(scope: Scope, ex: Expression, name: string, bound: TypeBound): VariableReference =
+  let overloads = overloads(scope, name, bound)
+  if overloads.len == 0:
+    raise (ref NoOverloadFoundError)(
+      expression: ex,
+      bound: bound,
+      scope: scope,
+      msg: "no overloads with bound " & $bound & " for " & $ex)
+  result = overloads[0]
+  if result.variable.genericParams.len != 0:
+    var matches: GenericMatchTable = initTable[TypeParameter, Type](result.variable.genericParams.len)
+    try:
+      matchParameters(result.variable.cachedType, bound.boundType, matches)
+    except GenericMatchError as e:
+      e.expression = ex
+      raise e
+    var unmatchedParams = result.variable.genericParams
+    # XXX continue
+    # use single memory slot + fake variables with filled out types for erased
+    # real variables for monomorphized
 
 proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement
@@ -300,7 +394,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
       for i in 0 ..< ex.arguments.len:
         if matchBound(+Ty(Statement), ty.param(i + 1)):
           makeStatement[i] = true
-          argumentTypes[i] = commonType(argumentTypes[i], metaTy.param(i))
+          argumentTypes[i] = commonConcreteType(argumentTypes[i], metaTy.param(i))
     for i, x in makeStatement:
       if x:
         try:
@@ -313,7 +407,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
           if same(e.expression, ex.arguments[i]):
             reset(allMetas)
             break
-        argumentTypes[i] = commonType(argumentTypes[i], argumentStatements[i].cachedType)
+        argumentTypes[i] = commonConcreteType(argumentTypes[i], argumentStatements[i].cachedType)
     var superMetas, subMetas: typeof(allMetas)
     for i, m in allMetas:
       let mt = metaTypes[i]

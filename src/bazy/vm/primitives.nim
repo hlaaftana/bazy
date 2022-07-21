@@ -153,7 +153,7 @@ type
     tyParameter,
     #tyGeneric
 
-  ParameterType* = ref object
+  TypeParameter* = ref object
     name*: string
     bound*: TypeBound
   
@@ -197,9 +197,9 @@ type
       valueMatcher*: proc (v: Value): bool
       # could add custom compare
     of tyParameter:
-      parameter*: ParameterType
+      parameter*: TypeParameter
     #of tyGeneric:
-    #  parameters*: Table[ParameterType, TypeBound]
+    #  parameters*: Table[TypeParameter, TypeBound]
     #  genericPattern*: ref Type
     
   TypeMatch* = enum
@@ -425,14 +425,15 @@ type
       binaryInstructionKind*: BinaryInstructionKind
       binary1*, binary2*: Instruction
   
-  ParameterInstantiation* = Table[ParameterType, Type]
+  ParameterInstantiation* = Table[TypeParameter, Type]
   
   Variable* = ref object
     name*: string
     cachedType*: Type
     stackIndex*: int
     scope*: Scope
-    genericParams*: seq[ParameterType]
+    # XXX make this a special hashset-like type and maybe attach it to the parameters
+    genericParams*: seq[TypeParameter]
     lazyExpression*: Expression
     evaluated*: bool
 
@@ -440,6 +441,7 @@ type
     ## current module or function
     imports*: seq[Context]
     stack*: Stack
+    stackSize*: int
     top*: Scope
     allVariables*: seq[Variable] ## should not shrink
   
@@ -553,11 +555,11 @@ proc hash*(p: PropertyTag): Hash =
 
 proc `==`*(a, b: PropertyTag): bool = same(a, b)
 
-proc hash*(p: ParameterType): Hash =
+proc hash*(p: TypeParameter): Hash =
   mix cast[pointer](p)
   result = !$ result
 
-proc `==`*(a, b: ParameterType): bool = same(a, b)
+proc `==`*(a, b: TypeParameter): bool = same(a, b)
 
 proc hash*(v: Value): Hash {.noSideEffect.}
 proc hash*(v: Type): Hash {.noSideEffect.}
@@ -693,6 +695,8 @@ proc `==`*(a, b: typeof(Statement()[])): bool =
   return true
 
 import strutils
+
+proc `$`*(t: TypeParameter): string {.inline.} = t.name
 
 proc `$`*(t: Type): string
 

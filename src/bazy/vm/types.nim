@@ -135,11 +135,6 @@ proc nth*(t: Type, i: int): Type =
   of tyParameter:#, tyGeneric:
     discard # what
 
-proc matchParameters*(pattern, t: Type, ): Type =
-  #assert gt.kind == tyGeneric
-  discard
-  
-
 proc param*(t: Type, i: int): Type {.inline.} =
   assert t.kind == tyFunction
   t.arguments[].nth(i)
@@ -311,19 +306,21 @@ proc `<=`*(a, b: Type): bool {.inline.} = compare(a, b) <= 0
 proc `>`*(a, b: Type): bool {.inline.} = compare(a, b) > 0
 proc `>=`*(a, b: Type): bool {.inline.} = compare(a, b) >= 0
 
-proc commonType*(a, b: Type): Type =
+proc commonConcreteType*(a, b: Type, doUnion = true): Type =
   let
     m1 = a.match(b)
     m2 = b.match(a)
   let cmp = compare(m1, m2)
   if cmp < 0:
-    a
-  elif cmp > 0:
     b
+  elif cmp > 0:
+    a
   elif m1 == tmEqual:
     a
-  else:
+  elif doUnion:
     union(a, b)
+  else:
+    Ty(None)
 
 import arrays
 
