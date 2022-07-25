@@ -27,7 +27,8 @@ proc toValue*(x: sink Array[Value]): Value =
     else:
       toArray(a)
   Value(kind: vkArray, tupleValue: arr x.toOpenArray(0, x.len - 1))
-proc toValue*(x: Type): Value = withkindrefv(vkType, typeValue, x)
+proc toValue*(x: Type): Value = Value(kind: vkType, typeValue: x.box)
+proc toValue*(x: BoxedType): Value = Value(kind: vkType, typeValue: x)
 proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
 proc toValue*(x: sink Table[CompositeNameId, Value]#[Array[(CompositeNameId, Value)]]#): Value = withkindref(composite, x)
@@ -38,14 +39,14 @@ proc toValue*(x: Expression): Value = withkind(expression, x)
 proc toValue*(x: Statement): Value = withkind(statement, x)
 proc toValue*(x: Scope): Value = withkind(scope, x)
 
-proc toType*(x: Value): Type =
+proc getType*(x: Value): Type =
   case x.kind
   of vkNone: result = Ty(NoneValue)
   of vkInteger: result = Ty(Integer)
   of vkUnsigned: result = Ty(Unsigned)
   of vkFloat: result = Ty(Float)
   of vkBoolean: result = Ty(Boolean)
-  of vkList: result = Type(kind: tyList, elementType: toRef(x.listValue.unref[0].toType))
+  of vkList: result = Type(kind: tyList, elementType: x.listValue.unref[0].getType.box)
   of vkString: result = Ty(String)
   of vkExpression: result = Ty(Expression)
   of vkStatement: result = Ty(Statement)
@@ -54,33 +55,33 @@ proc toType*(x: Value): Type =
     let val = x.tupleValue.unref
     result = Type(kind: tyTuple, elements: newSeq[Type](val.len))
     for i in 0 ..< x.tupleValue.unref.len:
-      result.elements[i] = val[i].toType
+      result.elements[i] = val[i].getType
   of vkReference:
-    result = Type(kind: tyReference, elementType: toRef(x.referenceValue[].toType))
+    result = Type(kind: tyReference, elementType: x.referenceValue[].getType.box)
   of vkComposite:
     let val = x.compositeValue.unref
     result = Type(kind: tyComposite, fields: initTable[string, Type](val.len))
     for k, v in val:#.items:
-      result.fields[k.getCompositeName] = v.toType
+      result.fields[k.getCompositeName] = v.getType
   of vkPropertyReference:
-    result = toType(x.propertyRefValue.value)
+    result = getType(x.propertyRefValue.value)
     result.properties = x.propertyRefValue.properties
   of vkType:
     result = Type(kind: tyType, typeValue: x.typeValue)
   of vkFunction, vkNativeFunction:
     result = Ty(Function) # XXX (2) no signature
   of vkEffect:
-    result = x.effectValue[].toType # XXX do what here
+    result = x.effectValue[].getType # XXX do what here
   of vkSet:
     result = Ty(Set)
     for v in x.setValue[]:
-      result.elementType = toRef(v.toType)
+      result.elementType = v.getType.box
       break
   of vkTable:
     result = Ty(Table)
     for k, v in x.tableValue[]:
-      result.keyType = toRef(k.toType)
-      result.valueType = toRef(v.toType)
+      result.keyType = k.getType.box
+      result.valueType = v.getType.box
       break
 
 proc copy*(value: Value): Value =

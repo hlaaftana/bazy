@@ -1,10 +1,11 @@
 import "."/[primitives, arrays, runtime, types, values], ../language/[expressions, number, shortstring], std/[tables, sets, strutils]
 
 template defineMetaProperty(recurWith: untyped): PropertyTag =
-  PropertyTag(name: "Meta", argumentTypes: @[Type(kind: tyBaseType, baseKind: tyFunction)],
+  PropertyTag(name: "Meta",
+    argumentTypes: @[Type(kind: tyBaseType, baseKind: tyFunction)],
     typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
       if t.properties.hasTag(recurWith):
-        match(args[0].typeValue[], t.properties.table[recurWith][0].typeValue[])
+        match(args[0].typeValue.unbox, t.properties.table[recurWith][0].typeValue.unbox)
       else:
         tmFalse)
 
@@ -170,7 +171,7 @@ proc setStatic*(variable: Variable, expression: Expression) =
   variable.evaluated = true
 
 proc getType*(variable: Variable): Type =
-  if variable.cachedType.kind == tyNone and not variable.lazyExpression.isNil and not variable.evaluated:
+  if variable.cachedType.isNone and not variable.lazyExpression.isNil and not variable.evaluated:
     variable.setStatic(variable.lazyExpression)
   variable.cachedType
 
@@ -222,8 +223,6 @@ proc variableSet*(r: VariableReference, value: Statement): Statement =
     cachedType: t)
 
 type
-  GenericMatchTable* = Table[TypeParameter, Type]
-
   GenericMatchError* = object of CompileError
     parameter*: TypeParameter
     presumed*: Type
@@ -231,17 +230,18 @@ type
   
   GenericUnmatchedError* = object of CompileError
     allParameters*: seq[TypeParameter]
-    matchedParameters*: GenericMatchTable
+    matchedParameters*: ParameterInstantiation
 
-proc matchParameters*(pattern, t: Type, table: var GenericMatchTable) =
+proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
   template match(a, b: Type) = matchParameters(a, b, table)
+  template match(a, b: BoxedType) = matchParameters(a[], b[], table)
   case pattern.kind
   of tyParameter:
     let param = pattern.parameter
     if param in table:
       let oldType = table[param]
-      let newType = commonConcreteType(oldType, t, doUnion = false)
-      if newType.kind == tyNone:
+      let newType = commonSuperType(oldType, t, doUnion = false)
+      if newType.isNone:
         raise (ref GenericMatchError)(
           msg: "param " & $param & " had type " & $newType & " but got " & $t,
           parameter: param,
@@ -256,41 +256,80 @@ proc matchParameters*(pattern, t: Type, table: var GenericMatchTable) =
     discard # atoms
   of tyFunction:
     if t.kind == tyFunction:
-      match(pattern.arguments[], t.arguments[])
-      match(pattern.returnType[], t.returnType[])
+      match(pattern.arguments, t.arguments)
+      match(pattern.returnType, t.returnType)
   of tyTuple:
     if t.kind == tyTuple:
       for i in 0 ..< t.elements.len:
         match(pattern.nth(i), t.elements[i])
-      if pattern.elements.len > t.elements.len and not t.varargs.isNil:
+      if pattern.elements.len > t.elements.len and not t.varargs.isNone:
         for i in t.elements.len ..< pattern.elements.len:
-          match(pattern.elements[i], t.varargs[])
-        if not pattern.varargs.isNil:
-          match(pattern.varargs[], t.varargs[])
+          match(pattern.elements[i], t.varargs.unbox)
+        if not pattern.varargs.isNone:
+          match(pattern.varargs, t.varargs)
   of tyReference, tyList, tySet:
     if t.kind == pattern.kind:
-      match(pattern.elementType[], t.elementType[])
+      match(pattern.elementType, t.elementType)
   of tyTable:
     if t.kind == pattern.kind:
-      match(pattern.keyType[], t.keyType[])
-      match(pattern.valueType[], t.valueType[])
+      match(pattern.keyType, t.keyType)
+      match(pattern.valueType, t.valueType)
   of tyComposite:
     discard # XXX todo
   of tyType:
     if t.kind == pattern.kind:
-      match(pattern.typeValue[], t.typeValue[])
+      match(pattern.typeValue, t.typeValue)
     else:
       # wonky
-      match(pattern.typeValue[], t)
+      match(pattern.typeValue.unbox, t)
   of tyUnion, tyIntersection, tyNot:
     discard # XXX what
   of tyWithProperty:
     if t.kind == pattern.kind:
-      match(pattern.typeWithProperty[], t.typeWithProperty[])
+      match(pattern.typeWithProperty, t.typeWithProperty)
     else:
-      match(pattern.typeWithProperty[], t)
+      match(pattern.typeWithProperty.unbox, t)
   of tyBaseType, tyCustomMatcher:
     discard # no type to traverse
+
+proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
+  template fill(a: var Type) = fillParameters(a, table)
+  template fill(a: var BoxedType) =
+    if not a.isNil:
+      var newType: Type = a.unbox
+      fillParameters(newType, table)
+      a = newType.box
+  case pattern.kind
+  of tyParameter:
+    pattern = table[pattern.parameter]
+  of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
+    tyString, tyExpression, tyStatement, tyScope,
+    tyAny, tyNone, tyBaseType, tyCustomMatcher:
+    discard
+  of tyFunction:
+    fill(pattern.arguments)
+    fill(pattern.returnType)
+  of tyTuple:
+    for e in pattern.elements.mitems:
+      fill(e)
+    fill(pattern.varargs)
+  of tyReference, tyList, tySet:
+    fill(pattern.elementType)
+  of tyTable:
+    fill(pattern.keyType)
+    fill(pattern.valueType)
+  of tyComposite:
+    for _, f in pattern.fields.mpairs:
+      fill(f)
+  of tyType:
+    fill(pattern.typeValue)
+  of tyUnion, tyIntersection:
+    for o in pattern.operands.mitems:
+      fill(o)
+  of tyNot:
+    fill(pattern.notType)
+  of tyWithProperty:
+    fill(pattern.typeWithProperty)
 
 template constant*(value: Value, ty: Type): Statement =
   Statement(kind: skConstant, constant: value, cachedType: ty)
@@ -338,7 +377,7 @@ proc resolve*(scope: Scope, ex: Expression, name: string, bound: TypeBound): Var
       msg: "no overloads with bound " & $bound & " for " & $ex)
   result = overloads[0]
   if result.variable.genericParams.len != 0:
-    var matches: GenericMatchTable = initTable[TypeParameter, Type](result.variable.genericParams.len)
+    var matches: ParameterInstantiation = initTable[TypeParameter, Type](result.variable.genericParams.len)
     try:
       matchParameters(result.variable.cachedType, bound.boundType, matches)
     except GenericMatchError as e:
@@ -348,6 +387,13 @@ proc resolve*(scope: Scope, ex: Expression, name: string, bound: TypeBound): Var
     # XXX continue
     # use single memory slot + fake variables with filled out types for erased
     # real variables for monomorphized
+  if not bound.matchBound(result.variable.cachedType):
+    raise (ref TypeBoundMatchError)(
+      expression: ex,
+      bound: bound,
+      type: result.variable.cachedType,
+      msg: "bound " & $bound & " does not match type " & $result.variable.cachedType &
+       " in expression " & $ex)
 
 proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement
@@ -362,11 +408,10 @@ proc compileProperty*(scope: Scope, ex: Expression, lhs: Statement, name: string
   else:
     let ident = Expression(kind: Name, identifier: "." & name)
     try:
-      result = compileCall(scope, ex, bound, argumentStatements = @[lhs])
-      #result = forward(
-      #  Expression(kind: PathCall,
-      #    address: ident,
-      #    arguments: @[ex.left]))
+      result = forward(
+        Expression(kind: PathCall,
+          address: ident,
+          arguments: @[ex.left]))
     except NoOverloadFoundError as e:
       if not same(ident, e.expression):
         raise
@@ -389,12 +434,12 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
     var metaTypes = newSeq[Type](allMetas.len)
     for i, v in allMetas:
       let ty = v.variable.cachedType
-      let metaTy = v.variable.cachedType.properties.getArguments(Meta)[0].typeValue[]
+      let metaTy = v.variable.cachedType.properties.getArguments(Meta)[0].typeValue.unbox
       metaTypes[i] = metaTy
       for i in 0 ..< ex.arguments.len:
         if matchBound(+Ty(Statement), ty.param(i + 1)):
           makeStatement[i] = true
-          argumentTypes[i] = commonConcreteType(argumentTypes[i], metaTy.param(i))
+          argumentTypes[i] = commonSubType(argumentTypes[i], metaTy.param(i))
     for i, x in makeStatement:
       if x:
         try:
@@ -407,7 +452,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
           if same(e.expression, ex.arguments[i]):
             reset(allMetas)
             break
-        argumentTypes[i] = commonConcreteType(argumentTypes[i], argumentStatements[i].cachedType)
+        argumentTypes[i] = commonSubType(argumentTypes[i], argumentStatements[i].cachedType)
     var superMetas, subMetas: typeof(allMetas)
     for i, m in allMetas:
       let mt = metaTypes[i]
@@ -449,9 +494,9 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
             arguments[i + 1] = toValue argumentStatements[i]
           else:
             arguments[i + 1] = toValue copy ex.arguments[i]
-        if checkType(toValue arguments, d.variable.cachedType.arguments[]):
+        if checkType(toValue arguments, d.variable.cachedType.arguments.unbox):
           var argumentStatement = newSeq[Statement](arguments.len)
-          for i, a in arguments: argumentStatement[i] = constant(a, a.toType)
+          for i, a in arguments: argumentStatement[i] = constant(a, a.getType)
           let call = Statement(kind: skFunctionCall,
             callee: variableGet(d),
             arguments: argumentStatement).toInstruction
@@ -472,17 +517,17 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
   try:
     let callee = map(ex.address, -functionType)
     result = Statement(kind: skFunctionCall,
-      cachedType: callee.cachedType.returnType[],
+      cachedType: callee.cachedType.returnType.unbox,
       callee: callee,
       arguments: argumentStatements)
   except NoOverloadFoundError as e:
     # dispatch lowest subtype functions in order:
     if same(e.expression, ex.address) and ex.address.isIdentifier(name):
-      functionType.returnType = toRef(
+      functionType.returnType = box do:
         if bound.variance == Covariant:
           union()
         else:
-          bound.boundType)
+          bound.boundType
       let subs = overloads(scope, name, +functionType)
       if subs.len != 0:
         var dispatchees = newSeq[(seq[Type], Statement)](subs.len)
@@ -499,7 +544,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
               d[0][i] = pt
           d[1] = variableGet(subs[i])
         result = Statement(kind: skDispatch,
-          cachedType: functionType.returnType[], # we could calculate a union here but it's not worth dealing with a typeclass
+          cachedType: functionType.returnType.unbox, # we could calculate a union here but it's not worth dealing with a typeclass
           dispatchees: dispatchees,
           dispatchArguments: argumentStatements)
 
@@ -523,7 +568,7 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
       if overs.len != 0:
         let dotCall = variableGet(overs[0])
         result = Statement(kind: skFunctionCall,
-          cachedType: dotCall.cachedType.returnType[],
+          cachedType: dotCall.cachedType.returnType.unbox,
           callee: callee,
           arguments: argumentStatements)
       else:
@@ -573,14 +618,14 @@ proc compileArrayExpression*(scope: Scope, ex: Expression, bound: TypeBound): St
   var boundSet = bound.boundType.kind == tyList 
   var b =
     if boundSet:
-      bound.boundType.elementType[] * bound.variance
+      bound.boundType.elementType.unbox * bound.variance
     else:
       defaultBound
   for e in ex.elements:
     let element = map(e, b)
     result.elements.add(element)
-    if result.cachedType.elementType.isNil or result.cachedType.elementType[] < element.cachedType:
-      result.cachedType.elementType = toRef(element.cachedType)
+    if result.cachedType.elementType.isNone or result.cachedType.elementType.unbox < element.cachedType:
+      result.cachedType.elementType = box element.cachedType
     if not boundSet:
       b = +element.cachedType
       boundSet = true
@@ -592,8 +637,8 @@ proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Stat
     var boundSet = bound.boundType.kind == tyTable
     var (bk, bv) =
       if boundSet:
-        (bound.boundType.keyType[] * bound.variance,
-          bound.boundType.valueType[] * bound.variance)
+        (bound.boundType.keyType.unbox * bound.variance,
+          bound.boundType.valueType.unbox * bound.variance)
       else:
         (defaultBound, defaultBound)
     for e in ex.elements:
@@ -602,10 +647,10 @@ proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Stat
       let k = map(e.left, bk)
       let v = map(e.right, bv)
       result.entries.add((key: k, value: v))
-      if result.cachedType.keyType.isNil or result.cachedType.keyType[] < k.cachedType:
-        result.cachedType.keyType = toRef(k.cachedType)
-      if result.cachedType.valueType.isNil or result.cachedType.valueType[] < v.cachedType:
-        result.cachedType.valueType = toRef(v.cachedType)
+      if result.cachedType.keyType.isNone or result.cachedType.keyType.unbox < k.cachedType:
+        result.cachedType.keyType = box k.cachedType
+      if result.cachedType.valueType.isNone or result.cachedType.valueType.unbox < v.cachedType:
+        result.cachedType.valueType = box v.cachedType
       if not boundSet:
         bk = +k.cachedType
         bv = +v.cachedType
@@ -615,14 +660,14 @@ proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Stat
     var boundSet = bound.boundType.kind == tySet 
     var b =
       if boundSet:
-        bound.boundType.elementType[] * bound.variance
+        bound.boundType.elementType.unbox * bound.variance
       else:
         defaultBound
     for e in ex.elements:
       let element = map(e, b)
       result.elements.add(element)
-      if result.cachedType.elementType.isNil or result.cachedType.elementType[] < element.cachedType:
-        result.cachedType.elementType = toRef(element.cachedType)
+      if result.cachedType.elementType.isNone or result.cachedType.elementType.unbox < element.cachedType:
+        result.cachedType.elementType = box element.cachedType
       if not boundSet:
         b = +element.cachedType
         boundSet = true
@@ -634,7 +679,7 @@ proc compileBlock*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       if i == ex.statements.high:
         bound
       else:
-        -union() #-Ty(None) # like void
+        -union() # like void
     let element = map(e, bound = b)
     result.sequence.add(element)
     if i == ex.statements.high:
@@ -648,15 +693,9 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   of String: result = constant(ex.str)
   of Wrapped: result = forward(ex.wrapped)
   of Name, Symbol:
-    let overloads = overloads(scope, if ex.kind == Symbol: $ex.symbol else: ex.identifier, bound)
-    if overloads.len == 0:
-      raise (ref NoOverloadFoundError)(
-        expression: ex,
-        bound: bound,
-        scope: scope,
-        msg: "no overloads with bound " & $bound & " for " & $ex)
     # XXX warn on ambiguity, thankfully recency is accounted for
-    result = variableGet(overloads[0])
+    let name = if ex.kind == Symbol: $ex.symbol else: ex.identifier
+    result = variableGet(resolve(scope, ex, name, bound))
   of Dot:
     if ex.right.kind == Name:
       let lhs = map ex.left

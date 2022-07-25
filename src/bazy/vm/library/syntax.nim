@@ -17,7 +17,7 @@ module syntax:
     for i in 0 ..< arguments.len:
       var arg = arguments[i]
       if arg.kind == Colon:
-        argTypes[i] = scope.evaluateStatic(arg.right, +Type(kind: tyType, typeValue: toRef(Ty(Any)))).typeValue[]
+        argTypes[i] = scope.evaluateStatic(arg.right, +Type(kind: tyType, typeValue: box Ty(Any))).typeValue.unbox
         arg = arg.left
       else:
         argTypes[i] = Ty(Any)
@@ -28,7 +28,7 @@ module syntax:
       v = scope.define(name, fnType)
     let body = bodyScope.compile(body, returnBound)
     if not v.isNil and not returnBoundSet:
-      v.cachedType.returnType[] = body.cachedType
+      v.cachedType.returnType = body.cachedType.box
     bodyScope.context.refreshStack()
     let fun = toValue(
       Function(stack: bodyScope.context.stack.shallowRefresh(), instruction: body.toInstruction))
@@ -43,7 +43,7 @@ module syntax:
     var body = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: toRef(Ty(Any)))).typeValue[]
+        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).typeValue.unbox
         lhs = lhs.left
         (+t, true)
       else:
@@ -61,7 +61,7 @@ module syntax:
     let rhs = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: toRef(Ty(Any)))).typeValue[]
+        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).typeValue.unbox
         lhs = lhs.left
         (+t, true)
       else:
@@ -80,7 +80,7 @@ module syntax:
     let rhs = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: toRef(Ty(Any)))).typeValue[]
+        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).typeValue.unbox
         lhs = lhs.left
         (+t, true)
       else:
@@ -120,7 +120,7 @@ module syntax:
       ifCond: valueArgs[1].statementValue,
       ifTrue: sc.compile(valueArgs[2].expressionValue, +Ty(Any)),
       ifFalse: elsesc.compile(els, +Ty(Any)))
-    res.cachedType = commonConcreteType(res.ifTrue.cachedType, res.ifFalse.cachedType)
+    res.cachedType = commonSuperType(res.ifTrue.cachedType, res.ifFalse.cachedType)
     result = toValue(res)
   define "while", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Expression)]).withProperties(
     property(Meta, toValue funcType(union(), [Ty(Boolean), union()]))
@@ -135,11 +135,12 @@ module syntax:
     let scope = valueArgs[0].scopeValue
     let index = scope.context.evaluateStatic(valueArgs[2].statementValue.toInstruction)
     let nthType = valueArgs[1].statementValue.cachedType.nth(index.integerValue)
+    proc val(args: openarray[Value]): Value {.nimcall.} =
+      args[0].tupleValue.unref[args[1].integerValue]
     result = toValue Statement(kind: skFunctionCall,
       cachedType: nthType,
       callee: constant(
-        Value(kind: vkNativeFunction, nativeFunctionValue: proc (args: openarray[Value]): Value {.nimcall.} =
-          args[0].tupleValue.unref[args[1].integerValue]),
+        Value(kind: vkNativeFunction, nativeFunctionValue: val),
         tyNone),
       arguments: @[valueArgs[1].statementValue, constant(index, Ty(Integer))])
   # todo: let/for

@@ -39,18 +39,19 @@ proc tupleType*(s: varargs[Type]): Type =
   Type(kind: tyTuple, elements: @s)
 
 proc funcType*(returnType: Type, arguments: varargs[Type]): Type {.inline.} =
-  Type(kind: tyFunction, returnType: toRef(returnType), arguments: toRef(tupleType(arguments)))
+  Type(kind: tyFunction, returnType: returnType.box, arguments: tupleType(arguments).box)
 
 proc tupleTypeWithVarargs*(s: varargs[Type], varargs: Type): Type =
-  Type(kind: tyTuple, elements: @s, varargs: toRef(varargs))
+  Type(kind: tyTuple, elements: @s, varargs: varargs.box)
 
 proc funcTypeWithVarargs*(returnType: Type, arguments: varargs[Type], varargs: Type): Type {.inline.} =
-  Type(kind: tyFunction, returnType: toRef(returnType), arguments: toRef(tupleTypeWithVarargs(arguments, varargs)))
+  Type(kind: tyFunction, returnType: returnType.box, arguments: tupleTypeWithVarargs(arguments, varargs).box)
 
 proc union*(s: varargs[Type]): Type =
   Type(kind: tyUnion, operands: @s)
 
 const definiteTypeLengths*: array[TypeKind, int] = [
+  tyNone: 0,
   tyNoneValue: 0,
   tyInteger: 0,
   tyUnsigned: 0,
@@ -69,7 +70,6 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyComposite: -1,
   tyType: 1,
   tyAny: 0,
-  tyNone: 0,
   tyUnion: -1,
   tyIntersection: -1,
   tyNot: 1,
@@ -85,14 +85,14 @@ proc len*(t: Type): int =
   if result < 0:
     case t.kind
     of tyTuple:
-      if t.varargs.isNil:
+      if t.varargs.isNone:
         result = t.elements.len
     of tyUnion, tyIntersection:
       result = t.operands.len
     else: discard
 
 proc hasNth*(t: Type, i: int): bool {.inline.} =
-  i < t.len or (t.kind == tyTuple and not t.varargs.isNil)
+  i < t.len or (t.kind == tyTuple and not t.varargs.isNone)
 
 proc nth*(t: Type, i: int): Type =
   case t.kind
@@ -102,30 +102,30 @@ proc nth*(t: Type, i: int): Type =
     discard # inapplicable
   of tyFunction:
     if i == 0:
-      result = t.arguments[]
+      result = t.arguments.unbox
     else:
-      result = t.returnType[]
+      result = t.returnType.unbox
   of tyTuple:
-    if i < t.elements.len or t.varargs.isNil:
+    if i < t.elements.len or t.varargs.isNone:
       result = t.elements[i]
     else:
-      result = t.varargs[]
+      result = t.varargs.unbox
   of tyReference, tyList, tySet:
-    result = t.elementType[]
+    result = t.elementType.unbox
   of tyTable:
     if i == 0:
-      result = t.keyType[]
+      result = t.keyType.unbox
     else:
-      result = t.valueType[]
+      result = t.valueType.unbox
   of tyComposite:
     discard # inapplicable
   of tyType:
-    result = t.typeValue[]
+    result = t.typeValue.unbox
   of tyUnion, tyIntersection:
     # this is actually not supposed to happen
     result = t.operands[i]
   of tyNot:
-    result = t.notType[]
+    result = t.notType.unbox
   of tyBaseType:
     discard # inapplicable
   of tyWithProperty:
@@ -137,7 +137,7 @@ proc nth*(t: Type, i: int): Type =
 
 proc param*(t: Type, i: int): Type {.inline.} =
   assert t.kind == tyFunction
-  t.arguments[].nth(i)
+  t.arguments.unbox.nth(i)
 
 proc matches*(tm: TypeMatch): bool {.inline.} =
   tm >= lowestMatching
@@ -205,30 +205,30 @@ proc match*(matcher, t: Type): TypeMatch =
     of atomicTypes * concreteTypeKinds:
       tmAlmostEqual
     of tyReference, tyList, tySet:
-      match(+matcher.elementType[], t.elementType[])
+      match(+matcher.elementType.unbox, t.elementType.unbox)
     of tyTuple:
-      if matcher.elements.len != t.elements.len and matcher.varargs.isNil and t.varargs.isNil:
+      if matcher.elements.len != t.elements.len and matcher.varargs.isNone and t.varargs.isNone:
         return tmNone
       var max = t.elements.len
-      if matcher.elements.len > t.elements.len and (max = matcher.elements.len; t.varargs.isNil):
+      if matcher.elements.len > t.elements.len and (max = matcher.elements.len; t.varargs.isNone):
         return tmNone
       var res = tmAlmostEqual
       for i in 0 ..< max:
         let m = match(+matcher.nth(i), t.nth(i))
         if m < res: res = m
         if res <= tmNone: return res
-      if not matcher.varargs.isNil and not t.varargs.isNil:
-        let vm = match(+matcher.varargs[], t.varargs[])
+      if not matcher.varargs.isNone and not t.varargs.isNone:
+        let vm = match(+matcher.varargs.unbox, t.varargs.unbox)
         if vm < res: res = vm
       res
     of tyFunction:
       min(
-        match(-matcher.returnType[], t.returnType[]),
-        match(+matcher.arguments[], t.arguments[]))
+        match(-matcher.returnType.unbox, t.returnType.unbox),
+        match(+matcher.arguments.unbox, t.arguments.unbox))
     of tyTable:
       min(
-        match(+matcher.keyType[], t.keyType[]),
-        match(+matcher.valueType[], t.valueType[]))
+        match(+matcher.keyType.unbox, t.keyType.unbox),
+        match(+matcher.valueType.unbox, t.valueType.unbox))
     of tyComposite:
       proc tableMatch[T](t1, t2: Table[T, Type]): TypeMatch =
         result = tmEqual
@@ -240,7 +240,7 @@ proc match*(matcher, t: Type): TypeMatch =
           elif m < result: result = m
       tableMatch(matcher.fields, t.fields)
     of tyType:
-      match(+matcher.typeValue[], t.typeValue[])
+      match(+matcher.typeValue.unbox, t.typeValue.unbox)
     of allTypeKinds - concreteTypeKinds: tmUnknown # unreachable
   of tyAny: tmTrue
   of tyNone: tmUnknown
@@ -263,7 +263,7 @@ proc match*(matcher, t: Type): TypeMatch =
         break
     min
   of tyNot:
-    boolMatch not match(matcher.notType[], t).matches
+    boolMatch not match(matcher.notType.unbox, t).matches
   of tyBaseType:
     boolMatch t.kind == matcher.baseKind
   of tyCustomMatcher:
@@ -274,7 +274,7 @@ proc match*(matcher, t: Type): TypeMatch =
   of tyWithProperty:
     min(
       if not t.properties.hasTag(matcher.withProperty): tmFiniteFalse else: tmAlmostEqual,
-      match(+matcher.typeWithProperty[], t))
+      match(+matcher.typeWithProperty.unbox, t))
   of tyParameter:
     min(
       tmGeneric,
@@ -306,16 +306,32 @@ proc `<=`*(a, b: Type): bool {.inline.} = compare(a, b) <= 0
 proc `>`*(a, b: Type): bool {.inline.} = compare(a, b) > 0
 proc `>=`*(a, b: Type): bool {.inline.} = compare(a, b) >= 0
 
-proc commonConcreteType*(a, b: Type, doUnion = true): Type =
+proc commonSubType*(a, b: Type, doUnion = true): Type =
   let
     m1 = a.match(b)
     m2 = b.match(a)
   let cmp = compare(m1, m2)
-  if cmp < 0:
+  if cmp > 0:
     b
-  elif cmp > 0:
+  elif cmp < 0:
     a
-  elif m1 == tmEqual:
+  elif m1 in {tmEqual, tmAlmostEqual}:
+    a
+  elif doUnion: # union here meaning either
+    union(a, b)
+  else:
+    Ty(None)
+
+proc commonSuperType*(a, b: Type, doUnion = true): Type =
+  let
+    m1 = a.match(b)
+    m2 = b.match(a)
+  let cmp = compare(m1, m2)
+  if cmp > 0:
+    a
+  elif cmp < 0:
+    b
+  elif m1 in {tmEqual, tmAlmostEqual}:
     a
   elif doUnion:
     union(a, b)
@@ -357,14 +373,14 @@ proc checkType*(value: Value, t: Type): bool =
     value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements)
   of tyReference:
     value.kind == vkReference and (value.referenceValue.isNil or
-      value.referenceValue[].checkType(t.elementType[]))
+      value.referenceValue[].checkType(t.elementType.unbox))
   of tyList:
-    value.kind == vkList and value.listValue.unref.eachAre(t.elementType[])
+    value.kind == vkList and value.listValue.unref.eachAre(t.elementType.unbox)
   of tyString: value.kind == vkString
   of tySet:
-    value.kind == vkSet and value.setValue.unref.eachAre(t.elementType[])
+    value.kind == vkSet and value.setValue.unref.eachAre(t.elementType.unbox)
   of tyTable:
-    value.kind == vkTable and value.tableValue.unref.eachAreTable(t.keyType[], t.valueType[])
+    value.kind == vkTable and value.tableValue.unref.eachAreTable(t.keyType.unbox, t.valueType.unbox)
   of tyExpression: value.kind == vkExpression
   of tyStatement: value.kind == vkStatement
   of tyScope: value.kind == vkScope
@@ -377,7 +393,7 @@ proc checkType*(value: Value, t: Type): bool =
           res = false; break
         inc i
       i == t.fields.len and res)
-  of tyType: value.kind == vkType and t.typeValue[].match(value.typeValue[]).matches
+  of tyType: value.kind == vkType and t.typeValue.unbox.match(value.typeValue.unbox).matches
   of tyAny: true
   of tyNone: false
   of tyUnion:
@@ -394,10 +410,10 @@ proc checkType*(value: Value, t: Type): bool =
         res = false
         break
     res
-  of tyNot: not value.checkType(t.notType[])
-  of tyBaseType: value.toType.kind == t.baseKind # XXX toType here is expensive
+  of tyNot: not value.checkType(t.notType.unbox)
+  of tyBaseType: value.getType.kind == t.baseKind # XXX unbox here is expensive
   of tyWithProperty:
-    value.checkType(t.typeWithProperty[]) and value.toType.properties.hasTag(t.withProperty)
+    value.checkType(t.typeWithProperty.unbox) and value.getType.properties.hasTag(t.withProperty)
   of tyCustomMatcher: not t.valueMatcher.isNil and t.valueMatcher(value)
   of tyParameter: value.checkType(t.parameter.bound.boundType)
   #of tyGeneric: value.checkType(t.genericPattern[])

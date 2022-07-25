@@ -7,10 +7,10 @@ import bazy, bazy/vm/[primitives, values, types, compilation, arrays]
 
 test "type relation":
   check {Ty(Integer).match(Ty(Float)), Ty(Float).match(Ty(Integer))} == {tmNone}
-  let a1 = Type(kind: tyTuple, elements: @[Ty(Scope)], varargs: toRef(Ty(Expression)))
+  let a1 = Type(kind: tyTuple, elements: @[Ty(Scope)], varargs: box Ty(Expression))
   let a2 = Type(kind: tyTuple, elements: @[Ty(Scope), Ty(Expression), Ty(Expression)])
   check {a1.match(a2), a2.match(a1)} == {tmAlmostEqual}
-  let a3 = Type(kind: tyTuple, elements: @[Ty(Scope)], varargs: toRef(Ty(Any)))
+  let a3 = Type(kind: tyTuple, elements: @[Ty(Scope)], varargs: box Ty(Any))
   let a4 = Type(kind: tyTuple, elements: @[Ty(Scope)])
   check a1.match(a3) == tmFalse
   check a3.match(a1) == tmTrue

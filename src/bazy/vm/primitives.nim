@@ -85,7 +85,7 @@ type
     of vkPropertyReference:
       propertyRefValue*: ref RuntimePropertyObj
     of vkType:
-      typeValue*: ref Type
+      typeValue*: BoxedType#ref Type
     of vkFunction:
       functionValue*: Function
     of vkNativeFunction:
@@ -128,6 +128,7 @@ type
 
   TypeKind* = enum
     # maybe add unknown type for values with unknown type at runtime
+    tyNone,
     # concrete
     tyNoneValue,
     tyInteger, tyUnsigned, tyFloat, tyBoolean,
@@ -141,7 +142,7 @@ type
     tyComposite,
     tyType,
     # typeclass
-    tyAny, tyNone,
+    tyAny,
     tyUnion, tyIntersection, tyNot,
     tyBaseType,
     tyWithProperty,
@@ -156,6 +157,8 @@ type
   TypeParameter* = ref object
     name*: string
     bound*: TypeBound
+
+  BoxedType* = ref Type
   
   Type* {.acyclic.} = object # could be cyclic
     properties*: Properties
@@ -168,29 +171,29 @@ type
       # XXX (2) signature with argument names and default values can be a property
       # only considered at callsite like nim, no semantic value
       # argument types could go in type or part of the property (good for runtime checking)
-      arguments*: ref Type # tuple type, includes varargs
-      returnType*: ref Type
+      arguments*: BoxedType#ref Typeref Type # tuple type, includes varargs
+      returnType*: BoxedType#ref Typeref Type
     of tyTuple:
       # XXX (1) maybe allow names in a property to reflect regular named tuples which would then extend to named arguments
       # maybe signature property instead, ordered names can be accessors instead of like composite
       elements*: seq[Type]
-      varargs*: ref Type # for now only trailing
+      varargs*: BoxedType#ref Typeref Type # for now only trailing
     of tyReference, tyList, tySet:
-      elementType*: ref Type
+      elementType*: BoxedType#ref Typeref Type
     of tyTable:
-      keyType*, valueType*: ref Type
+      keyType*, valueType*: BoxedType#ref Typeref Type
     of tyComposite:
       fields*: Table[string, Type]
     of tyType:
-      typeValue*: ref Type
+      typeValue*: BoxedType#ref Typeref Type
     of tyUnion, tyIntersection:
       operands*: seq[Type]
     of tyNot:
-      notType*: ref Type
+      notType*: BoxedType#ref Typeref Type
     of tyBaseType:
       baseKind*: TypeKind
     of tyWithProperty:
-      typeWithProperty*: ref Type
+      typeWithProperty*: BoxedType#ref Typeref Type
       withProperty*: PropertyTag
     of tyCustomMatcher:
       typeMatcher*: proc (t: Type): TypeMatch
@@ -543,6 +546,13 @@ template unref*[T](x: ref T): untyped = x[]
 
 template unref*[T](x: T): untyped = x
 
+proc unbox*(vt: BoxedType): Type {.inline.} =
+  if vt.isNil: Type(kind: tyNone) else: vt[]
+proc box*(t: Type): BoxedType {.inline.} = toRef t
+
+proc isNone*(t: Type): bool = t.kind == tyNone
+proc isNone*(vt: BoxedType): bool = vt.isNil or vt.unbox.isNone
+
 import ../util/objects
 
 template mix(x) =
@@ -700,6 +710,11 @@ proc `$`*(t: TypeParameter): string {.inline.} = t.name
 
 proc `$`*(t: Type): string
 
+proc `$`*(vt: BoxedType): string =
+  if vt.isNil:
+    "None"
+  else: $vt[]
+
 proc `$`*(value: Value): string =
   case value.kind
   of vkNone: "()"
@@ -726,7 +741,7 @@ proc `$`*(value: Value): string =
     s.add(')')
     s
   of vkPropertyReference: $value.propertyRefValue[].value
-  of vkType: $value.typeValue[]
+  of vkType: $value.typeValue
   of vkFunction: "<function>"
   of vkNativeFunction: "<native function>"
   of vkEffect: $value.effectValue[]
@@ -770,19 +785,19 @@ proc `$`*(t: Type): string =
   of tyAny: "Any"
   of tyNone: "None"
   of tyFunction:
-    "Function(" & $t.arguments[] & ") -> " & $t.returnType[]
-  of tyTuple: "Tuple(" & $t.elements & (if t.varargs.isNil: ")" else: ", " & $t.varargs[] & "...)")
-  of tyReference: "Reference(" & $t.elementType[] & ")"
-  of tyList: "List(" & $t.elementType[] & ")"
-  of tySet: "Set(" & $t.elementType[] & ")"
-  of tyTable: "Table(" & $t.keyType[] & ", " & $t.valueType[] & ")"
+    "Function(" & $t.arguments & ") -> " & $t.returnType
+  of tyTuple: "Tuple(" & $t.elements & (if t.varargs.isNone: ")" else: ", " & $t.varargs & "...)")
+  of tyReference: "Reference(" & $t.elementType & ")"
+  of tyList: "List(" & $t.elementType & ")"
+  of tySet: "Set(" & $t.elementType & ")"
+  of tyTable: "Table(" & $t.keyType & ", " & $t.valueType & ")"
   of tyComposite: "Composite" & $t.fields
-  of tyType: "Type " & $t.typeValue[]
+  of tyType: "Type " & $t.typeValue
   of tyUnion: "Union(" & $t.operands & ")"
   of tyIntersection: "Intersection(" & $t.operands & ")"
-  of tyNot: "Not " & $t.notType[]
+  of tyNot: "Not " & $t.notType
   of tyBaseType: "BaseType " & $t.baseKind
-  of tyWithProperty: "WithProperty(" & $t.typeWithProperty[] & ", " & $t.withProperty & ")"
+  of tyWithProperty: "WithProperty(" & $t.typeWithProperty & ", " & $t.withProperty & ")"
   of tyCustomMatcher: "Custom"
   of tyParameter: "Parameter(" & $t.parameter.name & ")"
   #of tyGeneric:

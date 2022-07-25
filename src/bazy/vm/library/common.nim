@@ -72,7 +72,7 @@ template module*(moduleName, definitions): untyped {.dirty.} =
       define(result, n, typ, x)
     template define(n: string, x: Value) {.used.} =
       let value = x
-      define(n, toType(value), value)
+      define(n, getType(value), value)
     template define(n: string, typ: Type, x) {.used.} =
       define(n, typ, toValue(x))
     template define(n: string, x) {.used.} =
