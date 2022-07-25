@@ -234,7 +234,7 @@ type
 
 proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
   template match(a, b: Type) = matchParameters(a, b, table)
-  template match(a, b: BoxedType) = matchParameters(a[], b[], table)
+  template match(a, b: Box[Type]) = matchParameters(a.unbox, b.unbox, table)
   case pattern.kind
   of tyParameter:
     let param = pattern.parameter
@@ -294,7 +294,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
 
 proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
   template fill(a: var Type) = fillParameters(a, table)
-  template fill(a: var BoxedType) =
+  template fill(a: var Box[Type]) =
     if not a.isNil:
       var newType: Type = a.unbox
       fillParameters(newType, table)

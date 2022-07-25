@@ -378,9 +378,9 @@ proc checkType*(value: Value, t: Type): bool =
     value.kind == vkList and value.listValue.unref.eachAre(t.elementType.unbox)
   of tyString: value.kind == vkString
   of tySet:
-    value.kind == vkSet and value.setValue.unref.eachAre(t.elementType.unbox)
+    value.kind == vkSet and value.setValue.unbox.eachAre(t.elementType.unbox)
   of tyTable:
-    value.kind == vkTable and value.tableValue.unref.eachAreTable(t.keyType.unbox, t.valueType.unbox)
+    value.kind == vkTable and value.tableValue.unbox.eachAreTable(t.keyType.unbox, t.valueType.unbox)
   of tyExpression: value.kind == vkExpression
   of tyStatement: value.kind == vkStatement
   of tyScope: value.kind == vkScope
@@ -388,8 +388,8 @@ proc checkType*(value: Value, t: Type): bool =
     value.kind == vkComposite and (block:
       var res = false
       var i = 0
-      for key, value in value.compositeValue[]:#.items:
-        if (i >= value.compositeValue[].len) or (not checkType(value, t.fields[key.getCompositeName])):
+      for key, value in value.compositeValue.unref:#.items:
+        if (i >= value.compositeValue.unref.len) or (not checkType(value, t.fields[key.getCompositeName])):
           res = false; break
         inc i
       i == t.fields.len and res)

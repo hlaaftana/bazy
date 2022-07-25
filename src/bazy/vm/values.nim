@@ -1,4 +1,4 @@
-import "."/[primitives, pointertag, arrays], ../language/expressions, std/[sets, tables]
+import "."/[primitives, pointertag, arrays], ../language/expressions, std/[sets, tables], ../util/box
 
 template withkind(k, val): Value =
   Value(kind: `vk k`, `k Value`: val)
@@ -11,6 +11,15 @@ template withkindref(k, val) =
 template withkindpossibleref(k, val): untyped =
   when result.`k Value` is ref:
     withkindref(k, val)
+  else:
+    withkind(k, val)
+template withkindboxv(vk, kv, val): untyped =
+  Value(kind: `vk`, `kv`: box `val`)
+template withkindbox(k, val): untyped =
+  withkindboxv(`vk k`, `k Value`, val)
+template withkindpossiblebox(k, val): untyped {.used.} =
+  when result.`k Value` is Box:
+    withkindbox(k, val)
   else:
     withkind(k, val)
 
@@ -28,10 +37,10 @@ proc toValue*(x: sink Array[Value]): Value =
       toArray(a)
   Value(kind: vkArray, tupleValue: arr x.toOpenArray(0, x.len - 1))
 proc toValue*(x: Type): Value = Value(kind: vkType, typeValue: x.box)
-proc toValue*(x: BoxedType): Value = Value(kind: vkType, typeValue: x)
-proc toValue*(x: sink HashSet[Value]): Value = withkindref(set, x)
-proc toValue*(x: sink Table[Value, Value]): Value = withkindref(table, x)
-proc toValue*(x: sink Table[CompositeNameId, Value]#[Array[(CompositeNameId, Value)]]#): Value = withkindref(composite, x)
+proc toValue*(x: Box[Type]): Value = Value(kind: vkType, typeValue: x)
+proc toValue*(x: sink HashSet[Value]): Value = withkindbox(set, x)
+proc toValue*(x: sink Table[Value, Value]): Value = withkindbox(table, x)
+proc toValue*(x: sink Table[CompositeNameId, Value]#[Array[(CompositeNameId, Value)]]#): Value = withkindpossibleref(composite, x)
 proc toValue*(x: sink Table[string, Value]): Value = toValue(toCompositeArray(x))
 proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkind(nativeFunction, x)
 proc toValue*(x: Function): Value = withkind(function, x)
@@ -60,26 +69,26 @@ proc getType*(x: Value): Type =
     result = Type(kind: tyReference, elementType: x.referenceValue[].getType.box)
   of vkComposite:
     let val = x.compositeValue.unref
-    result = Type(kind: tyComposite, fields: initTable[string, Type](val.len))
-    for k, v in val:#.items:
+    result = Type(kind: tyComposite, fields: initTable[string, Type](val.unref.len))
+    for k, v in val.unref:#.items:
       result.fields[k.getCompositeName] = v.getType
   of vkPropertyReference:
-    result = getType(x.propertyRefValue.value)
-    result.properties = x.propertyRefValue.properties
+    result = getType(x.propertyRefValue.unbox.value)
+    result.properties = x.propertyRefValue.unbox.properties
   of vkType:
     result = Type(kind: tyType, typeValue: x.typeValue)
   of vkFunction, vkNativeFunction:
     result = Ty(Function) # XXX (2) no signature
   of vkEffect:
-    result = x.effectValue[].getType # XXX do what here
+    result = x.effectValue.unbox.getType # XXX do what here
   of vkSet:
     result = Ty(Set)
-    for v in x.setValue[]:
+    for v in x.setValue.unbox:
       result.elementType = v.getType.box
       break
   of vkTable:
     result = Ty(Table)
-    for k, v in x.tableValue[]:
+    for k, v in x.tableValue.unbox:
       result.keyType = k.getType.box
       result.valueType = v.getType.box
       break
@@ -100,12 +109,12 @@ proc copy*(value: Value): Value =
       newArray[i] = copy value.tupleValue.unref[i]
     toValue(newArray)
   of vkComposite:
-    var newTable = newTable[CompositeNameId, Value](value.compositeValue[].len)#newArray[(CompositeNameId, Value)](value.compositeValue[].len)
+    var newTable = initTable[CompositeNameId, Value](value.compositeValue.unref.len)#newArray[(CompositeNameId, Value)](value.compositeValue[].len)
     #var i = 0
-    for k, v in value.compositeValue[]:#.items:
+    for k, v in value.compositeValue.unref:#.items:
       newTable[k] = copy v#i] = (k, copy v)
       #inc i
-    Value(kind: vkComposite, compositeValue: newTable)#toValue(newTable)
+    Value(kind: vkComposite, compositeValue: newTable.toRef)#toValue(newTable)
   of vkPropertyReference, vkEffect,
     vkSet, vkTable, vkExpression, vkStatement, vkScope:
     # unimplemented

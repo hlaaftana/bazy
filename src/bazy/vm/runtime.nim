@@ -13,7 +13,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
 
 template run(instr: Instruction, stack, effectHandler): Value =
   let val = evaluate(instr, stack, effectHandler)
-  if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val.effectValue[])):
+  if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val.effectValue.unbox)):
     return val
   val
 
@@ -97,8 +97,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
         break
   of EmitEffect:
     result = Value(kind: vkEffect)
-    new result.effectValue
-    result.effectValue[] = run ins.effect
+    result.effectValue.store(run ins.effect)
   of HandleEffect:
     let h = run ins.effectHandler
     var handler: proc (effect: Value): bool
@@ -152,11 +151,11 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     result = toValue(arr)
   of GetComposite:
     let x = run ins.getComposite
-    result = x.compositeValue[ins.getCompositeId]#.unref.get(ins.getCompositeId)
+    result = x.compositeValue.unref[ins.getCompositeId]#.unref.get(ins.getCompositeId)
   of SetComposite:
     let x = run ins.setComposite
     result = run ins.setCompositeValue
-    x.compositeValue[ins.setCompositeId] = result#.unref.set(ins.setCompositeId, result)
+    x.compositeValue.unref[ins.setCompositeId] = result#.unref.set(ins.setCompositeId, result)
   of GetIndex:
     let x = run ins.getIndexAddress
     case x.kind
@@ -170,15 +169,14 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
   of SetIndex:
     let x = run ins.setIndexAddress
     result = run ins.setIndexValue
-    assert x.kind == vkReference
-    case x.referenceValue[].kind
+    case x.kind
     of vkList:
-      x.referenceValue[].listValue.unref[ins.setIndex] = result
+      x.listValue.unref[ins.setIndex] = result
     of vkArray:
-      x.referenceValue[].tupleValue.unref[ins.setIndex] = result
+      x.tupleValue.unref[ins.setIndex] = result
     of vkString:
       assert result.kind == vkInteger and result.integerValue >= 0 and result.integerValue <= 255
-      x.referenceValue[].stringValue.unref[ins.setIndex] = result.integerValue.char
+      x.stringValue.unref[ins.setIndex] = result.integerValue.char
     else: discard # error
   of AddInt:
     let a = run ins.binary1

@@ -1,15 +1,11 @@
-import std/[tables, sets, hashes], "."/[arrays, pointertag], ../language/expressions
+import std/[tables, sets, hashes], "."/[arrays, pointertag], ../language/expressions, ../util/box
+export box, unbox
 
 # type system should exist for both static and runtime dispatch
 # runtime-only types should only be subtypes of static-only types
 
-template minimal(T): untyped =
-  when sizeof(T) == sizeof(int):
-    T
-  else:
-    ref T
-
 type
+  # XXX move the reference value kinds to another type
   ValueKind* = enum
     vkNone
       ## some kind of null value
@@ -71,32 +67,32 @@ type
     of vkFloat:
       floatValue*: float
     of vkList:
-      listValue*: minimal seq[Value]
+      listValue*: ref seq[Value]
     of vkString:
-      stringValue*: minimal string
+      stringValue*: ref string
     of vkArray:
-      tupleValue*: minimal Array[Value]
+      tupleValue*: ArrayRef[Value]
     of vkReference:
       referenceValue*: ref Value
     of vkComposite:
-      compositeValue*: minimal Table[CompositeNameId, Value]#ArrayRef[tuple[id: CompositeNameId, value: Value]]
+      compositeValue*: ref Table[CompositeNameId, Value]#ArrayRef[tuple[id: CompositeNameId, value: Value]]
       # ^ arrayref version here crashes orc compiler
       # XXX probably better than table to use seq
     of vkPropertyReference:
-      propertyRefValue*: ref RuntimePropertyObj
+      propertyRefValue*: Box[RuntimePropertyObj]
     of vkType:
-      typeValue*: BoxedType#ref Type
+      typeValue*: Box[Type]#ref Type
     of vkFunction:
       functionValue*: Function
     of vkNativeFunction:
       nativeFunctionValue*: proc (args: openarray[Value]): Value {.nimcall.}
       # replace with single value argument?
     of vkEffect:
-      effectValue*: ref Value
+      effectValue*: box Value
     of vkSet:
-      setValue*: ref HashSet[Value]
+      setValue*: box HashSet[Value]
     of vkTable:
-      tableValue*: ref Table[Value, Value]
+      tableValue*: box Table[Value, Value]
     of vkExpression:
       expressionValue*: Expression
     of vkStatement:
@@ -157,8 +153,6 @@ type
   TypeParameter* = ref object
     name*: string
     bound*: TypeBound
-
-  BoxedType* = ref Type
   
   Type* {.acyclic.} = object # could be cyclic
     properties*: Properties
@@ -171,29 +165,29 @@ type
       # XXX (2) signature with argument names and default values can be a property
       # only considered at callsite like nim, no semantic value
       # argument types could go in type or part of the property (good for runtime checking)
-      arguments*: BoxedType#ref Typeref Type # tuple type, includes varargs
-      returnType*: BoxedType#ref Typeref Type
+      arguments*: Box[Type] # tuple type, includes varargs
+      returnType*: Box[Type]
     of tyTuple:
       # XXX (1) maybe allow names in a property to reflect regular named tuples which would then extend to named arguments
       # maybe signature property instead, ordered names can be accessors instead of like composite
       elements*: seq[Type]
-      varargs*: BoxedType#ref Typeref Type # for now only trailing
+      varargs*: Box[Type] # for now only trailing
     of tyReference, tyList, tySet:
-      elementType*: BoxedType#ref Typeref Type
+      elementType*: Box[Type]
     of tyTable:
-      keyType*, valueType*: BoxedType#ref Typeref Type
+      keyType*, valueType*: Box[Type]
     of tyComposite:
       fields*: Table[string, Type]
     of tyType:
-      typeValue*: BoxedType#ref Typeref Type
+      typeValue*: Box[Type]
     of tyUnion, tyIntersection:
       operands*: seq[Type]
     of tyNot:
-      notType*: BoxedType#ref Typeref Type
+      notType*: Box[Type]
     of tyBaseType:
       baseKind*: TypeKind
     of tyWithProperty:
-      typeWithProperty*: BoxedType#ref Typeref Type
+      typeWithProperty*: Box[Type]
       withProperty*: PropertyTag
     of tyCustomMatcher:
       typeMatcher*: proc (t: Type): TypeMatch
@@ -543,15 +537,11 @@ template toRef*[T](x: T): ref T =
   res
 
 template unref*[T](x: ref T): untyped = x[]
-
+template unref*[T](x: Box[T]): untyped = x.unbox
 template unref*[T](x: T): untyped = x
 
-proc unbox*(vt: BoxedType): Type {.inline.} =
-  if vt.isNil: Type(kind: tyNone) else: vt[]
-proc box*(t: Type): BoxedType {.inline.} = toRef t
-
 proc isNone*(t: Type): bool = t.kind == tyNone
-proc isNone*(vt: BoxedType): bool = vt.isNil or vt.unbox.isNone
+proc isNone*(vt: Box[Type]): bool = vt.isNil or vt.unbox.isNone
 
 import ../util/objects
 
@@ -710,10 +700,10 @@ proc `$`*(t: TypeParameter): string {.inline.} = t.name
 
 proc `$`*(t: Type): string
 
-proc `$`*(vt: BoxedType): string =
+proc `$`*(vt: Box[Type]): string =
   if vt.isNil:
     "None"
-  else: $vt[]
+  else: $vt.unbox
 
 proc `$`*(value: Value): string =
   case value.kind
@@ -732,7 +722,7 @@ proc `$`*(value: Value): string =
   of vkReference: ($value.referenceValue[])
   of vkComposite:
     var s = "("
-    for k, v in value.compositeValue[]:#.items:
+    for k, v in value.compositeValue.unref:#.items:
       if s.len != len"(":
         s.add(", ")
       s.add(k.getCompositeName)
@@ -740,13 +730,13 @@ proc `$`*(value: Value): string =
       s.add($v)
     s.add(')')
     s
-  of vkPropertyReference: $value.propertyRefValue[].value
+  of vkPropertyReference: $value.propertyRefValue.unbox.value
   of vkType: $value.typeValue
   of vkFunction: "<function>"
   of vkNativeFunction: "<native function>"
-  of vkEffect: $value.effectValue[]
-  of vkSet: $value.setValue[]
-  of vkTable: $value.tableValue[]
+  of vkEffect: $value.effectValue.unbox
+  of vkSet: $value.setValue.unbox
+  of vkTable: $value.tableValue.unbox
   of vkExpression: $value.expressionValue[]
   of vkStatement: $value.statementValue[]
   of vkScope: $value.scopeValue[]
