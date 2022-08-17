@@ -32,10 +32,17 @@ type
     symbolWords*: seq[ShortString]
     stringBackslashEscape*, stringQuoteEscape*: bool
     backslashBreakNewline*, commaIgnoreIndent*: bool
+  
+  IndentContext* = object
+    levels*: seq[int]
+    level*: int
 
   Tokenizer* = ref object
     options*: TokenizerOptions
     str*: string
+    indentContexts*: seq[IndentContext]
+    indent*: int
+    recordingIndent*, comment*: bool
     currentRune*: Rune
     pos*, previousPos*: int
     when doLineColumn:
@@ -272,21 +279,11 @@ proc recordSymbolPlus*(tz: var Tokenizer, extra: char): string =
       return
 
 proc tokenize*(tz: var Tokenizer): seq[Token] =
-  type IndentContext = object
-    levels: seq[int]
-    level: int
-
+  # todo: convert to iterator
   result = newSeq[Token]()
   var
     lastKind: TokenKind
-    indent: int
-    recordingIndent, comment: bool
-    indentContexts = @[IndentContext()]
-
-  template dropLast() =
-    let l1 = result.len - 1
-    result.setLen(l1)
-    lastKind = if unlikely(l1 == 0): tkNone else: result[l1 - 1].kind
+  tz.indentContexts = @[IndentContext()]
 
   template add(t: Token) =
     var tok = t
@@ -302,30 +299,30 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
   for c in tz.runes:
     when doLineColumn:
       let (ln, cl) = (tz.ln, tz.cl)
-    if comment:
+    if tz.comment:
       if c == '\n':
-        comment = false
+        tz.comment = false
       else: continue
 
     let w = c.isWhitespace
 
-    if recordingIndent and c != '\n':
+    if tz.recordingIndent and c != '\n':
       case c.asChar
       of '\t':
-        inc indent, 4
+        inc tz.indent, 4
         continue
       of '#':
-        indent = 0
+        tz.indent = 0
         # recordingIndent still true
-        comment = true
+        tz.comment = true
         continue
       elif w:
-        inc indent
+        inc tz.indent
         continue
       else:
-        template indentLevels: untyped = indentContexts[^1].levels
-        template indentLevel: untyped = indentContexts[^1].level
-        let diff = indent - indentLevel
+        template indentLevels: untyped = tz.indentContexts[^1].levels
+        template indentLevel: untyped = tz.indentContexts[^1].level
+        let diff = tz.indent - indentLevel
         if diff < 0:
           var d = -diff
           var i = indentLevels.len
@@ -346,8 +343,8 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
           indentLevels.add(diff)
           inc indentLevel, diff
           add tkIndent
-        indent = 0
-        recordingIndent = false
+        tz.indent = 0
+        tz.recordingIndent = false
 
     if w:
       if c == '\n':
@@ -368,7 +365,7 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
           break
         if r == high(result):
           add(tkNewLine)
-        recordingIndent = not breakIndent
+        tz.recordingIndent = not breakIndent
       elif lastKind != tkWhitespace:
         add(tkWhitespace)
     elif c.isAlpha or c == '_':
@@ -386,26 +383,25 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
       add Token(kind: tkSymbol, short: recordSymbol(tz).toShortString)
     else:
       let ch = c.char
-      template doubleChar(k: TokenKind, startChar: char) =
-        if lastKind == k:
-          dropLast()
-          tz.resetPos()
-          add Token(kind: tkSymbol, short: recordSymbolPlus(tz, ch).toShortString)
+      template dotColon(k: TokenKind, startChar: char) =
+        let s = recordSymbolPlus(tz, ch)
+        if s.len == 1:
+          add Token(kind: k)
         else:
-          add k
+          add Token(kind: tkSymbol, short: s.toShortString)
       template openDelim(kind: TokenKind) =
-        indentContexts.add(IndentContext())
+        tz.indentContexts.add(IndentContext())
         add kind
       template closeDelim(kind: TokenKind) =
-        if indentContexts.len > 1:
-          indentContexts.setLen(indentContexts.high)
+        if tz.indentContexts.len > 1:
+          tz.indentContexts.setLen(tz.indentContexts.high)
         add kind
       case ch
-      of '#': comment = true
+      of '#': tz.comment = true
       of '\\': add tkBackslash
-      of '.': doubleChar tkDot, '.'
+      of '.': dotColon tkDot, '.'
       of ',': add tkComma
-      of ':': doubleChar tkColon, ':'
+      of ':': dotColon tkColon, ':'
       of ';': add tkSemicolon
       of '(': openDelim tkOpenParen
       of '[': openDelim tkOpenBrack
@@ -432,12 +428,7 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
       else:
         # non-alpha, so symbol start
         tz.resetPos()
-        if lastKind in {tkDot, tkColon}:
-          let ch = CharacterTokens[lastKind]
-          dropLast()
-          add Token(kind: tkSymbol, short: recordSymbolPlus(tz, ch).toShortString)
-        else:
-          add Token(kind: tkSymbol, short: recordSymbol(tz).toShortString)
+        add Token(kind: tkSymbol, short: recordSymbol(tz).toShortString)
 
 proc tokenize*(str: string): seq[Token] =
   var tokenizer = newTokenizer(str)

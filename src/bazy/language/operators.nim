@@ -42,10 +42,13 @@ const Associativities*: array[Precedence, Associativity] = [
   None: Left
 ]
 
+when shortStringIsArray:
+  {.experimental: "caseStmtMacros".}
+
 proc precedence*(symbol: ShortString): Precedence =
   var L: int
   case symbol
-  of ShortString(0): None
+  of short"": None
   of short"=": Assignment
   of short":": Colon
   of short"**", short"pow": Exponent # not keyword

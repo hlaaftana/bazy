@@ -1,20 +1,56 @@
-type
-  ShortString* = distinct uint
+when sizeof(uint) == 8:
+  type ShortString* = distinct uint
+  template impl(ss: ShortString): uint = uint(ss)
+  const shortStringIsArray* = false
 
-proc `==`*(a, b: ShortString): bool {.borrow.}
-proc `<`*(a, b: ShortString): bool {.borrow.}
+  proc `==`*(a, b: ShortString): bool {.borrow.}
+  proc `<`*(a, b: ShortString): bool {.borrow.}
+else:
+  type ShortString* = distinct array[2, uint32]
+  template impl(ss: ShortString): array[2, uint32] = array[2, uint32](ss)
+  const shortStringIsArray* = true
+
+  proc `==`*(a, b: ShortString): bool =
+    (a.impl[0] == b.impl[0]) and (a.impl[1] == b.impl[1])
+  proc `<`*(a, b: ShortString): bool =
+    (a.impl[0] < b.impl[0]) or (a.impl[1] < b.impl[1])
+
+  import macros
+
+  macro `case`*(ss: ShortString): untyped =
+    result = newNimNode(nnkCaseStmt, ss)
+    result.add(newCall(ident"$", ss[0]))
+    for i in 1 ..< ss.len:
+      let n = ss[i]
+      if n.kind == nnkOfBranch:
+        var b = newNimNode(nnkOfBranch, n)
+        for i in 0 ..< n.len - 1:
+          b.add(newCall(ident"$", n[i]))
+        b.add(n[^1])
+        result.add(b)
+      else:
+        result.add(n)
 
 const shortStringMaxSize* = sizeof(ShortString) div sizeof(char)
 const charBits = sizeof(char) * 8
 
 template get(ss: ShortString, i: int): char =
-  char(
-    (ss.uint shr (i * charBits)) and
-      high(char).uint)
+  when shortStringIsArray:
+    char(
+      (ss.impl[i shr 2] shr ((i and 0b11) * charBits)) and
+        high(char).uint32)
+  else:
+    char(
+      (ss.uint shr (i * charBits)) and
+        high(char).uint)
 
 template set(ss: var ShortString, i: int, c: char) =
-  ss = ShortString(ss.uint or
-    (c.uint shl (i * charBits)))
+  when shortStringIsArray:
+    let idx = i shr 2
+    ss.impl[idx] = ss.impl[idx] or (c.uint32 shl ((i and 0b11) * charBits))
+  else:
+    ss = ShortString(ss.uint or
+      (c.uint shl (i * charBits)))
 
 proc `[]`*(ss: ShortString, i: int): char {.inline.} =
   rangeCheck i >= 0 and i < shortStringMaxSize
@@ -25,47 +61,21 @@ proc `[]=`*(ss: var ShortString, i: int, c: char) {.inline.} =
   set(ss, i, c)
 
 proc len*(ss: ShortString): int =
-  when true: # this is faster
-    # unrolled loop
-    {.push rangeChecks: off.}
-    template doIndex(i: int) =
-      if get(ss, i) == char(0):
-        return i
-    doIndex 0
-    doIndex 1
-    doIndex 2
-    doIndex 3
-    doIndex 4
-    doIndex 5
-    doIndex 6
-    doIndex 7
-    return 8
-    {.pop.}
-  else:
-    if ss.uint <= 0xFF:
-      1
-    else:
-      when sizeof(uint) == 2:
-        2
-      else:
-        if ss.uint <= 0xFF_FF:
-          2
-        elif ss.uint <= 0xFF_FF_FF:
-          3
-        else:
-          when sizeof(uint) == 4:
-            4
-          else:
-            if ss.uint <= 0xFF_FF_FF_FF'u:
-              4
-            elif ss.uint <= 0xFF_FF_FF_FF_FF'u:
-              5
-            elif ss.uint <= 0xFF_FF_FF_FF_FF_FF'u:
-              6
-            elif ss.uint <= 0xFF_FF_FF_FF_FF_FF_FF'u:
-              7
-            else:
-              8
+  # unrolled loop
+  {.push rangeChecks: off.}
+  template doIndex(i: int) =
+    if get(ss, i) == char(0):
+      return i
+  doIndex 0
+  doIndex 1
+  doIndex 2
+  doIndex 3
+  doIndex 4
+  doIndex 5
+  doIndex 6
+  doIndex 7
+  return 8
+  {.pop.}
 
 template `[]`*(ss: ShortString, i: BackwardsIndex): char =
   ss[ss.len - i.int]
@@ -75,12 +85,16 @@ template `[]=`*(ss: var ShortString, i: BackwardsIndex, c: char) =
 
 proc `[]`*(ss: ShortString, sl: Slice[int]): ShortString {.inline.} =
   rangeCheck sl.a >= 0 and sl.a < shortStringMaxSize and sl.b >= 0 and sl.b < shortStringMaxSize
-  ShortString((ss.uint shl (sl.a * charBits)) shr ((sl.len - sl.b + sl.a - 1) * charBits))
+  when shortStringIsArray:
+    for i in sl.a .. sl.b:
+      set(result, i - sl.a, get(ss, i))
+  else:
+    ShortString((ss.uint shl (sl.a * charBits)) shr ((sl.len - sl.b + sl.a - 1) * charBits))
 
 proc `[]=`*(ss: var ShortString, sl: Slice[int], ss2: ShortString) {.inline.} =
   rangeCheck sl.a >= 0 and sl.a < shortStringMaxSize and sl.b >= 0 and sl.b < shortStringMaxSize
   for i in sl:
-    ss[i] = ss2[i - sl.a]
+    set(ss, i, get(ss2, i - sl.a))
 
 iterator items*(ss: ShortString): char =
   # not unrolled because nim doesnt allow return

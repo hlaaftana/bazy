@@ -275,7 +275,11 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
       match(pattern.keyType, t.keyType)
       match(pattern.valueType, t.valueType)
   of tyComposite:
-    discard # XXX todo
+    if t.kind == pattern.kind:
+      for k, v in t.fields:
+        let ty = pattern.fields.getOrDefault(k, Ty(None))
+        if not ty.isNone:
+          match(ty, v)
   of tyType:
     if t.kind == pattern.kind:
       match(pattern.typeValue, t.typeValue)
@@ -383,8 +387,17 @@ proc resolve*(scope: Scope, ex: Expression, name: string, bound: TypeBound): Var
     except GenericMatchError as e:
       e.expression = ex
       raise e
-    var unmatchedParams = result.variable.genericParams
-    # XXX continue
+    block:
+      var unmatchedParams: seq[TypeParameter]
+      for p in result.variable.genericParams:
+        if p notin matches:
+          unmatchedParams.add(p)
+      if unmatchedParams.len != 0:
+        raise (ref GenericUnmatchedError)(
+          expression: ex,
+          allParameters: result.variable.genericParams,
+          matchedParameters: matches)
+    # XXX (0) continue
     # use single memory slot + fake variables with filled out types for erased
     # real variables for monomorphized
   if not bound.matchBound(result.variable.cachedType):

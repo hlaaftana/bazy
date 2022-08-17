@@ -9,6 +9,7 @@ module syntax:
   templ "static", 1:
     let st = scope.compile(args[0], +Ty(Any))
     result = toValue constant(scope.context.evaluateStatic(st.toInstruction), st.cachedType)
+  
   proc makeFn(scope: Scope, arguments: seq[Expression], body: Expression,
     name: string, returnBound: TypeBound, returnBoundSet: bool): Statement =
     let context = scope.context.childContext()
@@ -38,6 +39,61 @@ module syntax:
     result = Statement(kind: skArmStack,
       cachedType: fnType,
       armStackFunction: constant(fun, fnType))
+
+  type
+    AssignBehavior = enum asDefine, asSet
+
+    AssignError = object of CompileError
+      varName: string
+      scope: Scope
+
+  proc assign(scope: Scope, bound: TypeBound, full: Expression, lhs, rhs: Expression, behaviors: set[AssignBehavior]): Statement =
+    # XXX (0) generics
+    var lhs = lhs
+    let typeExpr =
+      if lhs.kind == Colon:
+        #let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).typeValue.unbox
+        let val = lhs.right
+        lhs = lhs.left
+        val
+      else: nil
+    let arguments =
+      case lhs.kind
+      of CallKinds:
+        (lhs.arguments, true)
+      of Wrapped:
+        (@[lhs.wrapped], true)
+      else:
+        (@[], false)
+    let genericArguments =
+      if lhs.kind == Subscript:
+        let val = lhs.arguments
+        lhs = lhs.address
+        (val, true)
+      else:
+        (@[], false)
+    # XXX (0) finish
+    case lhs.kind
+    of Name, Symbol:
+      let name = $lhs
+      if asSet in behaviors and (let a = scope.overloads(name, bound); a.len != 0):
+        let v = a[0]
+        let value = compile(scope, rhs, +v.variable.cachedType)
+        result = variableSet(v, value)
+      elif asDefine in behaviors:
+        let value = compile(scope, rhs, bound)
+        let v = scope.define(name, value.cachedType)
+        result = variableSet(v.shallowReference, value)
+      else:
+        raise (ref AssignError)(
+          expression: full,
+          varName: name,
+          scope: scope,
+          msg: "cannot assign to " & name)
+    of CallKinds:
+      result = makeFn(scope, lhs.arguments, rhs, $lhs.address, bound, typeExpr != nil)
+    else: assert false, $lhs
+  
   templ "=>", 2:
     var lhs = args[0]
     var body = args[1]
