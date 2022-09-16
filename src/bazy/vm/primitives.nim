@@ -5,51 +5,83 @@ export box, unbox
 # runtime-only types should only be subtypes of static-only types
 
 type
-  # XXX move the reference value kinds to another type
   ValueKind* = enum
     vkNone
       ## some kind of null value
-    vkInteger, vkUnsigned, vkFloat, vkBoolean
-      ## size is implementation detail
-      ## same as pointer size for now but may be 32 or 48 bits
-      ## if values use pointer packing
-    vkList
-      ## both seq and string are references to save memory
-    #vkShortestString
-    #  ## word size string
-    vkString
-      ## general byte sequence type
-    vkArray
-      ## like java array but typed like TS, not necessarily hetero or homogenously typed
-    vkReference
-      ## reference (pointer) to value
-    vkComposite
-      ## like tuple, but fields are tied to names and unordered
-      ## (really the names define the order and the names can at least be shortstrings)
-    vkPropertyReference
-      ## references with some type properties attached at runtime
-      ## which are also runtime values
-      # XXX actually use and account for this without losing performance
-    vkType
-      ## type value
-    vkNativeFunction
-      ## Nim function that takes values as argument
-    vkFunction
-      ## function
+    vkInt32, vkUint32, vkFloat32, vkBool
+      ## unboxed numbers
     vkEffect
       ## embedded effect value for exceptions/return/yield/whatever
-    vkSet
-    vkTable
+    vkBoxed
+      ## boxed value
+    #vkShortestString
+    #  ## word size string
+  
+  BoxedValueKind* = enum
+    bvkInt, bvkUint, bvkFloat
+    bvkType
+      ## type value
+    bvkTag
+      ## typed tag, or ID, unique per type
+    bvkArray
+      ## like java array but typed like TS, implementation of tuples
+    bvkString
+      ## general byte sequence type
+    bvkList
+      ## both seq and string are references to save memory
+    bvkSet
+    bvkTable
+    bvkComposite
+      ## like tuple, but fields are tied to names and unordered
+      ## (really the names define the order and the names can at least be shortstrings)
+    bvkFunction
+      ## function
+    bvkNativeFunction
+      ## Nim function that takes values as argument
     # could be pointers or serialized but for now this is more efficient:
-    vkExpression
-    vkStatement
-    vkScope
-    #vkOpaque
+    bvkExpression
+    bvkStatement
+    bvkScope
     # bigints can be added
 
-  RuntimePropertyObj* = object
-    properties*: Properties
-    value*: Value
+  BoxedValue* = ref object
+    `type`*: ref Type
+      # XXX actually use and account for this without losing performance
+    case kind*: BoxedValueKind
+    of bvkInt:
+      intValue*: int
+    of bvkUint:
+      uintValue*: uint
+    of bvkFloat:
+      floatValue*: float
+    of bvkType:
+      typeValue*: Type
+    of bvkTag: discard # XXX
+    of bvkArray:
+      tupleValue*: Array[Value]
+    of bvkString:
+      stringValue*: string
+    of bvkList:
+      listValue*: seq[Value]
+    of bvkSet:
+      setValue*: HashSet[Value]
+    of bvkTable:
+      tableValue*: Table[Value, Value]
+    of bvkComposite:
+      compositeValue*: Table[CompositeNameId, Value]#ArrayRef[tuple[id: CompositeNameId, value: Value]]
+      # ^ arrayref version here crashes orc compiler
+      # XXX probably better than table to use seq
+    of bvkFunction:
+      functionValue*: Function
+    of bvkNativeFunction:
+      nativeFunctionValue*: proc (args: openarray[Value]): Value {.nimcall.}
+      # replace with single value argument?
+    of bvkExpression:
+      expressionValue*: Expression
+    of bvkStatement:
+      statementValue*: Statement
+    of bvkScope:
+      scopeValue*: Scope
   
   CompositeNameId* = int
 
@@ -60,45 +92,16 @@ type
     # maybe interning for some pointer types
     case kind*: ValueKind
     of vkNone: discard
-    of vkInteger, vkBoolean:
-      integerValue*: int
-    of vkUnsigned:
-      unsignedValue*: uint
-    of vkFloat:
-      floatValue*: float
-    of vkList:
-      listValue*: ref seq[Value]
-    of vkString:
-      stringValue*: ref string
-    of vkArray:
-      tupleValue*: ArrayRef[Value]
-    of vkReference:
-      referenceValue*: ref Value
-    of vkComposite:
-      compositeValue*: ref Table[CompositeNameId, Value]#ArrayRef[tuple[id: CompositeNameId, value: Value]]
-      # ^ arrayref version here crashes orc compiler
-      # XXX probably better than table to use seq
-    of vkPropertyReference:
-      propertyRefValue*: Box[RuntimePropertyObj]
-    of vkType:
-      typeValue*: Box[Type]#ref Type
-    of vkFunction:
-      functionValue*: Function
-    of vkNativeFunction:
-      nativeFunctionValue*: proc (args: openarray[Value]): Value {.nimcall.}
-      # replace with single value argument?
+    of vkInt32, vkBool:
+      int32Value*: int32
+    of vkUint32:
+      uint32Value*: uint32
+    of vkFloat32:
+      float32Value*: float32
     of vkEffect:
-      effectValue*: box Value
-    of vkSet:
-      setValue*: box HashSet[Value]
-    of vkTable:
-      tableValue*: box Table[Value, Value]
-    of vkExpression:
-      expressionValue*: Expression
-    of vkStatement:
-      statementValue*: Statement
-    of vkScope:
-      scopeValue*: Scope
+      effectValue*: ref Value
+    of vkBoxed:
+      boxedValue*: BoxedValue
   
   PointerTaggedValue* = distinct (
     when pointerTaggable:
@@ -109,18 +112,14 @@ type
   
   Value* = ValueObj
 
-  PropertyTag* = ref object
-    name*: string
-    argumentTypes*: seq[Type]
-    typeMatcher*: proc (t: Type, arguments: seq[Value]): TypeMatch
-    valueMatcher*: proc (v: Value, arguments: seq[Value]): bool
-
-  Property* = object
-    tag*: PropertyTag
-    arguments*: seq[Value]
+  Property* = ref object
+    value*: Value
+    # these are supposed to act on `prop.value`:
+    typeMatcher*: proc (prop: Property, t: Type): TypeMatch
+    valueMatcher*: proc (prop: Property, v: Value): bool
   
   Properties* = object
-    table*: Table[PropertyTag, seq[Value]]
+    table*: HashSet[Property]
 
   TypeKind* = enum
     # maybe add unknown type for values with unknown type at runtime
@@ -188,7 +187,7 @@ type
       baseKind*: TypeKind
     of tyWithProperty:
       typeWithProperty*: Box[Type]
-      withProperty*: PropertyTag
+      withProperty*: Property
     of tyCustomMatcher:
       typeMatcher*: proc (t: Type): TypeMatch
       valueMatcher*: proc (v: Value): bool
@@ -217,7 +216,7 @@ type
     imports*: Array[Stack]
     stack*: Array[Value]
 
-  Function* = ref object
+  Function* = object
     stack*: Stack
       ## persistent stack
       ## gets shallow copied when function is run
@@ -549,11 +548,9 @@ template mix(x) =
   mixin hash
   result = result !& hash(x)
 
-proc hash*(p: PropertyTag): Hash =
+proc hash*(p: Property): Hash =
   mix cast[pointer](p)
   result = !$ result
-
-proc `==`*(a, b: PropertyTag): bool = same(a, b)
 
 proc hash*(p: TypeParameter): Hash =
   mix cast[pointer](p)
@@ -564,6 +561,8 @@ proc `==`*(a, b: TypeParameter): bool = same(a, b)
 proc hash*(v: Value): Hash {.noSideEffect.}
 proc hash*(v: Type): Hash {.noSideEffect.}
 proc hash*(v: InstructionObj): Hash {.noSideEffect.}
+
+proc `==`*(a, b: Property): bool = a.value == b.value
 
 proc hash*(v: ref Value): Hash =
   if v.isNil:
@@ -741,18 +740,7 @@ proc `$`*(value: Value): string =
   of vkStatement: $value.statementValue[]
   of vkScope: $value.scopeValue[]
 
-proc `$`*(p: PropertyTag): string =
-  p.name
-
-proc `$`*(p: Property): string =
-  result = $p.tag
-  if p.arguments.len != 0:
-    result.add('(')
-    for i, a in p.arguments:
-      if i != 0:
-        result.add(", ")
-      result.add($a)
-    result.add(')')
+proc `$`*(p: Property): string = $p.value
 
 proc `$`*(tb: TypeBound): string
 
