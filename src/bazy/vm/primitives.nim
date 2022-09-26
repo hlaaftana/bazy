@@ -12,76 +12,79 @@ type
       ## unboxed numbers
     vkEffect
       ## embedded effect value for exceptions/return/yield/whatever
-    vkBoxed
-      ## boxed value
     #vkShortestString
     #  ## word size string
-  
-  BoxedValueKind* = enum
-    bvkInt, bvkUint, bvkFloat
-    bvkType
+    vkInt64, vkUint64, vkFloat64
+    vkType
       ## type value
-    bvkTag
+    vkTag
       ## typed tag, or ID, unique per type
-    bvkArray
+    vkArray
       ## like java array but typed like TS, implementation of tuples
-    bvkString
+    vkString
       ## general byte sequence type
-    bvkList
+    vkList
       ## both seq and string are references to save memory
-    bvkSet
-    bvkTable
-    bvkComposite
+    vkSet
+    vkTable
+    vkComposite
       ## like tuple, but fields are tied to names and unordered
       ## (really the names define the order and the names can at least be shortstrings)
-    bvkFunction
+    vkFunction
       ## function
-    bvkNativeFunction
+    vkNativeFunction
       ## Nim function that takes values as argument
     # could be pointers or serialized but for now this is more efficient:
-    bvkExpression
-    bvkStatement
-    bvkScope
+    vkExpression
+    vkStatement
+    vkScope
     # bigints can be added
+  
+  BoxedValueKind* = range[vkInt64..high(ValueKind)]
 
-  BoxedValue* = ref object
+const boxedValueKinds* = {low(BoxedValueKind)..high(BoxedValueKind)}
+
+type
+  BoxedValueObj* = object
     `type`*: ref Type
       # XXX actually use and account for this without losing performance
-    case kind*: BoxedValueKind
-    of bvkInt:
-      intValue*: int
-    of bvkUint:
-      uintValue*: uint
-    of bvkFloat:
-      floatValue*: float
-    of bvkType:
+    case kind*: ValueKind
+    of vkNone, vkInt32, vkUint32, vkFloat32, vkBool, vkEffect: discard
+    of vkInt64:
+      int64Value*: int
+    of vkUint64:
+      uint64Value*: uint
+    of vkFloat64:
+      float64Value*: float
+    of vkType:
       typeValue*: Type
-    of bvkTag: discard # XXX
-    of bvkArray:
+    of vkTag: discard # XXX
+    of vkArray:
       tupleValue*: Array[Value]
-    of bvkString:
+    of vkString:
       stringValue*: string
-    of bvkList:
+    of vkList:
       listValue*: seq[Value]
-    of bvkSet:
+    of vkSet:
       setValue*: HashSet[Value]
-    of bvkTable:
+    of vkTable:
       tableValue*: Table[Value, Value]
-    of bvkComposite:
+    of vkComposite:
       compositeValue*: Table[CompositeNameId, Value]#ArrayRef[tuple[id: CompositeNameId, value: Value]]
       # ^ arrayref version here crashes orc compiler
       # XXX probably better than table to use seq
-    of bvkFunction:
+    of vkFunction:
       functionValue*: Function
-    of bvkNativeFunction:
+    of vkNativeFunction:
       nativeFunctionValue*: proc (args: openarray[Value]): Value {.nimcall.}
       # replace with single value argument?
-    of bvkExpression:
+    of vkExpression:
       expressionValue*: Expression
-    of bvkStatement:
+    of vkStatement:
       statementValue*: Statement
-    of bvkScope:
+    of vkScope:
       scopeValue*: Scope
+  BoxedValue* = ref BoxedValueObj
   
   CompositeNameId* = int
 
@@ -92,7 +95,9 @@ type
     # maybe interning for some pointer types
     case kind*: ValueKind
     of vkNone: discard
-    of vkInt32, vkBool:
+    of vkBool:
+      boolValue*: bool
+    of vkInt32:
       int32Value*: int32
     of vkUint32:
       uint32Value*: uint32
@@ -100,7 +105,7 @@ type
       float32Value*: float32
     of vkEffect:
       effectValue*: ref Value
-    of vkBoxed:
+    of boxedValueKinds:
       boxedValue*: BoxedValue
   
   PointerTaggedValue* = distinct (
@@ -112,14 +117,20 @@ type
   
   Value* = ValueObj
 
-  Property* = ref object
-    value*: Value
+  # xxx update this
+  PropertyTag* = ref object
+    name*: string
+    argumentTypes*: seq[Type]
     # these are supposed to act on `prop.value`:
-    typeMatcher*: proc (prop: Property, t: Type): TypeMatch
-    valueMatcher*: proc (prop: Property, v: Value): bool
+    typeMatcher*: proc (t: Type, arguments: seq[Value]): TypeMatch
+    valueMatcher*: proc (v: Value, arguments: seq[Value]): bool
   
+  Property* = object
+    tag*: PropertyTag
+    arguments*: seq[Value]
+
   Properties* = object
-    table*: HashSet[Property]
+    table*: Table[PropertyTag, seq[Value]]
 
   TypeKind* = enum
     # maybe add unknown type for values with unknown type at runtime
@@ -187,7 +198,7 @@ type
       baseKind*: TypeKind
     of tyWithProperty:
       typeWithProperty*: Box[Type]
-      withProperty*: Property
+      withProperty*: PropertyTag
     of tyCustomMatcher:
       typeMatcher*: proc (t: Type): TypeMatch
       valueMatcher*: proc (v: Value): bool
@@ -260,7 +271,7 @@ type
   BinaryInstructionKind* = range[AddInt .. DivFloat]
   UnaryInstructionKind* = range[NegInt .. NegFloat]
 
-  Instruction* {.acyclic.} = ref object
+  InstructionObj* {.acyclic.} = object
     case kind*: InstructionKind
     of NoOp: discard
     of Constant:
@@ -320,8 +331,7 @@ type
       unary*: Instruction
     of low(BinaryInstructionKind) .. high(BinaryInstructionKind):
       binary1*, binary2*: Instruction
-
-  InstructionObj = typeof(Instruction()[])
+  Instruction* = ref InstructionObj
   
   StatementKind* = enum
     skNone
@@ -356,7 +366,7 @@ type
     skUnaryInstruction
     skBinaryInstruction
 
-  Statement* {.acyclic.} = ref object
+  StatementObj* {.acyclic.} = object
     ## typed/compiled expression
     cachedType*: Type
     case kind*: StatementKind
@@ -420,6 +430,7 @@ type
     of skBinaryInstruction:
       binaryInstructionKind*: BinaryInstructionKind
       binary1*, binary2*: Instruction
+  Statement* = ref StatementObj
   
   ParameterInstantiation* = Table[TypeParameter, Type]
   
@@ -548,9 +559,11 @@ template mix(x) =
   mixin hash
   result = result !& hash(x)
 
-proc hash*(p: Property): Hash =
+proc hash*(p: PropertyTag): Hash =
   mix cast[pointer](p)
   result = !$ result
+
+proc `==`*(a, b: PropertyTag): bool = same(a, b)
 
 proc hash*(p: TypeParameter): Hash =
   mix cast[pointer](p)
@@ -558,140 +571,76 @@ proc hash*(p: TypeParameter): Hash =
 
 proc `==`*(a, b: TypeParameter): bool = same(a, b)
 
+proc hash*(v: BoxedValueObj): Hash {.noSideEffect.}
 proc hash*(v: Value): Hash {.noSideEffect.}
 proc hash*(v: Type): Hash {.noSideEffect.}
 proc hash*(v: InstructionObj): Hash {.noSideEffect.}
 
-proc `==`*(a, b: Property): bool = a.value == b.value
+template hashRefObj(T): untyped {.dirty.} =
+  proc hash*(v: T): Hash =
+    if v.isNil:
+      mix 0
+    else:
+      mix v[]
+    result = !$ result
 
-proc hash*(v: ref Value): Hash =
-  if v.isNil:
-    mix 0
-  else:
-    mix v[]
-  result = !$ result
+hashRefObj(ref Value)
+hashRefObj(ref Type)
+hashRefObj Instruction
+hashRefObj Stack
 
-proc hash*(v: ref Type): Hash =
-  if v.isNil:
-    mix 0
-  else:
-    mix v[]
-  result = !$ result
-
-proc hash*(v: Instruction): Hash =
-  if v.isNil:
-    mix 0
-  else:
-    mix v[]
-  result = !$ result
-
-proc hash*(v: Value): Hash =
-  for f in fields(v):
-    when f is ref:
-      when compiles(hash(f[])):
-        if v.kind notin {vkReference, vkFunction} and not f.isNil:
-          mix(f[])
+template hashObj(T): untyped {.dirty.} =
+  proc hash*(v: T): Hash {.noSideEffect.} =
+    for f in fields(v):
+      when f is ref:
+        when compiles(hash(f[])):
+          if not f.isNil:
+            mix f[]
+          else:
+            mix cast[int](cast[pointer](f))
         else:
           mix cast[int](cast[pointer](f))
       else:
-        mix cast[int](cast[pointer](f))
-    else:
-      mix f
-  result = !$ result
+        mix f
+    result = !$ result
 
-proc hash*(v: Type): Hash =
-  for f in fields(v):
-    when f is ref:
-      when compiles(hash(f[])):
-        if not f.isNil:
-          mix f[]
-        else:
-          mix cast[int](cast[pointer](f))
-      else:
-        mix cast[int](cast[pointer](f))
-    else:
-      mix f
-  result = !$ result
+hashObj BoxedValueObj
+hashObj Value
+hashObj Type
+hashObj InstructionObj
 
-proc hash*(v: InstructionObj): Hash =
-  for f in fields(v):
-    when f is ref:
-      when compiles(hash(f[])):
-        if not f.isNil:
-          mix f[]
-        else:
-          mix cast[int](cast[pointer](f))
-      else:
-        mix cast[int](cast[pointer](f))
-    else:
-      mix f
-  result = !$ result
-
+proc `==`*(a, b: BoxedValueObj): bool {.noSideEffect.}
 proc `==`*(a, b: Value): bool {.noSideEffect.}
 proc `==`*(a, b: Type): bool {.noSideEffect.}
 proc `==`*(a, b: InstructionObj): bool {.noSideEffect.}
-proc `==`*(a, b: typeof(Statement()[])): bool {.noSideEffect.}
+proc `==`*(a, b: StatementObj): bool {.noSideEffect.}
 
 defineRefEquality Value
+defineRefEquality BoxedValueObj
 defineRefEquality Type
 defineRefEquality InstructionObj
-defineRefEquality typeof(Statement()[])
+defineRefEquality StatementObj
 
-proc `==`*(a, b: Value): bool =
-  zipFields(a, b, aField, bField):
-    when aField is ref:
-      if a.kind notin {vkReference, vkFunction} and not aField.isNil and not bField.isNil:
-        if aField[] != bField[]:
-          return false
+template eqObj(T; forceElseVal = false): untyped {.dirty.} =
+  proc `==`*(a, b: T): bool =
+    zipFields(forceElse = forceElseVal, a, b, aField, bField):
+      when aField is ref:
+        if not aField.isNil and not bField.isNil:
+          if aField[] != bField[]:
+            return false
+        else:
+          if aField != bField:
+            return false
       else:
         if aField != bField:
           return false
-    else:
-      if aField != bField:
-        return false
-  return true
+    return true
 
-proc `==`*(a, b: Type): bool =
-  zipFields(a, b, aField, bField):
-    when aField is ref:
-      if not aField.isNil and not bField.isNil:
-        if aField[] != bField[]:
-          return false
-      else:
-        if aField != bField:
-          return false
-    else:
-      if aField != bField:
-        return false
-  return true
-
-proc `==`*(a, b: InstructionObj): bool =
-  zipFields(forceElse = true, a, b, aField, bField):
-    when aField is ref:
-      if not aField.isNil and not bField.isNil:
-        if aField[] != bField[]:
-          return false
-      else:
-        if aField != bField:
-          return false
-    else:
-      if aField != bField:
-        return false
-  return true
-
-proc `==`*(a, b: typeof(Statement()[])): bool =
-  zipFields(a, b, aField, bField):
-    when aField is ref:
-      if not aField.isNil and not bField.isNil:
-        if aField[] != bField[]:
-          return false
-      else:
-        if aField != bField:
-          return false
-    else:
-      if aField != bField:
-        return false
-  return true
+eqObj Value, true
+eqObj BoxedValueObj
+eqObj Type
+eqObj InstructionObj, true
+eqObj StatementObj
 
 import strutils
 
@@ -704,13 +653,13 @@ proc `$`*(vt: Box[Type]): string =
     "None"
   else: $vt.unbox
 
-proc `$`*(value: Value): string =
-  case value.kind
-  of vkNone: "()"
-  of vkInteger: $value.integerValue
-  of vkBoolean: $bool(value.integerValue)
-  of vkUnsigned: $value.unsignedValue
-  of vkFloat: $value.floatValue
+proc `$`*(value: BoxedValue): string =
+  result = case value.kind
+  of vkNone, vkInt32, vkUint32, vkBool, vkFloat32, vkEffect: "" # unreachable
+  of vkInt64: $value.int64Value
+  of vkUint64: $value.uint64Value
+  of vkFloat64: $value.float64Value
+  of vkTag: "" # todo
   of vkList: ($value.listValue.unref)[1..^1]
   of vkString: value.stringValue.unref
   of vkArray:
@@ -718,7 +667,6 @@ proc `$`*(value: Value): string =
     s[0] = '('
     s[^1] = ')'
     s
-  of vkReference: ($value.referenceValue[])
   of vkComposite:
     var s = "("
     for k, v in value.compositeValue.unref:#.items:
@@ -729,18 +677,37 @@ proc `$`*(value: Value): string =
       s.add($v)
     s.add(')')
     s
-  of vkPropertyReference: $value.propertyRefValue.unbox.value
   of vkType: $value.typeValue
   of vkFunction: "<function>"
   of vkNativeFunction: "<native function>"
-  of vkEffect: $value.effectValue.unbox
-  of vkSet: $value.setValue.unbox
-  of vkTable: $value.tableValue.unbox
+  of vkSet: $value.setValue
+  of vkTable: $value.tableValue
   of vkExpression: $value.expressionValue[]
   of vkStatement: $value.statementValue[]
   of vkScope: $value.scopeValue[]
 
-proc `$`*(p: Property): string = $p.value
+proc `$`*(value: Value): string =
+  case value.kind
+  of vkNone: "()"
+  of vkInt32: $value.int32Value
+  of vkUint32: $value.uint32Value
+  of vkFloat32: $value.float32Value
+  of vkBool: $bool(value.int32Value)
+  of vkEffect: "Effect(" & $value.effectValue.unref & ")"
+  of boxedValueKinds: $value.boxedValue
+
+proc `$`*(p: PropertyTag): string =
+  p.name
+
+proc `$`*(p: Property): string =
+  result = $p.tag
+  if p.arguments.len != 0:
+    result.add('(')
+    for i, a in p.arguments:
+      if i != 0:
+        result.add(", ")
+      result.add($a)
+    result.add(')')
 
 proc `$`*(tb: TypeBound): string
 

@@ -2,19 +2,18 @@ import "."/[primitives, pointertag, arrays], ../language/expressions, std/[sets,
 
 template withkind(k, val): Value =
   Value(kind: `vk k`, `k Value`: val)
-template withkindrefv(vk, kv, val) =
-  result = Value(kind: `vk`)
-  new(result.`kv`)
-  result.`kv`[] = val
-template withkindref(k, val) =
+template withkindrefv(vk, kv, val): Value =
+  Value(kind: `vk`, boxedValue: BoxedValue(kind: `vk`, `kv`: val))
+template withkindref(k, val): Value =
   withkindrefv(`vk k`, `k Value`, val)
-template withkindpossibleref(k, val): untyped =
-  when result.`k Value` is ref:
-    withkindref(k, val)
-  else:
-    withkind(k, val)
+when false:
+  template withkindpossibleref(k, val): untyped =
+    when result.`k Value` is ref:
+      withkindref(k, val)
+    else:
+      withkind(k, val)
 template withkindboxv(vk, kv, val): untyped =
-  Value(kind: `vk`, `kv`: box `val`)
+  withkindrefv(vk, kv, val)#Value(kind: `vk`, `kv`: box `val`)
 template withkindbox(k, val): untyped =
   withkindboxv(`vk k`, `k Value`, val)
 template withkindpossiblebox(k, val): untyped {.used.} =
@@ -23,80 +22,90 @@ template withkindpossiblebox(k, val): untyped {.used.} =
   else:
     withkind(k, val)
 
-proc toValue*(x: int): Value = withkind(integer, x)
-proc toValue*(x: uint): Value = withkind(unsigned, x)
-proc toValue*(x: float): Value = withkind(float, x)
-proc toValue*(x: bool): Value = Value(kind: vkBoolean, integerValue: int(x))
-proc toValue*(x: sink seq[Value]): Value = withkindpossibleref(list, x)
-proc toValue*(x: sink string): Value = withkindpossibleref(string, x)
+proc toValue*(x: int32): Value = withkind(int32, x)
+proc toValue*(x: uint32): Value = withkind(uint32, x)
+proc toValue*(x: float32): Value = withkind(float32, x)
+proc toValue*(x: bool): Value = withkind(bool, x)
+proc toValue*(x: int64): Value = withkindbox(int64, x)
+proc toValue*(x: uint64): Value = withkindbox(uint64, x)
+proc toValue*(x: float64): Value = withkindbox(float64, x)
+proc toValue*(x: sink seq[Value]): Value = withkindbox(list, x)
+proc toValue*(x: sink string): Value = withkindbox(string, x)
 proc toValue*(x: sink Array[Value]): Value =
   template arr(a: untyped): untyped =
     when result.tupleValue is ArrayRef:
       toArrayRef(a)
     else:
       toArray(a)
-  Value(kind: vkArray, tupleValue: arr x.toOpenArray(0, x.len - 1))
-proc toValue*(x: Type): Value = Value(kind: vkType, typeValue: x.box)
-proc toValue*(x: Box[Type]): Value = Value(kind: vkType, typeValue: x)
+  withkindbox(array, arr x.toOpenArray(0, x.len - 1))
+proc toValue*(x: Type): Value = Value(kind: vkType, boxedValue: BoxedValue(kind: vkType, typeValue: x))
+proc toValue*(x: Box[Type]): Value = Value(kind: vkType, boxedValue: BoxedValue(kind: vkType, typeValue: x.unbox))
 proc toValue*(x: sink HashSet[Value]): Value = withkindbox(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindbox(table, x)
-proc toValue*(x: sink Table[CompositeNameId, Value]#[Array[(CompositeNameId, Value)]]#): Value = withkindpossibleref(composite, x)
+proc toValue*(x: sink Table[CompositeNameId, Value]#[Array[(CompositeNameId, Value)]]#): Value = withkindbox(composite, x)
 proc toValue*(x: sink Table[string, Value]): Value = toValue(toCompositeArray(x))
-proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkind(nativeFunction, x)
-proc toValue*(x: Function): Value = withkind(function, x)
-proc toValue*(x: Expression): Value = withkind(expression, x)
-proc toValue*(x: Statement): Value = withkind(statement, x)
-proc toValue*(x: Scope): Value = withkind(scope, x)
+proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkindbox(nativeFunction, x)
+proc toValue*(x: Function): Value = withkindbox(function, x)
+proc toValue*(x: Expression): Value = withkindbox(expression, x)
+proc toValue*(x: Statement): Value = withkindbox(statement, x)
+proc toValue*(x: Scope): Value = withkindbox(scope, x)
 
 proc getType*(x: Value): Type =
   case x.kind
   of vkNone: result = Ty(NoneValue)
-  of vkInteger: result = Ty(Integer)
-  of vkUnsigned: result = Ty(Unsigned)
-  of vkFloat: result = Ty(Float)
-  of vkBoolean: result = Ty(Boolean)
-  of vkList: result = Type(kind: tyList, elementType: x.listValue.unref[0].getType.box)
-  of vkString: result = Ty(String)
-  of vkExpression: result = Ty(Expression)
-  of vkStatement: result = Ty(Statement)
-  of vkScope: result = Ty(Scope)
-  of vkArray:
-    let val = x.tupleValue.unref
-    result = Type(kind: tyTuple, elements: newSeq[Type](val.len))
-    for i in 0 ..< x.tupleValue.unref.len:
-      result.elements[i] = val[i].getType
-  of vkReference:
-    result = Type(kind: tyReference, elementType: x.referenceValue[].getType.box)
-  of vkComposite:
-    let val = x.compositeValue.unref
-    result = Type(kind: tyComposite, fields: initTable[string, Type](val.unref.len))
-    for k, v in val.unref:#.items:
-      result.fields[k.getCompositeName] = v.getType
-  of vkPropertyReference:
-    result = getType(x.propertyRefValue.unbox.value)
-    result.properties = x.propertyRefValue.unbox.properties
-  of vkType:
-    result = Type(kind: tyType, typeValue: x.typeValue)
-  of vkFunction, vkNativeFunction:
-    result = Ty(Function) # XXX (2) no signature
+  of vkInt32: result = Ty(Integer)
+  of vkUint32: result = Ty(Unsigned)
+  of vkFloat32: result = Ty(Float)
+  of vkInt64: discard # result = Ty(Int32)
+  of vkUint64: discard # result = Ty(Uint32)
+  of vkFloat64: discard # result = Ty(Float32)
+  of vkBool: result = Ty(Boolean)
+  of boxedValueKinds - {vkInt64, vkUint64, vkFloat64}: result = x.boxedValue.type[]
   of vkEffect:
-    result = x.effectValue.unbox.getType # XXX do what here
-  of vkSet:
-    result = Ty(Set)
-    for v in x.setValue.unbox:
-      result.elementType = v.getType.box
-      break
-  of vkTable:
-    result = Ty(Table)
-    for k, v in x.tableValue.unbox:
-      result.keyType = k.getType.box
-      result.valueType = v.getType.box
-      break
+    result = x.effectValue.unref.getType # XXX do what here
+  when false:
+    case x.kind
+    of vkList: result = Type(kind: tyList, elementType: x.listValue.unref[0].getType.box)
+    of vkString: result = Ty(String)
+    of vkExpression: result = Ty(Expression)
+    of vkStatement: result = Ty(Statement)
+    of vkScope: result = Ty(Scope)
+    of vkArray:
+      let val = x.tupleValue.unref
+      result = Type(kind: tyTuple, elements: newSeq[Type](val.len))
+      for i in 0 ..< x.tupleValue.unref.len:
+        result.elements[i] = val[i].getType
+    of vkReference:
+      result = Type(kind: tyReference, elementType: x.referenceValue[].getType.box)
+    of vkComposite:
+      let val = x.compositeValue.unref
+      result = Type(kind: tyComposite, fields: initTable[string, Type](val.unref.len))
+      for k, v in val.unref:#.items:
+        result.fields[k.getCompositeName] = v.getType
+    of vkPropertyReference:
+      result = getType(x.propertyRefValue.unbox.value)
+      result.properties = x.propertyRefValue.unbox.properties
+    of vkType:
+      result = Type(kind: tyType, typeValue: x.typeValue)
+    of vkFunction, vkNativeFunction:
+      result = Ty(Function) # XXX (2) no signature
+    of vkSet:
+      result = Ty(Set)
+      for v in x.setValue.unbox:
+        result.elementType = v.getType.box
+        break
+    of vkTable:
+      result = Ty(Table)
+      for k, v in x.tableValue.unbox:
+        result.keyType = k.getType.box
+        result.valueType = v.getType.box
+        break
 
 proc copy*(value: Value): Value =
   case value.kind
-  of vkNone, vkInteger, vkBoolean, vkUnsigned, vkFloat,
-    vkReference, vkType, vkFunction, vkNativeFunction: value
+  of vkNone, vkInt64, vkBool, vkUint64, vkFloat64,
+    vkInt32, vkFloat32, vkUint32,
+    vkType, vkFunction, vkNativeFunction: value
   of vkList:
     var newSeq = newSeq[Value](value.listValue.unref.len)
     for i in 0 ..< newSeq.len:
