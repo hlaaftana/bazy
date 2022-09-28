@@ -45,17 +45,27 @@ type
 const boxedValueKinds* = {low(BoxedValueKind)..high(BoxedValueKind)}
 
 type
-  BoxedValueObj* = object
+  FullValueObj* = object
     `type`*: ref Type
       # XXX actually use and account for this without losing performance
     case kind*: ValueKind
-    of vkNone, vkInt32, vkUint32, vkFloat32, vkBool, vkEffect: discard
+    of vkNone: discard
+    of vkBool:
+      boolValue*: bool
+    of vkInt32:
+      int32Value*: int32
+    of vkUint32:
+      uint32Value*: uint32
+    of vkFloat32:
+      float32Value*: float32
+    of vkEffect:
+      effectValue*: Box[Value]
     of vkInt64:
-      int64Value*: int
+      int64Value*: int64
     of vkUint64:
-      uint64Value*: uint
+      uint64Value*: uint64
     of vkFloat64:
-      float64Value*: float
+      float64Value*: float64
     of vkType:
       typeValue*: Type
     of vkTag: discard # XXX
@@ -84,7 +94,7 @@ type
       statementValue*: Statement
     of vkScope:
       scopeValue*: Scope
-  BoxedValue* = ref BoxedValueObj
+  FullValue* = ref FullValueObj
   
   CompositeNameId* = int
 
@@ -104,9 +114,9 @@ type
     of vkFloat32:
       float32Value*: float32
     of vkEffect:
-      effectValue*: ref Value
+      effectValue*: Box[Value]
     of boxedValueKinds:
-      boxedValue*: BoxedValue
+      boxedValue*: FullValue
   
   PointerTaggedValue* = distinct (
     when pointerTaggable:
@@ -137,9 +147,9 @@ type
     tyNone,
     # concrete
     tyNoneValue,
-    tyInteger, tyUnsigned, tyFloat, tyBoolean,
+    tyInt32, tyUint32, tyFloat32, tyBool,
+    tyInt64, tyUint64, tyFloat64,
     tyFunction, tyTuple,
-    tyReference,
     tyList,
     tyString,
     tySet,
@@ -167,7 +177,9 @@ type
   Type* {.acyclic.} = object # could be cyclic
     properties*: Properties
     case kind*: TypeKind
-    of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
+    of tyNoneValue,
+      tyInt32, tyUint32, tyFloat32, tyBool,
+      tyInt64, tyUint64, tyFloat64,
       tyString, tyExpression, tyStatement, tyScope,
       tyAny, tyNone:
       discard
@@ -182,7 +194,7 @@ type
       # maybe signature property instead, ordered names can be accessors instead of like composite
       elements*: seq[Type]
       varargs*: Box[Type] # for now only trailing
-    of tyReference, tyList, tySet:
+    of tyList, tySet:
       elementType*: Box[Type]
     of tyTable:
       keyType*, valueType*: Box[Type]
@@ -571,7 +583,7 @@ proc hash*(p: TypeParameter): Hash =
 
 proc `==`*(a, b: TypeParameter): bool = same(a, b)
 
-proc hash*(v: BoxedValueObj): Hash {.noSideEffect.}
+proc hash*(v: FullValueObj): Hash {.noSideEffect.}
 proc hash*(v: Value): Hash {.noSideEffect.}
 proc hash*(v: Type): Hash {.noSideEffect.}
 proc hash*(v: InstructionObj): Hash {.noSideEffect.}
@@ -604,19 +616,19 @@ template hashObj(T): untyped {.dirty.} =
         mix f
     result = !$ result
 
-hashObj BoxedValueObj
+hashObj FullValueObj
 hashObj Value
 hashObj Type
 hashObj InstructionObj
 
-proc `==`*(a, b: BoxedValueObj): bool {.noSideEffect.}
+proc `==`*(a, b: FullValueObj): bool {.noSideEffect.}
 proc `==`*(a, b: Value): bool {.noSideEffect.}
 proc `==`*(a, b: Type): bool {.noSideEffect.}
 proc `==`*(a, b: InstructionObj): bool {.noSideEffect.}
 proc `==`*(a, b: StatementObj): bool {.noSideEffect.}
 
 defineRefEquality Value
-defineRefEquality BoxedValueObj
+defineRefEquality FullValueObj
 defineRefEquality Type
 defineRefEquality InstructionObj
 defineRefEquality StatementObj
@@ -637,7 +649,7 @@ template eqObj(T; forceElseVal = false): untyped {.dirty.} =
     return true
 
 eqObj Value, true
-eqObj BoxedValueObj
+eqObj FullValueObj
 eqObj Type
 eqObj InstructionObj, true
 eqObj StatementObj
@@ -653,9 +665,14 @@ proc `$`*(vt: Box[Type]): string =
     "None"
   else: $vt.unbox
 
-proc `$`*(value: BoxedValue): string =
+proc `$`*(value: FullValue): string =
   result = case value.kind
-  of vkNone, vkInt32, vkUint32, vkBool, vkFloat32, vkEffect: "" # unreachable
+  of vkNone: "()"
+  of vkInt32: $value.int32Value
+  of vkUint32: $value.uint32Value
+  of vkFloat32: $value.float32Value
+  of vkBool: $bool(value.int32Value)
+  of vkEffect: "Effect(" & $value.effectValue.unref & ")"
   of vkInt64: $value.int64Value
   of vkUint64: $value.uint64Value
   of vkFloat64: $value.float64Value
@@ -719,10 +736,13 @@ proc `$`*(t: Type): string =
       result.add($t)
   result = case t.kind
   of tyNoneValue: "NoneValue"
-  of tyInteger: "Int"
-  of tyUnsigned: "Unsigned"
-  of tyFloat: "Float"
-  of tyBoolean: "Boolean"
+  of tyInt32: "Int32"
+  of tyUint32: "Uint32"
+  of tyFloat32: "Float32"
+  of tyBool: "Bool"
+  of tyInt64: "Int64"
+  of tyUint64: "Uint64"
+  of tyFloat64: "Float64"
   of tyString: "String"
   of tyExpression: "Expression"
   of tyStatement: "Statement"
@@ -732,7 +752,6 @@ proc `$`*(t: Type): string =
   of tyFunction:
     "Function(" & $t.arguments & ") -> " & $t.returnType
   of tyTuple: "Tuple(" & $t.elements & (if t.varargs.isNone: ")" else: ", " & $t.varargs & "...)")
-  of tyReference: "Reference(" & $t.elementType & ")"
   of tyList: "List(" & $t.elementType & ")"
   of tySet: "Set(" & $t.elementType & ")"
   of tyTable: "Table(" & $t.keyType & ", " & $t.valueType & ")"

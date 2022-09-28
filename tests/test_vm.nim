@@ -6,7 +6,7 @@ else:
 import bazy, bazy/vm/[primitives, values, types, compilation, arrays]
 
 test "type relation":
-  check {Ty(Integer).match(Ty(Float)), Ty(Float).match(Ty(Integer))} == {tmNone}
+  check {Ty(Int32).match(Ty(Float32)), Ty(Float32).match(Ty(Int32))} == {tmNone}
   let a1 = Type(kind: tyTuple, elements: @[Ty(Scope)], varargs: box Ty(Expression))
   let a2 = Type(kind: tyTuple, elements: @[Ty(Scope), Ty(Expression), Ty(Expression)])
   check {a1.match(a2), a2.match(a1)} == {tmAlmostEqual}
@@ -130,6 +130,7 @@ a = 0
   
   for inp, outp in tests.items:
     try:
+      echo "doing: ", inp
       check evaluate(inp) == outp
     except:
       echo "fail: ", (input: inp)
@@ -141,10 +142,10 @@ a = 0
 import bazy/vm/library/common
 
 module withVarargsFn:
-  define "max", funcTypeWithVarargs(Ty(Integer), [], Ty(Integer)), (doFn do:
-    var res = args[0].integerValue
+  define "max", funcTypeWithVarargs(Ty(Int32), [], Ty(Int32)), (doFn do:
+    var res = args[0].int32Value
     for i in 1 ..< args.len:
-      let el = args[i].integerValue
+      let el = args[i].int32Value
       if el > res: res = el
     toValue(res))
 

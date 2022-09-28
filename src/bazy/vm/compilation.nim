@@ -5,7 +5,7 @@ template defineMetaProperty(recurWith: untyped): PropertyTag =
     argumentTypes: @[Type(kind: tyBaseType, baseKind: tyFunction)],
     typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
       if t.properties.hasTag(recurWith):
-        match(args[0].typeValue.unbox, t.properties.table[recurWith][0].typeValue.unbox)
+        match(args[0].boxedValue.typeValue, t.properties.table[recurWith][0].boxedValue.typeValue)
       else:
         tmFalse)
 
@@ -250,7 +250,9 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
       table[param] = newType
     else:
       table[param] = t
-  of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
+  of tyNoneValue,
+    tyInt32, tyUint32, tyFloat32, tyBool,
+    tyInt64, tyUint64, tyFloat64,
     tyString, tyExpression, tyStatement, tyScope,
     tyAny, tyNone:
     discard # atoms
@@ -267,7 +269,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
           match(pattern.elements[i], t.varargs.unbox)
         if not pattern.varargs.isNone:
           match(pattern.varargs, t.varargs)
-  of tyReference, tyList, tySet:
+  of tyList, tySet:
     if t.kind == pattern.kind:
       match(pattern.elementType, t.elementType)
   of tyTable:
@@ -306,7 +308,9 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
   case pattern.kind
   of tyParameter:
     pattern = table[pattern.parameter]
-  of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
+  of tyNoneValue,
+    tyInt32, tyUint32, tyFloat32, tyBool,
+    tyInt64, tyUint64, tyFloat64,
     tyString, tyExpression, tyStatement, tyScope,
     tyAny, tyNone, tyBaseType, tyCustomMatcher:
     discard
@@ -317,7 +321,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     for e in pattern.elements.mitems:
       fill(e)
     fill(pattern.varargs)
-  of tyReference, tyList, tySet:
+  of tyList, tySet:
     fill(pattern.elementType)
   of tyTable:
     fill(pattern.keyType)
@@ -342,9 +346,9 @@ template constant*(value: untyped, ty: Type): Statement =
 template constant*(value: untyped, ty: TypeKind): Statement =
   constant(value, Type(kind: ty))
 template constant*(value: string): Statement = constant(value, tyString)
-template constant*(value: int): Statement = constant(value, tyInteger)
-template constant*(value: uint): Statement = constant(value, tyUnsigned)
-template constant*(value: float): Statement = constant(value, tyFloat)
+template constant*(value: int32): Statement = constant(value, tyInt32)
+template constant*(value: uint32): Statement = constant(value, tyUint32)
+template constant*(value: float32): Statement = constant(value, tyFloat32)
 
 proc compileNumber*(ex: Expression, bound: TypeBound): Statement =
   let s = $ex.number
@@ -352,16 +356,16 @@ proc compileNumber*(ex: Expression, bound: TypeBound): Statement =
   case ex.number.kind
   of Integer:
     let val = parseInt(s)
-    if bound.boundType.kind == tyFloat:
-      result = constant(val.float)
-    elif val >= 0 and bound.boundType.kind == tyUnsigned:
-      result = constant(val.uint)
+    if bound.boundType.kind == tyFloat32:
+      result = constant(val.float32)
+    elif val >= 0 and bound.boundType.kind == tyUint32:
+      result = constant(val.uint32)
     else:
-      result = constant(val)
+      result = constant(val.int32)
   of Floating:
-    result = constant(parseFloat(s))
+    result = constant(parseFloat(s).float32)
   of Unsigned:
-    result = constant(parseUInt(s))
+    result = constant(parseUInt(s).uint32)
 
 template defaultBound: untyped = +Ty(Any)
 template map(ex: Expression, bound = defaultBound): Statement =
@@ -447,7 +451,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
     var metaTypes = newSeq[Type](allMetas.len)
     for i, v in allMetas:
       let ty = v.variable.cachedType
-      let metaTy = v.variable.cachedType.properties.getArguments(Meta)[0].typeValue.unbox
+      let metaTy = v.variable.cachedType.properties.getArguments(Meta)[0].boxedValue.typeValue
       metaTypes[i] = metaTy
       for i in 0 ..< ex.arguments.len:
         if matchBound(+Ty(Statement), ty.param(i + 1)):
@@ -497,7 +501,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
       let call = Statement(kind: skFunctionCall,
         callee: variableGet(meta),
         arguments: arguments).toInstruction
-      result = scope.context.evaluateStatic(call).statementValue
+      result = scope.context.evaluateStatic(call).boxedValue.statementValue
     else:
       for d in subMetas:
         var arguments = newArray[Value](ex.arguments.len + 1)
@@ -513,7 +517,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
           let call = Statement(kind: skFunctionCall,
             callee: variableGet(d),
             arguments: argumentStatement).toInstruction
-          result = scope.context.evaluateStatic(call).statementValue
+          result = scope.context.evaluateStatic(call).boxedValue.statementValue
           break
 
 proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
@@ -688,6 +692,7 @@ proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Stat
 proc compileBlock*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   result = Statement(kind: skSequence)
   for i, e in ex.statements:
+    echo "compiling ", e
     let b =
       if i == ex.statements.high:
         bound
@@ -753,7 +758,7 @@ type Program* = Function #[object
   instruction*: Instruction]#
 
 proc compile*(ex: Expression, imports: seq[Context], bound: TypeBound = +Ty(Any)): Program =
-  new(result)
+  #new(result)
   var context = newContext(imports)
   result.instruction = compile(context.top, ex, bound).toInstruction
   context.refreshStack()
