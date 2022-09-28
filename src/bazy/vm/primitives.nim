@@ -1,4 +1,4 @@
-import std/[tables, sets, hashes], "."/[arrays, pointertag], ../language/expressions, ../util/box
+import std/[tables, sets, hashes], "."/[arrays, pointertag], ../language/expressions, ../util/box, ../defines
 export box, unbox
 
 # type system should exist for both static and runtime dispatch
@@ -44,14 +44,13 @@ type
 
 const boxedValueKinds* = {low(BoxedValueKind)..high(BoxedValueKind)}
 
-# orc hangs on some of these types
-when defined(gcOrc):
-  {.pragma: orcAcyclic, acyclic.}
+when disableUnlikelyCycles:
+  {.pragma: unlikelyCycles, acyclic.}
 else:
-  {.pragma: orcAcyclic.}
+  {.pragma: unlikelyCycles.}
 
 type
-  FullValueObj* {.orcAcyclic.} = object
+  FullValueObj* {.unlikelyCycles.} = object
     `type`*: ref Type
       # XXX actually use and account for this without losing performance
     case kind*: ValueKind
@@ -106,7 +105,7 @@ type
 
   #OpaqueValue* = ref object of RootObj 
 
-  ValueObj* {.orcAcyclic.} = object # could be cyclic
+  ValueObj* {.unlikelyCycles.} = object # could be cyclic
     # entire thing can be pointer tagged, but would need GC hooks
     # maybe interning for some pointer types
     case kind*: ValueKind
@@ -180,7 +179,7 @@ type
     name*: string
     bound*: TypeBound
   
-  Type* {.orcAcyclic.} = object # could be cyclic
+  Type* {.unlikelyCycles.} = object # could be cyclic
     properties*: Properties
     case kind*: TypeKind
     of tyNoneValue,
@@ -241,7 +240,7 @@ type
     boundType*: Type
     variance*: Variance
 
-  Stack* {.acyclic.} = ref object
+  Stack* {.unlikelyCycles.} = ref object
     imports*: Array[Stack]
     stack*: Array[Value]
 
