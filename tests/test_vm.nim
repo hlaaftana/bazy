@@ -130,7 +130,6 @@ a = 0
   
   for inp, outp in tests.items:
     try:
-      echo "doing: ", inp
       check evaluate(inp) == outp
     except:
       echo "fail: ", (input: inp)

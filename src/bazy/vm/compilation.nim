@@ -692,7 +692,6 @@ proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Stat
 proc compileBlock*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   result = Statement(kind: skSequence)
   for i, e in ex.statements:
-    echo "compiling ", e
     let b =
       if i == ex.statements.high:
         bound

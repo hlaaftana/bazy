@@ -44,8 +44,14 @@ type
 
 const boxedValueKinds* = {low(BoxedValueKind)..high(BoxedValueKind)}
 
+# orc hangs on some of these types
+when defined(gcOrc):
+  {.pragma: orcAcyclic, acyclic.}
+else:
+  {.pragma: orcAcyclic.}
+
 type
-  FullValueObj* = object
+  FullValueObj* {.orcAcyclic.} = object
     `type`*: ref Type
       # XXX actually use and account for this without losing performance
     case kind*: ValueKind
@@ -100,7 +106,7 @@ type
 
   #OpaqueValue* = ref object of RootObj 
 
-  ValueObj* = object # could be cyclic
+  ValueObj* {.orcAcyclic.} = object # could be cyclic
     # entire thing can be pointer tagged, but would need GC hooks
     # maybe interning for some pointer types
     case kind*: ValueKind
@@ -174,7 +180,7 @@ type
     name*: string
     bound*: TypeBound
   
-  Type* {.acyclic.} = object # could be cyclic
+  Type* {.orcAcyclic.} = object # could be cyclic
     properties*: Properties
     case kind*: TypeKind
     of tyNoneValue,
