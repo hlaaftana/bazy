@@ -52,6 +52,54 @@ proc toValue*(x: Expression): Value = withkindbox(expression, x)
 proc toValue*(x: Statement): Value = withkindbox(statement, x)
 proc toValue*(x: Scope): Value = withkindbox(scope, x)
 
+proc getType*(x: Value): Type
+
+proc getType*(x: FullValue): Type =
+  if not x.type.isNil: return x.type[]
+  case x.kind
+  of vkNone: result = Ty(NoneValue)
+  of vkInt32: result = Ty(Int32)
+  of vkUint32: result = Ty(Uint32)
+  of vkFloat32: result = Ty(Float32)
+  of vkInt64: result = Ty(Int64)
+  of vkUint64: result = Ty(Uint64)
+  of vkFloat64: result = Ty(Float64)
+  of vkBool: result = Ty(Bool)
+  of vkTag: discard
+  of vkBoxed: result = getType(x.boxedValue)
+  of vkList: result = Type(kind: tyList, elementType: x.listValue.unref[0].getType.box)
+  of vkString: result = Ty(String)
+  of vkExpression: result = Ty(Expression)
+  of vkStatement: result = Ty(Statement)
+  of vkScope: result = Ty(Scope)
+  of vkArray:
+    let val = x.tupleValue.unref
+    result = Type(kind: tyTuple, elements: newSeq[Type](val.len))
+    for i in 0 ..< x.tupleValue.unref.len:
+      result.elements[i] = val[i].getType
+  of vkComposite:
+    let val = x.compositeValue.unref
+    result = Type(kind: tyComposite, fields: initTable[string, Type](val.unref.len))
+    for k, v in val.unref:#.items:
+      result.fields[k.getCompositeName] = v.getType
+  of vkType:
+    result = Type(kind: tyType, typeValue: box x.typeValue)
+  of vkFunction, vkNativeFunction:
+    result = Ty(Function) # XXX (2) no signature
+  of vkSet:
+    result = Ty(Set)
+    for v in x.setValue:
+      result.elementType = v.getType.box
+      break
+  of vkTable:
+    result = Ty(Table)
+    for k, v in x.tableValue:
+      result.keyType = k.getType.box
+      result.valueType = v.getType.box
+      break
+  of vkEffect:
+    result = x.effectValue.unref.getType # XXX do what here
+
 proc getType*(x: Value): Type =
   case x.kind
   of vkNone: result = Ty(NoneValue)
@@ -63,42 +111,7 @@ proc getType*(x: Value): Type =
   of vkFloat64: result = Ty(Float64)
   of vkBool: result = Ty(Bool)
   of boxedValueKinds - {vkInt64, vkUint64, vkFloat64}:
-    if not x.boxedValue.type.isNil:
-      result = x.boxedValue.type[]
-    else:
-      let x = x.boxedValue
-      case x.kind
-      of {low(ValueKind) .. high(ValueKind)} - boxedValueKinds + {vkInt64, vkUint64, vkFloat64, vkTag}: discard
-      of vkList: result = Type(kind: tyList, elementType: x.listValue.unref[0].getType.box)
-      of vkString: result = Ty(String)
-      of vkExpression: result = Ty(Expression)
-      of vkStatement: result = Ty(Statement)
-      of vkScope: result = Ty(Scope)
-      of vkArray:
-        let val = x.tupleValue.unref
-        result = Type(kind: tyTuple, elements: newSeq[Type](val.len))
-        for i in 0 ..< x.tupleValue.unref.len:
-          result.elements[i] = val[i].getType
-      of vkComposite:
-        let val = x.compositeValue.unref
-        result = Type(kind: tyComposite, fields: initTable[string, Type](val.unref.len))
-        for k, v in val.unref:#.items:
-          result.fields[k.getCompositeName] = v.getType
-      of vkType:
-        result = Type(kind: tyType, typeValue: box x.typeValue)
-      of vkFunction, vkNativeFunction:
-        result = Ty(Function) # XXX (2) no signature
-      of vkSet:
-        result = Ty(Set)
-        for v in x.setValue:
-          result.elementType = v.getType.box
-          break
-      of vkTable:
-        result = Ty(Table)
-        for k, v in x.tableValue:
-          result.keyType = k.getType.box
-          result.valueType = v.getType.box
-          break
+    result = x.boxedValue.getType
   of vkEffect:
     result = x.effectValue.unref.getType # XXX do what here
 

@@ -110,6 +110,16 @@ iterator mitems*[T](x: var Array[T]): var T =
   for i in 0 ..< L:
     yield x.data[i]
 
+iterator pairs*[T](x: Array[T]): (int, T) =
+  let L = x.len
+  for i in 0 ..< L:
+    yield (i, x.data[i])
+
+iterator mpairs*[T](x: var Array[T]): (int, var T) =
+  let L = x.len
+  for i in 0 ..< L:
+    yield (i, x.data[i])
+
 proc newArrayUninitialized*[T](length: int): Array[T] =
   initarr result, length, alloc
 

@@ -13,7 +13,7 @@ else:
   proc `==`*(a, b: ShortString): bool =
     (a.impl[0] == b.impl[0]) and (a.impl[1] == b.impl[1])
   proc `<`*(a, b: ShortString): bool =
-    (a.impl[0] < b.impl[0]) or (a.impl[1] < b.impl[1])
+    (a.impl[0] < b.impl[0]) or (a.impl[0] == b.impl[0] and a.impl[1] < b.impl[1])
 
   import macros
 

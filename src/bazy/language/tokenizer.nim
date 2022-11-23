@@ -279,7 +279,7 @@ proc recordSymbolPlus*(tz: var Tokenizer, extra: char): string =
       return
 
 proc tokenize*(tz: var Tokenizer): seq[Token] =
-  # todo: convert to iterator
+  # XXX convert to iterator
   result = newSeq[Token]()
   var
     lastKind: TokenKind

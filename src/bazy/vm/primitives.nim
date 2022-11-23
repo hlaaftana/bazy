@@ -14,6 +14,7 @@ type
       ## embedded effect value for exceptions/return/yield/whatever
     #vkShortestString
     #  ## word size string
+    vkBoxed
     vkInt64, vkUint64, vkFloat64
     vkType
       ## type value
@@ -40,7 +41,7 @@ type
     vkScope
     # bigints can be added
   
-  BoxedValueKind* = range[vkInt64..high(ValueKind)]
+  BoxedValueKind* = range[vkBoxed..high(ValueKind)]
 
 const boxedValueKinds* = {low(BoxedValueKind)..high(BoxedValueKind)}
 
@@ -65,6 +66,8 @@ type
       float32Value*: float32
     of vkEffect:
       effectValue*: Box[Value]
+    of vkBoxed:
+      boxedValue*: FullValue
     of vkInt64:
       int64Value*: int64
     of vkUint64:
@@ -536,7 +539,10 @@ else:
     for i, (k, v) in table:
       let id = k.getCompositeNameId
       result[i] = (id, v)
-    seq[typeof result[0]](result).sort(proc (a, b: auto): int = cmp(a[0], b[0]))
+    (when useArrays:
+      result.toOpenArray(0, result.len - 1)
+    else:
+      seq[typeof result[0]](result)).sort(proc (a, b: auto): int = cmp(a[0], b[0]))
 
   proc toCompositeArray*[T](table: Table[string, T]): Table[CompositeNameId, T] =
     for k, v in table:
@@ -678,10 +684,11 @@ proc `$`*(value: FullValue): string =
   of vkFloat32: $value.float32Value
   of vkBool: $bool(value.int32Value)
   of vkEffect: "Effect(" & $value.effectValue.unref & ")"
+  of vkBoxed: $value.boxedValue
   of vkInt64: $value.int64Value
   of vkUint64: $value.uint64Value
   of vkFloat64: $value.float64Value
-  of vkTag: "" # todo
+  of vkTag: "" # XXX todo
   of vkList: ($value.listValue.unref)[1..^1]
   of vkString: value.stringValue.unref
   of vkArray:

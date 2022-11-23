@@ -12,7 +12,10 @@ import std/math
 module numbers:
   define "Int", Ty(Int32)
   define "Float", Ty(Float32)
-  define "Unsigned", Ty(Uint32)
+  define "Uint", Ty(Uint32)
+  define "Int64", Ty(Int64)
+  define "Float64", Ty(Float64)
+  define "Uint64", Ty(Uint64)
   template unarySingle(op: static string, k) =
     fn op, [Ty(`k`)], Ty(`k`):
       toValue callOp(`op`, args[0].`k Value`)
