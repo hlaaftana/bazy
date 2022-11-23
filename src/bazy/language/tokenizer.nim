@@ -37,9 +37,16 @@ type
     levels*: seq[int]
     level*: int
 
+  QueueMode* = enum
+    ClearQueue, NewlineQueue
+
   Tokenizer* = ref object
     options*: TokenizerOptions
     str*: string
+    lastKind*: TokenKind
+    queue*: seq[Token]
+    queuePos*: int
+    queueMode*: QueueMode
     indentContexts*: seq[IndentContext]
     indent*: int
     recordingIndent*, comment*: bool
@@ -58,8 +65,12 @@ proc defaultOptions*(): TokenizerOptions =
     "div", "mod", "xor"]:
     result.symbolWords.add(it.toShortString)
 
+proc resetTokenizer*(tz: var Tokenizer) =
+  tz.indentContexts = @[IndentContext()]
+
 proc newTokenizer*(str: sink string = "", options = defaultOptions()): Tokenizer =
-  Tokenizer(str: str, options: options)
+  result = Tokenizer(str: str, options: options)
+  result.resetTokenizer()
 
 proc resetPos*(tz: var Tokenizer) =
   assert tz.previousPos != -1, "no previous position to reset to"
@@ -278,23 +289,24 @@ proc recordSymbolPlus*(tz: var Tokenizer, extra: char): string =
       tz.resetPos()
       return
 
-proc tokenize*(tz: var Tokenizer): seq[Token] =
-  # XXX convert to iterator
-  result = newSeq[Token]()
-  var
-    lastKind: TokenKind
-  tz.indentContexts = @[IndentContext()]
-
-  template add(t: Token) =
+proc nextToken*(tz: var Tokenizer): Token =
+  template fill(t: Token): Token =
     var tok = t
     when doLineColumn:
       tok.info.line = ln
       tok.info.column = cl
-    lastKind = tok.kind
-    result.add(tok)
+    tz.lastKind = tok.kind
+    tok
+
+  template add(t: Token) =
+    return fill(t)
 
   template add(tt: TokenKind) =
     add Token(kind: tt)
+
+  template queue(tt: TokenKind, mode: QueueMode = ClearQueue) =
+    tz.queueMode = mode
+    tz.queue.add(fill(Token(kind: tt)))
 
   for c in tz.runes:
     when doLineColumn:
@@ -331,42 +343,59 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
             let indt = indentLevels[i]
             dec d, indt
             dec indentLevel, indt
-            add tkIndentBack
+            queue tkIndentBack
             if d < 0:
               dec indentLevel, d
               indentLevels[^1] = -d
-              add tkIndent
+              queue tkIndent
               break
             indentLevels.setLen(indentLevels.high)
             if d == 0: break
         elif diff > 0:
           indentLevels.add(diff)
           inc indentLevel, diff
-          add tkIndent
+          queue tkIndent
         tz.indent = 0
         tz.recordingIndent = false
 
-    if w:
-      if c == '\n':
-        let r = high(result)
-        var breakIndent = false
-        for xi in countdown(r, 0):
-          case result[xi].kind
-          of tkWhitespace:
-            continue
+    if tz.queue.len != 0:
+      case tz.queueMode
+      of ClearQueue:
+        tz.resetPos()
+        result = tz.queue[tz.queuePos]
+        inc tz.queuePos
+        if tz.queuePos >= tz.queue.len:
+          tz.queuePos = 0
+          reset(tz.queue)
+        return result
+      of NewlineQueue:
+        if c == '\n':
+          var breakIndent = false
+          var breakNewline = false
+          case tz.queue[0].kind
           of tkBackslash:
             if tz.options.backslashBreakNewline:
-              result.del(xi)
+              tz.queue.delete(0)
+              breakNewline = true
               breakIndent = true
           of tkComma:
             if tz.options.commaIgnoreIndent:
               breakIndent = true
-          else: discard
-          break
-        if r == high(result):
-          add(tkNewLine)
-        tz.recordingIndent = not breakIndent
-      elif lastKind != tkWhitespace:
+          else: discard # impossible
+          if not breakNewline:
+            queue(tkNewline)
+          tz.queueMode = ClearQueue
+        elif w:
+          if tz.lastKind != tkWhitespace:
+            queue(tkWhitespace, NewlineQueue)
+        else:
+          tz.resetPos()
+          tz.queueMode = ClearQueue
+    elif w:
+      if c == '\n':
+        tz.recordingIndent = true
+        add(tkNewLine)
+      elif tz.lastKind != tkWhitespace:
         add(tkWhitespace)
     elif c.isAlpha or c == '_':
       # identifier start
@@ -398,9 +427,9 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
         add kind
       case ch
       of '#': tz.comment = true
-      of '\\': add tkBackslash
+      of '\\': queue(tkBackslash, NewlineQueue)
+      of ',': queue(tkComma, NewlineQueue)
       of '.': dotColon tkDot, '.'
-      of ',': add tkComma
       of ':': dotColon tkColon, ':'
       of ';': add tkSemicolon
       of '(': openDelim tkOpenParen
@@ -429,6 +458,11 @@ proc tokenize*(tz: var Tokenizer): seq[Token] =
         # non-alpha, so symbol start
         tz.resetPos()
         add Token(kind: tkSymbol, short: recordSymbol(tz).toShortString)
+
+proc tokenize*(tz: var Tokenizer): seq[Token] =
+  tz.resetTokenizer()
+  while (let tok = tz.nextToken(); tok.kind != tkNone):
+    result.add(tok)
 
 proc tokenize*(str: string): seq[Token] =
   var tokenizer = newTokenizer(str)
