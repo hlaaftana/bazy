@@ -4,16 +4,16 @@ type EffectHandler* = proc (effect: Value): bool
   ## returns true to continue execution
 
 template toNegatedBool*(val: Value): bool =
-  val.integerValue == 0
+  not val.boolValue
 
 template toBool*(val: Value): bool =
-  val.integerValue != 0
+  val.boolValue
 
 proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = nil): Value
 
 template run(instr: Instruction, stack, effectHandler): Value =
   let val = evaluate(instr, stack, effectHandler)
-  if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val.effectValue.unbox)):
+  if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val.effectValue.unref)):
     return val
   val
 
@@ -26,9 +26,9 @@ proc call*(fun: Function, args: sink Array[Value], effectHandler: EffectHandler 
 proc call*(fun: Value, args: sink Array[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
   case fun.kind
   of vkNativeFunction:
-    result = fun.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
+    result = fun.boxedValue.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
   of vkFunction:
-    result = fun.functionValue.call(args, effectHandler)
+    result = fun.boxedValue.functionValue.call(args, effectHandler)
   else:
     discard # error
 
@@ -79,7 +79,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     s.set(ins.setAddress[0], result)
   of ArmStack:
     result = run ins.armStackFunction
-    result.functionValue.stack.imports[0] = stack
+    result.boxedValue.functionValue.stack.imports[0] = stack
   of If:
     let cond = run ins.ifCondition
     if cond.toBool:
@@ -103,11 +103,11 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     var handler: proc (effect: Value): bool
     case h.kind
     of vkNativeFunction:
-      let f = h.nativeFunctionValue
+      let f = h.boxedValue.nativeFunctionValue
       handler = proc (effect: Value): bool =
         f([effect]).toBool
     of vkFunction:
-      let f = h.functionValue
+      let f = h.boxedValue.functionValue
       handler = proc (effect: Value): bool =
         let val = f.call([effect].toArray)
         if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
@@ -151,68 +151,68 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     result = toValue(arr)
   of GetComposite:
     let x = run ins.getComposite
-    result = x.compositeValue.unref[ins.getCompositeId]#.unref.get(ins.getCompositeId)
+    result = x.boxedValue.compositeValue.unref[ins.getCompositeId]#.unref.get(ins.getCompositeId)
   of SetComposite:
     let x = run ins.setComposite
     result = run ins.setCompositeValue
-    x.compositeValue.unref[ins.setCompositeId] = result#.unref.set(ins.setCompositeId, result)
+    x.boxedValue.compositeValue.unref[ins.setCompositeId] = result#.unref.set(ins.setCompositeId, result)
   of GetIndex:
     let x = run ins.getIndexAddress
     case x.kind
     of vkList:
-      result = x.listValue.unref[ins.getIndex]
+      result = x.boxedValue.listValue.unref[ins.getIndex]
     of vkArray:
-      result = x.tupleValue.unref[ins.getIndex]
+      result = x.boxedValue.tupleValue.unref[ins.getIndex]
     of vkString:
-      result = toValue(x.stringValue.unref[ins.getIndex].int)
+      result = toValue(x.boxedValue.stringValue.unref[ins.getIndex].int)
     else: discard # error
   of SetIndex:
     let x = run ins.setIndexAddress
     result = run ins.setIndexValue
     case x.kind
     of vkList:
-      x.listValue.unref[ins.setIndex] = result
+      x.boxedValue.listValue.unref[ins.setIndex] = result
     of vkArray:
-      x.tupleValue.unref[ins.setIndex] = result
+      x.boxedValue.tupleValue.unref[ins.setIndex] = result
     of vkString:
-      assert result.kind == vkInteger and result.integerValue >= 0 and result.integerValue <= 255
-      x.stringValue.unref[ins.setIndex] = result.integerValue.char
+      assert result.kind == vkInt32 and result.int32Value >= 0 and result.int32Value <= 255
+      x.boxedValue.stringValue.unref[ins.setIndex] = result.int32Value.char
     else: discard # error
   of AddInt:
     let a = run ins.binary1
     let b = run ins.binary2
-    result = toValue(a.integerValue + b.integerValue)
+    result = toValue(a.int32Value + b.int32Value)
   of SubInt:
     let a = run ins.binary1
     let b = run ins.binary2
-    result = toValue(a.integerValue - b.integerValue)
+    result = toValue(a.int32Value - b.int32Value)
   of MulInt:
     let a = run ins.binary1
     let b = run ins.binary2
-    result = toValue(a.integerValue * b.integerValue)
+    result = toValue(a.int32Value * b.int32Value)
   of DivInt:
     let a = run ins.binary1
     let b = run ins.binary2
-    result = toValue(a.integerValue div b.integerValue)
+    result = toValue(a.int32Value div b.int32Value)
   of AddFloat:
     let a = run ins.binary1
     let b = run ins.binary2
-    result = toValue(a.floatValue + b.floatValue)
+    result = toValue(a.float32Value + b.float32Value)
   of SubFloat:
     let a = run ins.binary1
     let b = run ins.binary2
-    result = toValue(a.floatValue - b.floatValue)
+    result = toValue(a.float32Value - b.float32Value)
   of MulFloat:
     let a = run ins.binary1
     let b = run ins.binary2
-    result = toValue(a.floatValue * b.floatValue)
+    result = toValue(a.float32Value * b.float32Value)
   of DivFloat:
     let a = run ins.binary1
     let b = run ins.binary2
-    result = toValue(a.floatValue / b.floatValue)
+    result = toValue(a.float32Value / b.float32Value)
   of NegInt:
     let a = run ins.unary
-    result = toValue(-a.integerValue)
+    result = toValue(-a.int32Value)
   of NegFloat:
     let a = run ins.unary
-    result = toValue(-a.floatValue)
+    result = toValue(-a.float32Value)

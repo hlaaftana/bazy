@@ -29,10 +29,10 @@ proc templType*(arity: int): Type {.inline.} =
 
 template doTempl*(body): untyped =
   (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
-    let scope {.inject, used.} = valueArgs[0].scopeValue
+    let scope {.inject, used.} = valueArgs[0].boxedValue.scopeValue
     var args {.inject.} = newSeq[Expression](valueArgs.len - 1)
     for i in 0 ..< args.len:
-      args[i] = valueArgs[i + 1].expressionValue
+      args[i] = valueArgs[i + 1].boxedValue.expressionValue
     body)
 
 proc typedTemplType*(arity: int): Type {.inline.} =
@@ -55,10 +55,10 @@ proc typedTemplType*(realArgs: openarray[Type], returnType: Type): Type {.inline
 
 template doTypedTempl*(body): untyped =
   (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
-    let scope {.inject, used.} = valueArgs[0].scopeValue
+    let scope {.inject, used.} = valueArgs[0].boxedValue.scopeValue
     var args {.inject.} = newSeq[Statement](valueArgs.len - 1)
     for i in 0 ..< args.len:
-      args[i] = valueArgs[i + 1].statementValue
+      args[i] = valueArgs[i + 1].boxedValue.statementValue
     body)
 
 template doFn*(body): untyped =

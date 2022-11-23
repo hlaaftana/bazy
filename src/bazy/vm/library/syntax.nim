@@ -18,7 +18,7 @@ module syntax:
     for i in 0 ..< arguments.len:
       var arg = arguments[i]
       if arg.kind == Colon:
-        argTypes[i] = scope.evaluateStatic(arg.right, +Type(kind: tyType, typeValue: box Ty(Any))).typeValue.unbox
+        argTypes[i] = scope.evaluateStatic(arg.right, +Type(kind: tyType, typeValue: box Ty(Any))).boxedValue.typeValue
         arg = arg.left
       else:
         argTypes[i] = Ty(Any)
@@ -99,7 +99,7 @@ module syntax:
     var body = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).typeValue.unbox
+        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).boxedValue.typeValue
         lhs = lhs.left
         (+t, true)
       else:
@@ -117,7 +117,7 @@ module syntax:
     let rhs = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).typeValue.unbox
+        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).boxedValue.typeValue
         lhs = lhs.left
         (+t, true)
       else:
@@ -136,7 +136,7 @@ module syntax:
     let rhs = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).typeValue.unbox
+        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).boxedValue.typeValue
         lhs = lhs.left
         (+t, true)
       else:
@@ -156,47 +156,47 @@ module syntax:
       result = toValue makeFn(scope, lhs.arguments, rhs, $lhs.address, bound, typeSet)
     else: assert false, $lhs
   define "if", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Expression)]).withProperties(
-    property(Meta, toValue funcType(Ty(Any), [Ty(Boolean), Ty(Any)]))
+    property(Meta, toValue funcType(Ty(Any), [Ty(Bool), Ty(Any)]))
   ), toValue proc (valueArgs: openarray[Value]): Value = 
-    let sc = valueArgs[0].scopeValue.childScope()
+    let sc = valueArgs[0].boxedValue.scopeValue.childScope()
     result = toValue Statement(kind: skIf,
-      ifCond: valueArgs[1].statementValue,
-      ifTrue: sc.compile(valueArgs[2].expressionValue, +Ty(Any)),
+      ifCond: valueArgs[1].boxedValue.statementValue,
+      ifTrue: sc.compile(valueArgs[2].boxedValue.expressionValue, +Ty(Any)),
       ifFalse: Statement(kind: skNone))
   define "if", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Expression), Ty(Expression)]).withProperties(
-    property(Meta, toValue funcType(Ty(Any), [Ty(Boolean), Ty(Any), Ty(Any)]))
+    property(Meta, toValue funcType(Ty(Any), [Ty(Bool), Ty(Any), Ty(Any)]))
   ), toValue proc (valueArgs: openarray[Value]): Value = 
-    var els = valueArgs[3].expressionValue
+    var els = valueArgs[3].boxedValue.expressionValue
     if els.kind == Colon and els.left.isIdentifier(ident) and ident == "else":
       els = els.right
-    let scope = valueArgs[0].scopeValue
+    let scope = valueArgs[0].boxedValue.scopeValue
     let sc = scope.childScope()
     let elsesc = scope.childScope()
     var res = Statement(kind: skIf,
-      ifCond: valueArgs[1].statementValue,
-      ifTrue: sc.compile(valueArgs[2].expressionValue, +Ty(Any)),
+      ifCond: valueArgs[1].boxedValue.statementValue,
+      ifTrue: sc.compile(valueArgs[2].boxedValue.expressionValue, +Ty(Any)),
       ifFalse: elsesc.compile(els, +Ty(Any)))
     res.cachedType = commonSuperType(res.ifTrue.cachedType, res.ifFalse.cachedType)
     result = toValue(res)
   define "while", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Expression)]).withProperties(
-    property(Meta, toValue funcType(union(), [Ty(Boolean), union()]))
+    property(Meta, toValue funcType(union(), [Ty(Bool), union()]))
   ), toValue proc (valueArgs: openarray[Value]): Value = 
-    let sc = valueArgs[0].scopeValue.childScope()
+    let sc = valueArgs[0].boxedValue.scopeValue.childScope()
     result = toValue Statement(kind: skWhile,
-      whileCond: valueArgs[1].statementValue,
-      whileBody: sc.compile(valueArgs[2].expressionValue, -union()))
+      whileCond: valueArgs[1].boxedValue.statementValue,
+      whileBody: sc.compile(valueArgs[2].boxedValue.expressionValue, -union()))
   define ".[]", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Statement)]).withProperties(
-    property(Meta, toValue funcType(Ty(Any), [Type(kind: tyBaseType, baseKind: tyTuple), Ty(Integer)]))
+    property(Meta, toValue funcType(Ty(Any), [Type(kind: tyBaseType, baseKind: tyTuple), Ty(Int32)]))
   ), toValue proc (valueArgs: openarray[Value]): Value =
-    let scope = valueArgs[0].scopeValue
-    let index = scope.context.evaluateStatic(valueArgs[2].statementValue.toInstruction)
-    let nthType = valueArgs[1].statementValue.cachedType.nth(index.integerValue)
+    let scope = valueArgs[0].boxedValue.scopeValue
+    let index = scope.context.evaluateStatic(valueArgs[2].boxedValue.statementValue.toInstruction)
+    let nthType = valueArgs[1].boxedValue.statementValue.cachedType.nth(index.int32Value)
     proc val(args: openarray[Value]): Value {.nimcall.} =
-      args[0].tupleValue.unref[args[1].integerValue]
+      args[0].boxedValue.tupleValue.unref[args[1].int32Value]
     result = toValue Statement(kind: skFunctionCall,
       cachedType: nthType,
       callee: constant(
-        Value(kind: vkNativeFunction, nativeFunctionValue: val),
+        Value(kind: vkNativeFunction, boxedValue: FullValue(kind: vkNativeFunction, nativeFunctionValue: val)),
         tyNone),
-      arguments: @[valueArgs[1].statementValue, constant(index, Ty(Integer))])
+      arguments: @[valueArgs[1].boxedValue.statementValue, constant(index, Ty(Int32))])
   # todo: let/for

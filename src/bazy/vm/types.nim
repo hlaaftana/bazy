@@ -30,7 +30,9 @@ const
   concreteTypeKinds* = {tyNoneValue..tyType}
   typeclassTypeKinds* = {tyAny..tyWithProperty}
   matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
-  atomicTypes* = {tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
+  atomicTypes* = {tyNoneValue,
+    tyInt32, tyUint32, tyFloat32, tyBool,
+    tyInt64, tyUint64, tyFloat64,
     tyString, tyExpression, tyStatement, tyScope}
   highestNonMatching* = tmFalse
   lowestMatching* = tmTrue
@@ -53,13 +55,15 @@ proc union*(s: varargs[Type]): Type =
 const definiteTypeLengths*: array[TypeKind, int] = [
   tyNone: 0,
   tyNoneValue: 0,
-  tyInteger: 0,
-  tyUnsigned: 0,
-  tyFloat: 0,
-  tyBoolean: 0,
+  tyInt32: 0,
+  tyUint32: 0,
+  tyFloat32: 0,
+  tyBool: 0,
+  tyInt64: 0,
+  tyUint64: 0,
+  tyFloat64: 0,
   tyFunction: 2,
   tyTuple: -1,
-  tyReference: 1,
   tyList: 1,
   tyString: 0,
   tySet: 1,
@@ -96,7 +100,9 @@ proc hasNth*(t: Type, i: int): bool {.inline.} =
 
 proc nth*(t: Type, i: int): Type =
   case t.kind
-  of tyNoneValue, tyInteger, tyUnsigned, tyFloat, tyBoolean,
+  of tyNoneValue,
+    tyInt32, tyUint32, tyFloat32, tyBool,
+    tyInt64, tyUint64, tyFloat64,
     tyString, tyExpression, tyStatement, tyScope,
     tyAny, tyNone:
     discard # inapplicable
@@ -110,7 +116,7 @@ proc nth*(t: Type, i: int): Type =
       result = t.elements[i]
     else:
       result = t.varargs.unbox
-  of tyReference, tyList, tySet:
+  of tyList, tySet:
     result = t.elementType.unbox
   of tyTable:
     if i == 0:
@@ -204,7 +210,7 @@ proc match*(matcher, t: Type): TypeMatch =
     case matcher.kind
     of atomicTypes * concreteTypeKinds:
       tmAlmostEqual
-    of tyReference, tyList, tySet:
+    of tyList, tySet:
       match(+matcher.elementType.unbox, t.elementType.unbox)
     of tyTuple:
       if matcher.elements.len != t.elements.len and matcher.varargs.isNone and t.varargs.isNone:
@@ -362,25 +368,25 @@ proc checkType*(value: Value, t: Type): bool =
     yes
   result = case t.kind
   of tyNoneValue: value.kind == vkNone
-  of tyInteger: value.kind == vkInteger
-  of tyUnsigned: value.kind == vkUnsigned
-  of tyFloat: value.kind == vkFloat
-  of tyBoolean: value.kind == vkBoolean
+  of tyInt32: value.kind == vkInt32
+  of tyUint32: value.kind == vkUint32
+  of tyFloat32: value.kind == vkFloat32
+  of tyBool: value.kind == vkBool
+  of tyInt64: value.kind == vkInt64
+  of tyUint64: value.kind == vkUint64
+  of tyFloat64: value.kind == vkFloat64
   of tyFunction:
     # XXX (2) no information about signature
     value.kind in {vkFunction, vkNativeFunction}
   of tyTuple:
-    value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements)
-  of tyReference:
-    value.kind == vkReference and (value.referenceValue.isNil or
-      value.referenceValue[].checkType(t.elementType.unbox))
+    value.kind == vkArray and value.boxedValue.tupleValue.unref.eachAre(t.elements)
   of tyList:
-    value.kind == vkList and value.listValue.unref.eachAre(t.elementType.unbox)
+    value.kind == vkList and value.boxedValue.listValue.unref.eachAre(t.elementType.unbox)
   of tyString: value.kind == vkString
   of tySet:
-    value.kind == vkSet and value.setValue.unbox.eachAre(t.elementType.unbox)
+    value.kind == vkSet and value.boxedValue.setValue.eachAre(t.elementType.unbox)
   of tyTable:
-    value.kind == vkTable and value.tableValue.unbox.eachAreTable(t.keyType.unbox, t.valueType.unbox)
+    value.kind == vkTable and value.boxedValue.tableValue.eachAreTable(t.keyType.unbox, t.valueType.unbox)
   of tyExpression: value.kind == vkExpression
   of tyStatement: value.kind == vkStatement
   of tyScope: value.kind == vkScope
@@ -388,12 +394,12 @@ proc checkType*(value: Value, t: Type): bool =
     value.kind == vkComposite and (block:
       var res = false
       var i = 0
-      for key, value in value.compositeValue.unref:#.items:
-        if (i >= value.compositeValue.unref.len) or (not checkType(value, t.fields[key.getCompositeName])):
+      for key, value in value.boxedValue.compositeValue.unref:#.items:
+        if (i >= value.boxedValue.compositeValue.unref.len) or (not checkType(value, t.fields[key.getCompositeName])):
           res = false; break
         inc i
       i == t.fields.len and res)
-  of tyType: value.kind == vkType and t.typeValue.unbox.match(value.typeValue.unbox).matches
+  of tyType: value.kind == vkType and t.typeValue.unbox.match(value.boxedValue.typeValue).matches
   of tyAny: true
   of tyNone: false
   of tyUnion:

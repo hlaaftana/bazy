@@ -12,7 +12,7 @@ module types:
   typedTempl "cast", [Ty(Any), Type(kind: tyType, typeValue: Ty(Any).box)], Ty(Any):
     let newStmt = new(Statement)
     newStmt[] = args[0][]
-    newStmt.cachedType = scope.context.evaluateStatic(args[1].toInstruction).typeValue.unbox
+    newStmt.cachedType = scope.context.evaluateStatic(args[1].toInstruction).boxedValue.typeValue
     result = toValue newStmt
   {.pop.}
   when false:

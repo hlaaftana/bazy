@@ -94,7 +94,9 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
       if not old.isNil:
         inc deleted
   while prec != Precedence.None:
-    template isOperator(e: Expression): bool = e.kind == Symbol and e.symbol.precedence == prec
+    proc isOperator(e: Expression, precedence = prec): bool {.inline, nimcall.} =
+      # xxx maybe have a precedence field in symbol
+      e.kind == Symbol and e.symbol.precedence == precedence
     let assoc = Associativities[prec]
     var mustPrefix = true
     var prefixStack: seq[Expression]
