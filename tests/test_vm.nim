@@ -126,6 +126,7 @@ a.getter.()""": toValue(3),
 a = 0
 (true and (a = a + 1; false), true and (a = a + 1; true), false and (a = a + 1; true), false and (a = a + 1; false), a)""": toValue(toArray([toValue(false), toValue(true), toValue(false), toValue(false), toValue(2)])),
     "i = 5; while(i > 0, i = i - 1); i": toValue(0),
+    "1 + 1 == 1 or false": toValue(false)
   }
   
   for inp, outp in tests.items:

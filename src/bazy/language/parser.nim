@@ -318,9 +318,14 @@ proc collectLineExpression*(exprs: sink seq[Expression], info: TokenInfo): Expre
     if callee.kind in {Prefix, Infix, ExpressionKind.Colon}: # postfix should not be possible
       # command-after-operator support
       var deepest = callee
-      while deepest.arguments[^1].kind in {Prefix, Infix, ExpressionKind.Colon}:
-        deepest = deepest.arguments[^1]
-      deepest.arguments[^1] = Expression(kind: OpenCall, address: deepest.arguments[^1], arguments: @[result]).inferInfo()
+      proc last(ex: var Expression): var Expression =
+        if ex.kind == ExpressionKind.Colon:
+          result = ex.right
+        else:
+          result = ex.arguments[^1]
+      while (let last = deepest.last; last.kind in {Prefix, Infix, ExpressionKind.Colon}):
+        deepest = last
+      (deepest.last) = Expression(kind: OpenCall, address: deepest.last, arguments: @[result]).inferInfo()
       result = callee
     else:
       result = Expression(kind: OpenCall, address: callee, arguments: @[result], info: callee.info)
@@ -348,14 +353,19 @@ proc recordLineLevel*(parser: var Parser, info: TokenInfo, closed = false): Expr
             if indentIsDo: {Prefix, Infix, ExpressionKind.Colon}
             else: {Infix, ExpressionKind.Colon};
             lineExprs[0].kind in expandKinds):
+          proc last(ex: var Expression): var Expression =
+            if ex.kind == ExpressionKind.Colon:
+              result = ex.right
+            else:
+              result = ex.arguments[^1]
           var ex = lineExprs[0]
-          while ex.arguments[^1].kind in expandKinds:
-            ex = ex.arguments[^1]
-          if ex.arguments[^1].kind in IndentableCallKinds:
-            ex.arguments[^1].arguments.add(indent)
+          while (let last = ex.last; last.kind in expandKinds):
+            ex = last
+          if ex.last.kind in IndentableCallKinds:
+            ex.last.arguments.add(indent)
           else:
-            ex.arguments[^1] = Expression(kind: OpenCall,
-              address: ex.arguments[^1], arguments: @[indent]).inferInfo()
+            (ex.last) = Expression(kind: OpenCall,
+              address: ex.last, arguments: @[indent]).inferInfo()
         elif parser.options.makeOperatorInfixOnIndent and
           lineExprs[0].kind in {Postfix, Prefix}:
           if lineExprs[0].arguments.len == 1:

@@ -682,7 +682,7 @@ proc `$`*(value: FullValue): string =
   of vkInt32: $value.int32Value
   of vkUint32: $value.uint32Value
   of vkFloat32: $value.float32Value
-  of vkBool: $bool(value.int32Value)
+  of vkBool: $value.boolValue
   of vkEffect: "Effect(" & $value.effectValue.unref & ")"
   of vkBoxed: $value.boxedValue
   of vkInt64: $value.int64Value
@@ -721,7 +721,7 @@ proc `$`*(value: Value): string =
   of vkInt32: $value.int32Value
   of vkUint32: $value.uint32Value
   of vkFloat32: $value.float32Value
-  of vkBool: $bool(value.int32Value)
+  of vkBool: $value.boolValue
   of vkEffect: "Effect(" & $value.effectValue.unref & ")"
   of boxedValueKinds: $value.boxedValue
 

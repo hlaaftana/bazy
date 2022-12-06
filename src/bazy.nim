@@ -34,7 +34,7 @@ when not defined(js):
       try:
         result = cstring $evaluate($input)
       except Exception as e:
-        result = cstring e.msg
+        result = cstring(e.msg & "\n" & e.getStackTrace)
   elif isMainModule and appType == "console":
     import os
 
