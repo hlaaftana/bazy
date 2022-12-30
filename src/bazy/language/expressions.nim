@@ -1,4 +1,4 @@
-import shortstring, number, tokens, ../util/objects, ../defines
+import shortstring, number, tokens, operators, ../util/objects, ../defines
 export same
 
 type
@@ -26,6 +26,7 @@ type
       identifier*: string
     of Symbol:
       symbol*: ShortString
+      precedence*: Precedence ## calculated based on the symbol, but cached
     of Wrapped:
       wrapped*: Expression
     of OpenCall, Infix, Prefix, Postfix,
@@ -110,11 +111,17 @@ const
   CallKinds* = OpenCallKinds + PathCallKinds
   IndentableCallKinds* = OpenCallKinds + {PathCall}
 
-proc makeInfix*(op, a, b: Expression): Expression =
+proc makeInfix*(op, a, b: sink Expression): Expression =
   if op.kind == Symbol and op.symbol == short":":
     Expression(kind: Colon, left: a, right: b, info: op.info)
   else:
     Expression(kind: Infix, address: op, arguments: @[a, b], info: op.info)
+
+proc newSymbolExpression*(s: ShortString): Expression {.inline.} =
+  Expression(kind: Symbol, symbol: s, precedence: s.precedence)
+
+template newSymbolExpression*(s: static string): Expression =
+  newSymbolExpression(short(s))
 
 template isIdentifier*(ex: Expression, name: untyped): bool =
   var `name` {.inject.}: string
@@ -122,7 +129,7 @@ template isIdentifier*(ex: Expression, name: untyped): bool =
 
 import strutils
 
-proc `$`*(ex: Expression): string =
+proc `$`*(ex: Expression): string {.noSideEffect.}  =
   if ex.isNil: return "nil"
   case ex.kind
   of None: "()"
@@ -160,7 +167,7 @@ proc `$`*(ex: Expression): string =
     s
   of SemicolonBlock: "(" & ex.statements.join("; ") & ")"
 
-proc repr*(ex: Expression): string =
+proc repr*(ex: Expression): string {.noSideEffect.}  =
   if ex.isNil: return "nil"
   proc joinRepr(exs: seq[Expression]): string =
     for e in exs:

@@ -205,7 +205,7 @@ proc recordSingle*(parser: var Parser, info: TokenInfo): Expression =
       result = Expression(kind: PathPrefix, address: precedingSymbol, arguments: @[result], info: info)
     if precedingDot:
       result = Expression(kind: PathPrefix,
-        address: Expression(kind: Symbol, symbol: short"."),
+        address: newSymbolExpression(short".").withInfo(info),
         arguments: @[result], info: info)
   template finish = return
   for token in parser.nextTokens:
@@ -289,9 +289,9 @@ proc recordSingle*(parser: var Parser, info: TokenInfo): Expression =
     of tkSymbol, tkBackslash:
       if lastWhitespace and not lastDot:
         finish()
-      let ex = Expression(kind: Symbol, symbol:
+      let ex = newSymbolExpression(
         if token.kind == tkSymbol: token.short
-        else: short"\\", info: token.info)
+        else: short"\\").withInfo(token.info)
       if result.isNil:
         if lastDot: precedingDot = true
         if parser.options.pathOperators:
@@ -308,6 +308,112 @@ proc recordSingle*(parser: var Parser, info: TokenInfo): Expression =
           finish()
     lastDot = false
     lastWhitespace = false
+
+proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence)): seq[Expression] =
+  # use nils to delete expressions instead of reordering the seq
+  if exprs.len <= 1: return exprs
+  var prec = lowestKind
+  var deleted = 0
+  template delete(foo) =
+    when defined(c): # fast to use swap, doesn't evaluate foo twice
+      var old: Expression
+      swap old, foo
+      if not old.isNil:
+        inc deleted
+    else:
+      if not foo.isNil:
+        inc deleted
+      foo = nil
+  while prec != Precedence.None:
+    proc isOperator(e: Expression, precedence = prec): bool {.inline, nimcall.} =
+      e.kind == Symbol and e.precedence == precedence
+    let assoc = Associativities[prec]
+    var mustPrefix = true
+    var prefixStack: seq[Expression]
+    var i = 0
+    while i < exprs.len:
+      var e = exprs[i]
+      if e.isNil: discard
+      elif e.isOperator:
+        if mustPrefix:
+          prefixStack.add(e)
+        mustPrefix = true
+      else:
+        let psl = prefixStack.len
+        while prefixStack.len != 0:
+          e = Expression(kind: Prefix, address: prefixStack.pop, arguments: @[e]).inferInfo()
+        for j in i - psl ..< i:
+          delete exprs[j]
+        exprs[i] = e
+        mustPrefix = false
+      inc i
+    if mustPrefix:
+      let startIndex = max(0, exprs.len - prefixStack.len - 2)
+      var e = exprs[startIndex]
+      for i in startIndex + 1 ..< exprs.len:
+        e = Expression(kind: Postfix, address: exprs[i], arguments: @[e]).inferInfo()
+        delete exprs[i]
+      exprs[startIndex] = e
+    case assoc
+    of Left:
+      var lhsStart, i = 0
+      var lhs, op: Expression
+      while i < exprs.len:
+        let e = exprs[i]
+        if e.isNil: discard
+        elif e.isOperator:
+          op = e
+        elif op.isNil:
+          lhs = e
+          lhsStart = i
+        else:
+          lhs = makeInfix(op, lhs, e)
+          for j in lhsStart ..< i:
+            delete exprs[j]
+          exprs[i] = lhs
+          discard lhs # arc destroys lhs here otherwise
+          op = nil
+        inc i
+    of Right:
+      var rhsStart, i = exprs.high
+      var rhs, op: Expression
+      while i >= 0:
+        let e = exprs[i]
+        if e.isNil: discard
+        elif e.isOperator:
+          op = e
+        elif op.isNil:
+          rhs = e
+          rhsStart = i
+        else:
+          rhs = makeInfix(op, e, rhs)
+          for j in i ..< rhsStart:
+            delete exprs[j]
+          exprs[rhsStart] = rhs
+          discard rhs # arc deletes rhs otherwise
+          op = nil
+        dec i
+    of Unary:
+      var stack: seq[Expression]
+      var i = 0
+      while i < exprs.len:
+        var e = exprs[i]
+        if e.isNil: discard
+        elif e.isOperator:
+          stack.add(e)
+        else:
+          let sl = stack.len
+          while stack.len != 0:
+            e = Expression(kind: Prefix, address: stack.pop, arguments: @[e]).inferInfo()
+          for j in i - sl ..< i:
+            delete exprs[j]
+          exprs[i] = e
+        inc i
+    inc prec
+  result = newSeqOfCap[Expression](exprs.len - deleted)
+  for e in exprs:
+    if not e.isNil:
+      result.add(e)
 
 proc collectLineExpression*(exprs: sink seq[Expression], info: TokenInfo): Expression =
   if exprs.len == 0: return Expression(kind: ExpressionKind.None, info: info)
@@ -463,7 +569,7 @@ proc recordLineLevel*(parser: var Parser, info: TokenInfo, closed = false): Expr
       # outside line scope
       finish()
     of tkColon:
-      singleExprs.add(Expression(kind: Symbol, symbol: short":", info: token.info))
+      singleExprs.add(newSymbolExpression(short":").withInfo(token.info))
     elif token.kind == tkBackslash and parser.options.backslashParenLine and
       parser.pos + 1 < parser.tokens.len and
       parser.tokens[parser.pos + 1].kind == tkOpenParen:

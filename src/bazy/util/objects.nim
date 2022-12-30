@@ -6,7 +6,7 @@ template refEquality*(a, b: ref): bool =
 
 template defineRefEquality*(T: type) {.dirty.} =
   mixin `==`
-  proc `==`*(a, b: ref T): bool =
+  proc `==`*(a, b: ref T): bool {.noSideEffect.}  =
     same(a, b) or (not a.isNil and not b.isNil and a[] == b[])
 
 import macros
@@ -58,14 +58,14 @@ macro zipFields*(forceElse: static bool, val1, val2: object, name1, name2, body:
   result = build(val1, val2, body, t[^1], $name1, $name2, forceElse)
 
 template defineEquality*[ObjT: object](T: type ObjT) {.dirty.} =
-  proc `==`*(a, b: T): bool =
+  proc `==`*(a, b: T): bool {.noSideEffect.} =
     zipFields(a, b, aField, bField):
       if aField != bField:
         return false
     return true
 
 template defineEquality*[ObjT: ref object](T: type ObjT) {.dirty.} =
-  proc `==`*(a, b: T): bool =
+  proc `==`*(a, b: T): bool {.noSideEffect.} =
     if same(a, b): return true
     if a.isNil or b.isNil: return false
     zipFields(a[], b[], aField, bField):

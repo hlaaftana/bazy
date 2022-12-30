@@ -10,6 +10,7 @@ type
   CharacterTokenKind* = range[tkBackslash..tkCloseCurly]
 
   # XXX should also have filename and ending column
+  # maybe separate from token or use smaller integer sizes
   TokenInfo* = tuple[line, column: int]
 
   TokenObj* = object

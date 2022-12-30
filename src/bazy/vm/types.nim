@@ -25,6 +25,8 @@ proc withProperties*(ty: sink Type, ps: varargs[Property, property]): Type {.inl
   ty.properties = properties(ps)
   ty
 
+type TypeError* = object of CatchableError
+
 const
   allTypeKinds* = {low(TypeKind)..high(TypeKind)}
   concreteTypeKinds* = {tyNoneValue..tyType}
@@ -347,6 +349,7 @@ proc commonSuperType*(a, b: Type, doUnion = true): Type =
 import arrays
 
 proc checkType*(value: Value, t: Type): bool =
+  # XXX this is broken for boxed values
   template eachAre(iter; types: seq[Type]): untyped =
     let ts = types; var yes = true; var i = 0
     for it in iter:
@@ -428,3 +431,116 @@ proc checkType*(value: Value, t: Type): bool =
       if not p.valueMatcher.isNil:
         result = result and p.valueMatcher(value, args)
         if not result: return result
+
+type
+  GenericMatchError* = object of TypeError
+    parameter*: TypeParameter
+    presumed*: Type
+    conflicting*: Type
+
+proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
+  template match(a, b: Type) = matchParameters(a, b, table)
+  template match(a, b: Box[Type]) = matchParameters(a.unbox, b.unbox, table)
+  case pattern.kind
+  of tyParameter:
+    let param = pattern.parameter
+    if param in table:
+      let oldType = table[param]
+      let newType = commonSuperType(oldType, t, doUnion = false)
+      if newType.isNone:
+        raise (ref GenericMatchError)(
+          msg: "param " & $param & " had type " & $newType & " but got " & $t,
+          parameter: param,
+          presumed: oldType,
+          conflicting: t)
+      table[param] = newType
+    else:
+      table[param] = t
+  of tyNoneValue,
+    tyInt32, tyUint32, tyFloat32, tyBool,
+    tyInt64, tyUint64, tyFloat64,
+    tyString, tyExpression, tyStatement, tyScope,
+    tyAny, tyNone:
+    discard # atoms
+  of tyFunction:
+    if t.kind == tyFunction:
+      match(pattern.arguments, t.arguments)
+      match(pattern.returnType, t.returnType)
+  of tyTuple:
+    if t.kind == tyTuple:
+      for i in 0 ..< t.elements.len:
+        match(pattern.nth(i), t.elements[i])
+      if pattern.elements.len > t.elements.len and not t.varargs.isNone:
+        for i in t.elements.len ..< pattern.elements.len:
+          match(pattern.elements[i], t.varargs.unbox)
+        if not pattern.varargs.isNone:
+          match(pattern.varargs, t.varargs)
+  of tyList, tySet:
+    if t.kind == pattern.kind:
+      match(pattern.elementType, t.elementType)
+  of tyTable:
+    if t.kind == pattern.kind:
+      match(pattern.keyType, t.keyType)
+      match(pattern.valueType, t.valueType)
+  of tyComposite:
+    if t.kind == pattern.kind:
+      for k, v in t.fields:
+        let ty = pattern.fields.getOrDefault(k, Ty(None))
+        if not ty.isNone:
+          match(ty, v)
+  of tyType:
+    if t.kind == pattern.kind:
+      match(pattern.typeValue, t.typeValue)
+    else:
+      # wonky
+      match(pattern.typeValue.unbox, t)
+  of tyUnion, tyIntersection, tyNot:
+    discard # XXX what
+  of tyWithProperty:
+    if t.kind == pattern.kind:
+      match(pattern.typeWithProperty, t.typeWithProperty)
+    else:
+      match(pattern.typeWithProperty.unbox, t)
+  of tyBaseType, tyCustomMatcher:
+    discard # no type to traverse
+
+proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
+  template fill(a: var Type) = fillParameters(a, table)
+  template fill(a: var Box[Type]) =
+    if not a.isNil:
+      var newType: Type = a.unbox
+      fillParameters(newType, table)
+      a = newType.box
+  case pattern.kind
+  of tyParameter:
+    pattern = table[pattern.parameter]
+  of tyNoneValue,
+    tyInt32, tyUint32, tyFloat32, tyBool,
+    tyInt64, tyUint64, tyFloat64,
+    tyString, tyExpression, tyStatement, tyScope,
+    tyAny, tyNone, tyBaseType, tyCustomMatcher:
+    discard
+  of tyFunction:
+    fill(pattern.arguments)
+    fill(pattern.returnType)
+  of tyTuple:
+    for e in pattern.elements.mitems:
+      fill(e)
+    fill(pattern.varargs)
+  of tyList, tySet:
+    fill(pattern.elementType)
+  of tyTable:
+    fill(pattern.keyType)
+    fill(pattern.valueType)
+  of tyComposite:
+    for _, f in pattern.fields.mpairs:
+      fill(f)
+  of tyType:
+    fill(pattern.typeValue)
+  of tyUnion, tyIntersection:
+    for o in pattern.operands.mitems:
+      fill(o)
+  of tyNot:
+    fill(pattern.notType)
+  of tyWithProperty:
+    fill(pattern.typeWithProperty)

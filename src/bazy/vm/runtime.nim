@@ -51,14 +51,15 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     var args = newArray[Value](ins.dispatchArguments.len)
     for i in 0 ..< args.len:
       args[i] = run ins.dispatchArguments[i]
-    for ts, fnInstr in ins.dispatchFunctions.items:
-      block accepted:
-        for i in 0 ..< args.len:
-          if not args[i].checkType(ts[i]):
-            break accepted
-        let fn = run fnInstr
-        result = fn.call(args, effectHandler)
-        break
+    block dispatch:
+      for ts, fnInstr in ins.dispatchFunctions.items:
+        block accepted:
+          for i in 0 ..< args.len:
+            if not args[i].checkType(ts[i]):
+              break accepted
+          let fn = run fnInstr
+          result = fn.call(args, effectHandler)
+          break dispatch
   of Sequence:
     for instr in ins.sequence:
       result = run instr

@@ -85,7 +85,9 @@ proc getType*(x: FullValue): Type =
   of vkType:
     result = Type(kind: tyType, typeValue: box x.typeValue)
   of vkFunction, vkNativeFunction:
-    result = Ty(Function) # XXX (2) no signature
+    result = Ty(Function)
+    # could save signature into Function object
+    # but we can still use the type field
   of vkSet:
     result = Ty(Set)
     for v in x.setValue:

@@ -170,13 +170,9 @@ type
     tyUnion, tyIntersection, tyNot,
     tyBaseType,
     tyWithProperty,
-    tyCustomMatcher
-    # XXX (0) generics: generic type + mechanism that instantiates symbols with generic types
-    # only works with symbols meaning only symbol resolving logic has to deal with the instantiation
-    # otherwise generic type by itself can work
-    # ^ maybe remove tyGeneric and put the parameter list in Variable
-    tyParameter,
-    #tyGeneric
+    tyCustomMatcher,
+    # generic parameter
+    tyParameter
 
   TypeParameter* = ref object
     name*: string
@@ -582,13 +578,13 @@ template mix(x) =
   mixin hash
   result = result !& hash(x)
 
-proc hash*(p: PropertyTag): Hash =
+proc hash*(p: PropertyTag): Hash {.noSideEffect.} =
   mix cast[pointer](p)
   result = !$ result
 
 proc `==`*(a, b: PropertyTag): bool = same(a, b)
 
-proc hash*(p: TypeParameter): Hash =
+proc hash*(p: TypeParameter): Hash {.noSideEffect.} =
   mix cast[pointer](p)
   result = !$ result
 
@@ -600,7 +596,7 @@ proc hash*(v: Type): Hash {.noSideEffect.}
 proc hash*(v: InstructionObj): Hash {.noSideEffect.}
 
 template hashRefObj(T): untyped {.dirty.} =
-  proc hash*(v: T): Hash =
+  proc hash*(v: T): Hash {.noSideEffect.} =
     if v.isNil:
       mix 0
     else:
@@ -645,7 +641,7 @@ defineRefEquality InstructionObj
 defineRefEquality StatementObj
 
 template eqObj(T; forceElseVal = false): untyped {.dirty.} =
-  proc `==`*(a, b: T): bool =
+  proc `==`*(a, b: T): bool {.noSideEffect.} =
     zipFields(forceElse = forceElseVal, a, b, aField, bField):
       when aField is ref:
         if not aField.isNil and not bField.isNil:

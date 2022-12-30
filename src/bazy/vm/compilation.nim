@@ -190,7 +190,17 @@ proc symbols*(scope: Scope, name: string, bound: TypeBound, doImports = true): s
   if not scope.parent.isNil:
     result.add(symbols(scope.parent, name, bound, doImports = false))
   for i, v in scope.variables:
-    if name == v.name and bound.matchBound(v.getType()):
+    var t = v.getType
+    # XXX test this works (generic substitution)
+    if v.genericParams.len != 0:
+      var matches: ParameterInstantiation = initTable[TypeParameter, Type](v.genericParams.len)
+      try:
+        matchParameters(t, bound.boundType, matches)
+      except GenericMatchError:
+        matches.clear()
+      if matches.len != 0:
+        fillParameters(t, matches)
+    if name == v.name and bound.matchBound(t):
       result.add(v.shallowReference)
 
 import algorithm
@@ -221,123 +231,6 @@ proc variableSet*(r: VariableReference, value: Statement): Statement =
     setAddress: r.address,
     setAddressValue: value,
     cachedType: t)
-
-type
-  GenericMatchError* = object of CompileError
-    parameter*: TypeParameter
-    presumed*: Type
-    conflicting*: Type
-  
-  GenericUnmatchedError* = object of CompileError
-    allParameters*: seq[TypeParameter]
-    matchedParameters*: ParameterInstantiation
-
-proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
-  template match(a, b: Type) = matchParameters(a, b, table)
-  template match(a, b: Box[Type]) = matchParameters(a.unbox, b.unbox, table)
-  case pattern.kind
-  of tyParameter:
-    let param = pattern.parameter
-    if param in table:
-      let oldType = table[param]
-      let newType = commonSuperType(oldType, t, doUnion = false)
-      if newType.isNone:
-        raise (ref GenericMatchError)(
-          msg: "param " & $param & " had type " & $newType & " but got " & $t,
-          parameter: param,
-          presumed: oldType,
-          conflicting: t)
-      table[param] = newType
-    else:
-      table[param] = t
-  of tyNoneValue,
-    tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64,
-    tyString, tyExpression, tyStatement, tyScope,
-    tyAny, tyNone:
-    discard # atoms
-  of tyFunction:
-    if t.kind == tyFunction:
-      match(pattern.arguments, t.arguments)
-      match(pattern.returnType, t.returnType)
-  of tyTuple:
-    if t.kind == tyTuple:
-      for i in 0 ..< t.elements.len:
-        match(pattern.nth(i), t.elements[i])
-      if pattern.elements.len > t.elements.len and not t.varargs.isNone:
-        for i in t.elements.len ..< pattern.elements.len:
-          match(pattern.elements[i], t.varargs.unbox)
-        if not pattern.varargs.isNone:
-          match(pattern.varargs, t.varargs)
-  of tyList, tySet:
-    if t.kind == pattern.kind:
-      match(pattern.elementType, t.elementType)
-  of tyTable:
-    if t.kind == pattern.kind:
-      match(pattern.keyType, t.keyType)
-      match(pattern.valueType, t.valueType)
-  of tyComposite:
-    if t.kind == pattern.kind:
-      for k, v in t.fields:
-        let ty = pattern.fields.getOrDefault(k, Ty(None))
-        if not ty.isNone:
-          match(ty, v)
-  of tyType:
-    if t.kind == pattern.kind:
-      match(pattern.typeValue, t.typeValue)
-    else:
-      # wonky
-      match(pattern.typeValue.unbox, t)
-  of tyUnion, tyIntersection, tyNot:
-    discard # XXX what
-  of tyWithProperty:
-    if t.kind == pattern.kind:
-      match(pattern.typeWithProperty, t.typeWithProperty)
-    else:
-      match(pattern.typeWithProperty.unbox, t)
-  of tyBaseType, tyCustomMatcher:
-    discard # no type to traverse
-
-proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
-  template fill(a: var Type) = fillParameters(a, table)
-  template fill(a: var Box[Type]) =
-    if not a.isNil:
-      var newType: Type = a.unbox
-      fillParameters(newType, table)
-      a = newType.box
-  case pattern.kind
-  of tyParameter:
-    pattern = table[pattern.parameter]
-  of tyNoneValue,
-    tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64,
-    tyString, tyExpression, tyStatement, tyScope,
-    tyAny, tyNone, tyBaseType, tyCustomMatcher:
-    discard
-  of tyFunction:
-    fill(pattern.arguments)
-    fill(pattern.returnType)
-  of tyTuple:
-    for e in pattern.elements.mitems:
-      fill(e)
-    fill(pattern.varargs)
-  of tyList, tySet:
-    fill(pattern.elementType)
-  of tyTable:
-    fill(pattern.keyType)
-    fill(pattern.valueType)
-  of tyComposite:
-    for _, f in pattern.fields.mpairs:
-      fill(f)
-  of tyType:
-    fill(pattern.typeValue)
-  of tyUnion, tyIntersection:
-    for o in pattern.operands.mitems:
-      fill(o)
-  of tyNot:
-    fill(pattern.notType)
-  of tyWithProperty:
-    fill(pattern.typeWithProperty)
 
 template constant*(value: Value, ty: Type): Statement =
   Statement(kind: skConstant, constant: value, cachedType: ty)
@@ -384,26 +277,28 @@ proc resolve*(scope: Scope, ex: Expression, name: string, bound: TypeBound): Var
       scope: scope,
       msg: "no overloads with bound " & $bound & " for " & $ex)
   result = overloads[0]
-  if result.variable.genericParams.len != 0:
-    var matches: ParameterInstantiation = initTable[TypeParameter, Type](result.variable.genericParams.len)
-    try:
-      matchParameters(result.variable.cachedType, bound.boundType, matches)
-    except GenericMatchError as e:
-      e.expression = ex
-      raise e
-    block:
-      var unmatchedParams: seq[TypeParameter]
-      for p in result.variable.genericParams:
-        if p notin matches:
-          unmatchedParams.add(p)
-      if unmatchedParams.len != 0:
-        raise (ref GenericUnmatchedError)(
-          expression: ex,
-          allParameters: result.variable.genericParams,
-          matchedParameters: matches)
-    # XXX (0) continue
-    # use single memory slot + fake variables with filled out types for erased
-    # real variables for monomorphized
+  when false:
+    # XXX can implement generic evaluation here
+    # maybe lazyExpression compiled with a new scope with the type variables
+    # but then we would need to save every version
+    # can generate new variables but that would fill up scope
+    if result.variable.genericParams.len != 0:
+      var matches: ParameterInstantiation = initTable[TypeParameter, Type](result.variable.genericParams.len)
+      try:
+        matchParameters(result.variable.cachedType, bound.boundType, matches)
+      except GenericMatchError as e:
+        e.expression = ex
+        raise e
+      block:
+        var unmatchedParams: seq[TypeParameter]
+        for p in result.variable.genericParams:
+          if p notin matches:
+            unmatchedParams.add(p)
+        if unmatchedParams.len != 0:
+          raise (ref GenericUnmatchedError)(
+            expression: ex,
+            allParameters: result.variable.genericParams,
+            matchedParameters: matches)
   if not bound.matchBound(result.variable.cachedType):
     raise (ref TypeBoundMatchError)(
       expression: ex,
@@ -727,11 +622,11 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   of Subscript:
     # what specialization can go here
     result = forward(Expression(kind: PathCall,
-      address: Expression(kind: Symbol, symbol: short".[]"),
+      address: newSymbolExpression(short".[]"),
       arguments: @[ex.address] & ex.arguments))
   of CurlySubscript:
     result = forward(Expression(kind: PathCall,
-      address: Expression(kind: Symbol, symbol: short".{}"),
+      address: newSymbolExpression(short".{}"),
       arguments: @[ex.address] & ex.arguments))
   of Colon:
     assert false, "cannot compile lone colon expression"
