@@ -6,13 +6,13 @@ module types:
   define "Any", Ty(Any)
   define "None", Ty(None)
   typedTempl "type_of", [Ty(Any)], Type(kind: tyType, typeValue: Ty(Any).box):
-    let t = args[0].cachedType
+    let t = args[0].knownType
     result = toValue constant(t, Type(kind: tyType, typeValue: t.box))
   {.push hints: off.}
   typedTempl "cast", [Ty(Any), Type(kind: tyType, typeValue: Ty(Any).box)], Ty(Any):
     let newStmt = new(Statement)
     newStmt[] = args[0][]
-    newStmt.cachedType = scope.context.evaluateStatic(args[1].toInstruction).boxedValue.typeValue
+    newStmt.knownType = scope.context.evaluateStatic(args[1].toInstruction).boxedValue.typeValue
     result = toValue newStmt
   {.pop.}
   when false:

@@ -384,7 +384,7 @@ type
 
   StatementObj* {.acyclic.} = object
     ## typed/compiled expression
-    cachedType*: Type
+    knownType*: Type
     case kind*: StatementKind
     of skNone: discard
     of skConstant:
@@ -452,7 +452,7 @@ type
   
   Variable* = ref object
     name*: string
-    cachedType*: Type
+    knownType*: Type
     stackIndex*: int
     scope*: Scope
     # XXX make this a special hashset-like type and maybe attach it to the parameters
@@ -481,6 +481,7 @@ type
 
   VariableReference* = object
     variable*: Variable
+    `type`*: Type ## must have a known type
     address*: VariableAddress
 
 static:
@@ -794,7 +795,7 @@ proc `$`*(tb: TypeBound): string =
   of Ultravariant: '*') & $tb.boundType
 
 proc `$`*(variable: Variable): string =
-  variable.name & ": " & $variable.cachedType
+  variable.name & ": " & $variable.knownType
 
 proc `$`*(context: Context): string =
   result = "context\n"

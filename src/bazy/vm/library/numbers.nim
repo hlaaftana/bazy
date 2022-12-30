@@ -64,7 +64,7 @@ module numbers:
         binaryInstructionKind: instructionName,
         binary1: args[0].toInstruction,
         binary2: args[1].toInstruction,
-        cachedType: Ty(`k`))
+        knownType: Ty(`k`))
   instr "+", AddInt, int32
   instr "+", AddFloat, float32
   instr "-", SubInt, int32

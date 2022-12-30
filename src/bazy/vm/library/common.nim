@@ -1,7 +1,7 @@
 import ".."/[primitives, compilation, types, values], ../../language/expressions, std/[tables]
 
 proc define*(scope: Scope, n: string, typ: Type): Variable =
-  result = Variable(name: n, cachedType: typ)
+  result = Variable(name: n, knownType: typ)
   scope.define(result)
 
 proc define*(scope: Scope, n: string, typ: Type, x: Value) =

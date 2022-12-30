@@ -165,18 +165,18 @@ proc evaluateStatic*(scope: Scope, ex: Expression, bound: TypeBound = +Ty(Any)):
 
 proc setStatic*(variable: Variable, expression: Expression) =
   variable.scope.context.refreshStack()
-  let value = variable.scope.compile(expression, +variable.cachedType)
-  variable.cachedType = value.cachedType
+  let value = variable.scope.compile(expression, +variable.knownType)
+  variable.knownType = value.knownType
   variable.scope.context.stack.set(variable.stackIndex, value.toInstruction.evaluate(variable.scope.context.stack))
   variable.evaluated = true
 
 proc getType*(variable: Variable): Type =
-  if variable.cachedType.isNone and not variable.lazyExpression.isNil and not variable.evaluated:
+  if variable.knownType.isNone and not variable.lazyExpression.isNil and not variable.evaluated:
     variable.setStatic(variable.lazyExpression)
-  variable.cachedType
+  variable.knownType
 
-proc shallowReference*(v: Variable): VariableReference {.inline.} =
-  VariableReference(variable: v, address: VariableAddress(indices: @[v.stackIndex]))
+proc shallowReference*(v: Variable, `type`: Type = v.getType): VariableReference {.inline.} =
+  VariableReference(variable: v, type: `type`, address: VariableAddress(indices: @[v.stackIndex]))
 
 proc symbols*(scope: Scope, name: string, bound: TypeBound, doImports = true): seq[VariableReference] =
   if scope.isNil: return
@@ -201,7 +201,7 @@ proc symbols*(scope: Scope, name: string, bound: TypeBound, doImports = true): s
       if matches.len != 0:
         fillParameters(t, matches)
     if name == v.name and bound.matchBound(t):
-      result.add(v.shallowReference)
+      result.add(v.shallowReference(t))
 
 import algorithm
 
@@ -210,30 +210,30 @@ proc overloads*(scope: Scope | Context, name: string, bound: TypeBound): seq[Var
   # sort must be stable to preserve definition/import order
   result.sort(
     cmp = proc (a, b: VariableReference): int =
-      compare(a.variable.cachedType, b.variable.cachedType),
+      compare(a.type, b.type),
     order = if bound.variance == Covariant: Ascending else: Descending)
   result.reverse()
 
 proc variableGet*(r: VariableReference): Statement =
-  let t = r.variable.cachedType
+  let t = r.type
   result = Statement(kind: skVariableGet,
     variableGetIndex: r.address.indices[0],
-    cachedType: t)
+    knownType: t)
   for i in 1 ..< r.address.indices.len:
     result = Statement(kind: skFromImportedStack,
       importedStackIndex: r.address.indices[i],
       importedStackStatement: result,
-      cachedType: t)
+      knownType: t)
 
 proc variableSet*(r: VariableReference, value: Statement): Statement =
-  let t = r.variable.cachedType
+  let t = r.type
   result = Statement(kind: skSetAddress,
     setAddress: r.address,
     setAddressValue: value,
-    cachedType: t)
+    knownType: t)
 
 template constant*(value: Value, ty: Type): Statement =
-  Statement(kind: skConstant, constant: value, cachedType: ty)
+  Statement(kind: skConstant, constant: value, knownType: ty)
 template constant*(value: untyped, ty: Type): Statement =
   constant(toValue(value), ty)
 template constant*(value: untyped, ty: TypeKind): Statement =
@@ -285,7 +285,7 @@ proc resolve*(scope: Scope, ex: Expression, name: string, bound: TypeBound): Var
     if result.variable.genericParams.len != 0:
       var matches: ParameterInstantiation = initTable[TypeParameter, Type](result.variable.genericParams.len)
       try:
-        matchParameters(result.variable.cachedType, bound.boundType, matches)
+        matchParameters(result.type, bound.boundType, matches)
       except GenericMatchError as e:
         e.expression = ex
         raise e
@@ -299,12 +299,12 @@ proc resolve*(scope: Scope, ex: Expression, name: string, bound: TypeBound): Var
             expression: ex,
             allParameters: result.variable.genericParams,
             matchedParameters: matches)
-  if not bound.matchBound(result.variable.cachedType):
+  if not bound.matchBound(result.type):
     raise (ref TypeBoundMatchError)(
       expression: ex,
       bound: bound,
-      type: result.variable.cachedType,
-      msg: "bound " & $bound & " does not match type " & $result.variable.cachedType &
+      type: result.type,
+      msg: "bound " & $bound & " does not match type " & $result.type &
        " in expression " & $ex)
 
 proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
@@ -312,9 +312,9 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
 
 proc compileProperty*(scope: Scope, ex: Expression, lhs: Statement, name: string, bound: TypeBound): Statement =
   result = nil
-  if lhs.cachedType.kind == tyComposite and lhs.cachedType.fields.hasKey(name):
+  if lhs.knownType.kind == tyComposite and lhs.knownType.fields.hasKey(name):
     result = Statement(kind: skGetComposite,
-      cachedType: lhs.cachedType.fields[name],
+      knownType: lhs.knownType.fields[name],
       getComposite: lhs,
       getCompositeName: name)
   else:
@@ -345,8 +345,8 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
     var makeStatement = newSeq[bool](ex.arguments.len)
     var metaTypes = newSeq[Type](allMetas.len)
     for i, v in allMetas:
-      let ty = v.variable.cachedType
-      let metaTy = v.variable.cachedType.properties.getArguments(Meta)[0].boxedValue.typeValue
+      let ty = v.type
+      let metaTy = v.type.properties.getArguments(Meta)[0].boxedValue.typeValue
       metaTypes[i] = metaTy
       for i in 0 ..< ex.arguments.len:
         if matchBound(+Ty(Statement), ty.param(i + 1)):
@@ -364,7 +364,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
           if same(e.expression, ex.arguments[i]):
             reset(allMetas)
             break
-        argumentTypes[i] = commonSubType(argumentTypes[i], argumentStatements[i].cachedType)
+        argumentTypes[i] = commonSubType(argumentTypes[i], argumentStatements[i].knownType)
     var superMetas, subMetas: typeof(allMetas)
     for i, m in allMetas:
       let mt = metaTypes[i]
@@ -377,15 +377,15 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
         subMetas.add(m)
     superMetas.sort(
       cmp = proc (a, b: VariableReference): int =
-        compare(a.variable.cachedType, b.variable.cachedType),
+        compare(a.type, b.type),
       order = Descending)
     subMetas.sort(
       cmp = proc (a, b: VariableReference): int =
-        compare(a.variable.cachedType, b.variable.cachedType),
+        compare(a.type, b.type),
       order = Ascending)
     if superMetas.len != 0:
       let meta = superMetas[0]
-      let ty = meta.variable.cachedType
+      let ty = meta.type
       var arguments = newSeq[Statement](ex.arguments.len + 1)
       arguments[0] = constant(scope, Ty(Scope))
       for i in 0 ..< ex.arguments.len:
@@ -402,11 +402,11 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
         var arguments = newArray[Value](ex.arguments.len + 1)
         arguments[0] = toValue scope
         for i in 0 ..< ex.arguments.len:
-          if matchBound(+Ty(Statement), d.variable.cachedType.param(i + 1)):
+          if matchBound(+Ty(Statement), d.type.param(i + 1)):
             arguments[i + 1] = toValue argumentStatements[i]
           else:
             arguments[i + 1] = toValue copy ex.arguments[i]
-        if checkType(toValue arguments, d.variable.cachedType.arguments.unbox):
+        if checkType(toValue arguments, d.type.arguments.unbox):
           var argumentStatement = newSeq[Statement](arguments.len)
           for i, a in arguments: argumentStatement[i] = constant(a, a.getType)
           let call = Statement(kind: skFunctionCall,
@@ -423,13 +423,13 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
   for i in 0 ..< ex.arguments.len:
     if argumentStatements[i].isNil:
       argumentStatements[i] = map(ex.arguments[i])
-    argumentTypes[i] = argumentStatements[i].cachedType
+    argumentTypes[i] = argumentStatements[i].knownType
   functionType = funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)
   # lowest supertype function:
   try:
     let callee = map(ex.address, -functionType)
     result = Statement(kind: skFunctionCall,
-      cachedType: callee.cachedType.returnType.unbox,
+      knownType: callee.knownType.returnType.unbox,
       callee: callee,
       arguments: argumentStatements)
   except NoOverloadFoundError as e:
@@ -444,7 +444,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
       if subs.len != 0:
         var dispatchees = newSeq[(seq[Type], Statement)](subs.len)
         for i, d in dispatchees.mpairs:
-          let t = subs[i].variable.cachedType
+          let t = subs[i].type
           d[0].newSeq(argumentStatements.len)
           for i in 0 ..< argumentStatements.len:
             let pt = t.param(i)
@@ -456,7 +456,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
               d[0][i] = pt
           d[1] = variableGet(subs[i])
         result = Statement(kind: skDispatch,
-          cachedType: functionType.returnType.unbox, # we could calculate a union here but it's not worth dealing with a typeclass
+          knownType: functionType.returnType.unbox, # we could calculate a union here but it's not worth dealing with a typeclass
           dispatchees: dispatchees,
           dispatchArguments: argumentStatements)
 
@@ -474,13 +474,13 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
     if result.isNil:
       let callee = map ex.address
       argumentStatements.insert(callee, 0)
-      argumentTypes.insert(callee.cachedType, 0)
+      argumentTypes.insert(callee.knownType, 0)
       functionType = funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)
       let overs = overloads(scope, ".call", -functionType)
       if overs.len != 0:
         let dotCall = variableGet(overs[0])
         result = Statement(kind: skFunctionCall,
-          cachedType: dotCall.cachedType.returnType.unbox,
+          knownType: dotCall.knownType.returnType.unbox,
           callee: callee,
           arguments: argumentStatements)
       else:
@@ -489,8 +489,8 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
           bound: bound,
           scope: scope,
           argumentTypes: argumentTypes,
-          type: callee.cachedType,
-          msg: "no way to call " & $ex.address & " of type " & $callee.cachedType &
+          type: callee.knownType,
+          msg: "no way to call " & $ex.address & " of type " & $callee.knownType &
             " found for argument types " & $argumentTypes)
 
 proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
@@ -498,7 +498,7 @@ proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): St
     ex.elements[0].isSingleColon):
     if bound.boundType.kind == tyComposite:
       assert bound.boundType.fields.len == ex.elements.len, "tuple bound type lengths do not match"
-    result = Statement(kind: skComposite, cachedType:
+    result = Statement(kind: skComposite, knownType:
       Type(kind: tyComposite, fields: initTable[string, Type](ex.elements.len)))
     for e in ex.elements:
       if e.isSingleColon: continue
@@ -511,11 +511,11 @@ proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): St
         defaultBound
       let v = map(e.right, bv)
       result.composite.add((key: k, value: v))
-      result.cachedType.fields[k] = v.cachedType
+      result.knownType.fields[k] = v.knownType
   else:
     if bound.boundType.kind == tyTuple:
       assert bound.boundType.elements.len == ex.elements.len, "tuple bound type lengths do not match"
-    result = Statement(kind: skTuple, cachedType:
+    result = Statement(kind: skTuple, knownType:
       Type(kind: tyTuple, elements: newSeqOfCap[Type](ex.elements.len)))
     for i, e in ex.elements:
       let element = if bound.boundType.kind == tyTuple:
@@ -523,10 +523,10 @@ proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): St
       else:
         map e
       result.elements.add(element)
-      result.cachedType.elements.add(element.cachedType)
+      result.knownType.elements.add(element.knownType)
 
 proc compileArrayExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
-  result = Statement(kind: skList, cachedType: Ty(List))
+  result = Statement(kind: skList, knownType: Ty(List))
   var boundSet = bound.boundType.kind == tyList 
   var b =
     if boundSet:
@@ -536,16 +536,16 @@ proc compileArrayExpression*(scope: Scope, ex: Expression, bound: TypeBound): St
   for e in ex.elements:
     let element = map(e, b)
     result.elements.add(element)
-    if result.cachedType.elementType.isNone or result.cachedType.elementType.unbox < element.cachedType:
-      result.cachedType.elementType = box element.cachedType
+    if result.knownType.elementType.isNone or result.knownType.elementType.unbox < element.knownType:
+      result.knownType.elementType = box element.knownType
     if not boundSet:
-      b = +element.cachedType
+      b = +element.knownType
       boundSet = true
 
 proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
     ex.elements[0].isSingleColon):
-    result = Statement(kind: skTable, cachedType: Ty(Table))
+    result = Statement(kind: skTable, knownType: Ty(Table))
     var boundSet = bound.boundType.kind == tyTable
     var (bk, bv) =
       if boundSet:
@@ -559,16 +559,16 @@ proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Stat
       let k = map(e.left, bk)
       let v = map(e.right, bv)
       result.entries.add((key: k, value: v))
-      if result.cachedType.keyType.isNone or result.cachedType.keyType.unbox < k.cachedType:
-        result.cachedType.keyType = box k.cachedType
-      if result.cachedType.valueType.isNone or result.cachedType.valueType.unbox < v.cachedType:
-        result.cachedType.valueType = box v.cachedType
+      if result.knownType.keyType.isNone or result.knownType.keyType.unbox < k.knownType:
+        result.knownType.keyType = box k.knownType
+      if result.knownType.valueType.isNone or result.knownType.valueType.unbox < v.knownType:
+        result.knownType.valueType = box v.knownType
       if not boundSet:
-        bk = +k.cachedType
-        bv = +v.cachedType
+        bk = +k.knownType
+        bv = +v.knownType
         boundSet = true
   else:
-    result = Statement(kind: skSet, cachedType: Ty(Set))
+    result = Statement(kind: skSet, knownType: Ty(Set))
     var boundSet = bound.boundType.kind == tySet 
     var b =
       if boundSet:
@@ -578,10 +578,10 @@ proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Stat
     for e in ex.elements:
       let element = map(e, b)
       result.elements.add(element)
-      if result.cachedType.elementType.isNone or result.cachedType.elementType.unbox < element.cachedType:
-        result.cachedType.elementType = box element.cachedType
+      if result.knownType.elementType.isNone or result.knownType.elementType.unbox < element.knownType:
+        result.knownType.elementType = box element.knownType
       if not boundSet:
-        b = +element.cachedType
+        b = +element.knownType
         boundSet = true
 
 proc compileBlock*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
@@ -595,12 +595,12 @@ proc compileBlock*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
     let element = map(e, bound = b)
     result.sequence.add(element)
     if i == ex.statements.high:
-      result.cachedType = element.cachedType
+      result.knownType = element.knownType
 
 proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   # move some things out to procs
   case ex.kind
-  of None: result = Statement(kind: skNone, cachedType: Ty(None))
+  of None: result = Statement(kind: skNone, knownType: Ty(None))
   of Number: result = compileNumber(ex, bound)
   of String: result = constant(ex.str)
   of Wrapped: result = forward(ex.wrapped)
@@ -638,12 +638,12 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
     result = compileSetExpression(scope, ex, bound)
   of Block, SemicolonBlock:
     result = compileBlock(scope, ex, bound)
-  if not bound.matchBound(result.cachedType):
+  if not bound.matchBound(result.knownType):
     raise (ref TypeBoundMatchError)(
       expression: ex,
       bound: bound,
-      type: result.cachedType,
-      msg: "bound " & $bound & " does not match type " & $result.cachedType &
+      type: result.knownType,
+      msg: "bound " & $bound & " does not match type " & $result.knownType &
        " in expression " & $ex)
 
 type Program* = Function #[object

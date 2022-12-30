@@ -8,7 +8,7 @@ module syntax:
     result = toValue sc.compile(args[0], +Ty(Any))
   templ "static", 1:
     let st = scope.compile(args[0], +Ty(Any))
-    result = toValue constant(scope.context.evaluateStatic(st.toInstruction), st.cachedType)
+    result = toValue constant(scope.context.evaluateStatic(st.toInstruction), st.knownType)
   
   proc makeFn(scope: Scope, arguments: seq[Expression], body: Expression,
     name: string, returnBound: TypeBound, returnBoundSet: bool): Statement =
@@ -29,7 +29,7 @@ module syntax:
       v = scope.define(name, fnType)
     let body = bodyScope.compile(body, returnBound)
     if not v.isNil and not returnBoundSet:
-      v.cachedType.returnType = body.cachedType.box
+      v.knownType.returnType = body.knownType.box
     bodyScope.context.refreshStack()
     let fun = toValue(
       Function(stack: bodyScope.context.stack.shallowRefresh(), instruction: body.toInstruction))
@@ -37,7 +37,7 @@ module syntax:
       context.refreshStack()
       scope.context.stack.set(v.stackIndex, fun)
     result = Statement(kind: skArmStack,
-      cachedType: fnType,
+      knownType: fnType,
       armStackFunction: constant(fun, fnType))
 
   templ "=>", 2:
@@ -73,7 +73,7 @@ module syntax:
     of Name, Symbol:
       let name = $lhs
       let value = compile(scope, rhs, bound)
-      let v = scope.define(name, if typeSet: bound.boundType else: value.cachedType)
+      let v = scope.define(name, if typeSet: bound.boundType else: value.knownType)
       result = toValue variableSet(v.shallowReference, value)
     of CallKinds:
       result = toValue makeFn(scope, lhs.arguments, rhs, $lhs.address, bound, typeSet)
@@ -93,11 +93,11 @@ module syntax:
       let name = $lhs
       if (let a = scope.overloads(name, bound); a.len != 0):
         let v = a[0]
-        let value = compile(scope, rhs, +v.variable.cachedType)
+        let value = compile(scope, rhs, +v.type)
         result = toValue variableSet(v, value)
       else:
         let value = compile(scope, rhs, bound)
-        let v = scope.define(name, value.cachedType)
+        let v = scope.define(name, value.knownType)
         result = toValue variableSet(v.shallowReference, value)
     of CallKinds:
       result = toValue makeFn(scope, lhs.arguments, rhs, $lhs.address, bound, typeSet)
@@ -123,7 +123,7 @@ module syntax:
       ifCond: valueArgs[1].boxedValue.statementValue,
       ifTrue: sc.compile(valueArgs[2].boxedValue.expressionValue, +Ty(Any)),
       ifFalse: elsesc.compile(els, +Ty(Any)))
-    res.cachedType = commonSuperType(res.ifTrue.cachedType, res.ifFalse.cachedType)
+    res.knownType = commonSuperType(res.ifTrue.knownType, res.ifFalse.knownType)
     result = toValue(res)
   define "while", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Expression)]).withProperties(
     property(Meta, toValue funcType(union(), [Ty(Bool), union()]))
@@ -137,11 +137,11 @@ module syntax:
   ), toValue proc (valueArgs: openarray[Value]): Value =
     let scope = valueArgs[0].boxedValue.scopeValue
     let index = scope.context.evaluateStatic(valueArgs[2].boxedValue.statementValue.toInstruction)
-    let nthType = valueArgs[1].boxedValue.statementValue.cachedType.nth(index.int32Value)
+    let nthType = valueArgs[1].boxedValue.statementValue.knownType.nth(index.int32Value)
     proc val(args: openarray[Value]): Value {.nimcall.} =
       args[0].boxedValue.tupleValue.unref[args[1].int32Value]
     result = toValue Statement(kind: skFunctionCall,
-      cachedType: nthType,
+      knownType: nthType,
       callee: constant(
         Value(kind: vkNativeFunction, boxedValue: FullValue(kind: vkNativeFunction, nativeFunctionValue: val)),
         tyNone),

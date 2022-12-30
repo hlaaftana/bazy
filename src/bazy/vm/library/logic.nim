@@ -20,7 +20,7 @@ module logic:
             ifCond: valueArgs[i].boxedValue.statementValue,
             ifTrue: res,
             ifFalse: constant(false, Ty(Bool)),
-            cachedType: Ty(Bool))
+            knownType: Ty(Bool))
       result = toValue res
   define "or",
     funcTypeWithVarargs(Ty(Statement), [Ty(Scope)], Ty(Statement)).withProperties(
@@ -33,7 +33,7 @@ module logic:
             ifCond: valueArgs[i].boxedValue.statementValue,
             ifTrue: constant(true, Ty(Bool)),
             ifFalse: res,
-            cachedType: Ty(Bool))
+            knownType: Ty(Bool))
       result = toValue res
   fn "xor", [Ty(Bool), Ty(Bool)], Ty(Bool):
     toValue(args[0].boolValue xor args[1].boolValue)
