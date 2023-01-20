@@ -1,4 +1,4 @@
-import ".."/[primitives, compilation, types, values, arrays], ../../language/expressions
+import ".."/[primitives, compilation, types, values], ../../language/[expressions, shortstring]
 
 import common
 
@@ -101,6 +101,14 @@ module syntax:
         result = toValue variableSet(v.shallowReference, value)
     of CallKinds:
       result = toValue makeFn(scope, lhs.arguments, rhs, $lhs.address, bound, typeSet)
+    of Subscript:
+      result = toValue compile(scope, Expression(kind: PathCall,
+        address: newSymbolExpression(short".[]="),
+        arguments: @[lhs.address] & lhs.arguments & rhs), bound)
+    of CurlySubscript:
+      result = toValue compile(scope, Expression(kind: PathCall,
+        address: newSymbolExpression(short".{}="),
+        arguments: @[lhs.address] & lhs.arguments & rhs), bound)
     else: assert false, $lhs
   define "if", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Expression)]).withProperties(
     property(Meta, toValue funcType(Ty(Any), [Ty(Bool), Ty(Any)]))
@@ -132,18 +140,4 @@ module syntax:
     result = toValue Statement(kind: skWhile,
       whileCond: valueArgs[1].boxedValue.statementValue,
       whileBody: sc.compile(valueArgs[2].boxedValue.expressionValue, -union()))
-  define ".[]", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Statement)]).withProperties(
-    property(Meta, toValue funcType(Ty(Any), [Type(kind: tyBaseType, baseKind: tyTuple), Ty(Int32)]))
-  ), toValue proc (valueArgs: openarray[Value]): Value =
-    let scope = valueArgs[0].boxedValue.scopeValue
-    let index = scope.context.evaluateStatic(valueArgs[2].boxedValue.statementValue.toInstruction)
-    let nthType = valueArgs[1].boxedValue.statementValue.knownType.nth(index.int32Value)
-    proc val(args: openarray[Value]): Value {.nimcall.} =
-      args[0].boxedValue.tupleValue.unref[args[1].int32Value]
-    result = toValue Statement(kind: skFunctionCall,
-      knownType: nthType,
-      callee: constant(
-        Value(kind: vkNativeFunction, boxedValue: FullValue(kind: vkNativeFunction, nativeFunctionValue: val)),
-        tyNone),
-      arguments: @[valueArgs[1].boxedValue.statementValue, constant(index, Ty(Int32))])
   # todo: let/for

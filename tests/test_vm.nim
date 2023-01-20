@@ -126,7 +126,10 @@ a.getter.()""": toValue(3),
 a = 0
 (true and (a = a + 1; false), true and (a = a + 1; true), false and (a = a + 1; true), false and (a = a + 1; false), a)""": toValue(toArray([toValue(false), toValue(true), toValue(false), toValue(false), toValue(2)])),
     "i = 5; while(i > 0, i = i - 1); i": toValue(0),
-    "1 + 1 == 1 or false": toValue(false)
+    "1 + 1 == 1 or false": toValue(false),
+    "(1, (2, 3), 4)[1][0]": toValue(2),
+    "a = (1, (2, 3), 4); a[0] == 1 and a[1][1] == 3": toValue(true),
+    "`.[]=`(a: Int, b: Int, c: Int) = a * b + c; 3[4] = 5": toValue(17),
   }
   
   for inp, outp in tests.items:
