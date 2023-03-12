@@ -673,6 +673,8 @@ proc `$`*(vt: Box[Type]): string =
     "None"
   else: $vt.unbox
 
+proc `$`*(value: Value): string
+
 proc `$`*(value: FullValue): string =
   result = case value.kind
   of vkNone: "()"
