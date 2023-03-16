@@ -1,24 +1,37 @@
 import "."/[primitives, arrays, runtime, types, values], ../language/[expressions, number, shortstring], std/[tables, sets, strutils]
 
-template defineMetaProperty(recurWith: untyped): PropertyTag =
-  PropertyTag(name: "Meta",
-    argumentTypes: @[Type(kind: tyBaseType, baseKind: tyFunction)],
-    typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
-      if t.properties.hasTag(recurWith):
-        match(args[0].boxedValue.typeValue, t.properties.table[recurWith][0].boxedValue.typeValue)
-      else:
-        tmFalse)
-
 when defined(gcDestructors):
-  var Meta*: PropertyTag
-  Meta = defineMetaProperty(Meta)
+  template defineProperty(name, value): untyped {.dirty.} =
+    let `name`* = block:
+      var propertySelf {.inject.}: PropertyTag
+      propertySelf = value
+      propertySelf
 else:
-  proc metaProperty: PropertyTag =
-    var prop {.global.}: PropertyTag
-    if prop.isNil:
-      prop = defineMetaProperty(prop)
-    result = prop
-  template Meta*: PropertyTag = metaProperty()
+  template defineProperty(name, value): untyped =
+    proc getProperty: PropertyTag {.gensym.} =
+      var propertySelf {.global, inject.}: PropertyTag
+      if propertySelf.isNil:
+        propertySelf = value
+      result = propertySelf
+    template `name`*: PropertyTag {.inject.} = getProperty()
+
+defineProperty Meta, PropertyTag(name: "Meta",
+  argumentTypes: @[Type(kind: tyBaseType, baseKind: tyFunction)],
+  typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
+    if t.properties.hasTag(propertySelf):
+      match(args[0].boxedValue.typeValue, t.properties.table[propertySelf][0].boxedValue.typeValue)
+    else:
+      tmFalse)
+
+defineProperty Fields, PropertyTag(name: "Fields",
+  argumentTypes: @[Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32))],
+  typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
+    if t.properties.hasTag(propertySelf) and args[0].boxedValue.tableValue == t.properties.table[propertySelf][0].boxedValue.tableValue:
+      tmEqual
+    else:
+      tmAlmostEqual)
+
+# also Defaults purely for initialization/conversion
 
 proc newContext*(imports: seq[Context]): Context =
   result = Context(stack: Stack(), imports: imports)
@@ -317,6 +330,15 @@ proc compileProperty*(scope: Scope, ex: Expression, lhs: Statement, name: string
       knownType: lhs.knownType.fields[name],
       getComposite: lhs,
       getCompositeName: name)
+  elif lhs.knownType.kind == tyTuple and lhs.knownType.properties.hasTag(Fields) and (
+    let tab = lhs.knownType.properties.table[Fields][0].boxedValue.tableValue;
+    let nam = toValue(name);
+    tab.contains(nam)):
+    let ind = tab[nam].int32Value
+    result = Statement(kind: skGetIndex,
+      knownType: lhs.knownType.nth(ind),
+      getIndexAddress: lhs,
+      getIndex: ind)
   else:
     let ident = Expression(kind: Name, identifier: "." & name)
     try:
@@ -462,8 +484,9 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
 
 proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement =
-  # XXX (1) named & default arguments with signature property (instead of composite?) meaning handle colon expressions
+  # XXX (1) named & default arguments with signature property meaning handle colon expressions
   if ex.address.isIdentifier(name):
+    # XXX should meta calls take precedence
     result = compileMetaCall(scope, name, ex, bound, argumentStatements)
   if result.isNil:
     var argumentTypes = newSeq[Type](ex.arguments.len)
@@ -494,36 +517,45 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
             " found for argument types " & $argumentTypes)
 
 proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
-  if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
-    ex.elements[0].isSingleColon):
-    if bound.boundType.kind == tyComposite:
-      assert bound.boundType.fields.len == ex.elements.len, "tuple bound type lengths do not match"
-    result = Statement(kind: skComposite, knownType:
-      Type(kind: tyComposite, fields: initTable[string, Type](ex.elements.len)))
-    for e in ex.elements:
-      if e.isSingleColon: continue
-      assert e.kind == Colon, "composite literal must only have colon expressions"
+  if bound.boundType.kind == tyTuple:
+    assert bound.boundType.elements.len == ex.elements.len, "tuple bound type lengths do not match"
+  result = Statement(kind: skTuple, knownType: Type(kind: tyTuple, elements: newSeqOfCap[Type](ex.elements.len)))
+  var fields: Table[Value, Value]
+  for i, e in ex.elements:
+    var val: Expression
+    if e.kind == Colon:
       assert e.left.kind == Name, "composite literal has non-name left hand side on colon expression"
-      let k = e.left.identifier
-      let bv = if bound.boundType.kind == tyComposite and k in bound.boundType.fields:
-        bound.boundType.fields[k] * bound.variance
-      else:
-        defaultBound
-      let v = map(e.right, bv)
-      result.composite.add((key: k, value: v))
-      result.knownType.fields[k] = v.knownType
-  else:
-    if bound.boundType.kind == tyTuple:
-      assert bound.boundType.elements.len == ex.elements.len, "tuple bound type lengths do not match"
-    result = Statement(kind: skTuple, knownType:
-      Type(kind: tyTuple, elements: newSeqOfCap[Type](ex.elements.len)))
-    for i, e in ex.elements:
-      let element = if bound.boundType.kind == tyTuple:
-        map(e, bound.boundType.elements[i] * bound.variance)
-      else:
-        map e
-      result.elements.add(element)
-      result.knownType.elements.add(element.knownType)
+      fields[toValue(e.left.identifier)] = toValue(i.int32)
+      val = e.right
+    else:
+      val = e
+    let element = if bound.boundType.kind == tyTuple:
+      map(val, bound.boundType.elements[i] * bound.variance)
+    else:
+      map val
+    result.elements.add(element)
+    result.knownType.elements.add(element.knownType)
+  if fields.len != 0:
+    result.knownType.properties.table[Fields] = @[toValue(fields)]
+  when false:
+    if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
+      ex.elements[0].isSingleColon):
+      if bound.boundType.kind == tyComposite:
+        assert bound.boundType.fields.len == ex.elements.len, "tuple bound type lengths do not match"
+      result = Statement(kind: skComposite, knownType:
+        Type(kind: tyComposite, fields: initTable[string, Type](ex.elements.len)))
+      for e in ex.elements:
+        if e.isSingleColon: continue
+        assert e.kind == Colon, "composite literal must only have colon expressions"
+        assert e.left.kind == Name, "composite literal has non-name left hand side on colon expression"
+        let k = e.left.identifier
+        let bv = if bound.boundType.kind == tyComposite and k in bound.boundType.fields:
+          bound.boundType.fields[k] * bound.variance
+        else:
+          defaultBound
+        let v = map(e.right, bv)
+        result.composite.add((key: k, value: v))
+        result.knownType.fields[k] = v.knownType
 
 proc compileArrayExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   result = Statement(kind: skList, knownType: Ty(List))

@@ -163,7 +163,7 @@ type
     tySet,
     tyTable,
     tyExpression, tyStatement, tyScope,
-    tyComposite,
+    tyComposite, # xxx should probably go in favor of Fields property with tples
     tyType,
     # typeclass
     tyAny,
@@ -179,6 +179,7 @@ type
     bound*: TypeBound
   
   Type* {.unlikelyCycles.} = object # could be cyclic
+    # xxx for easier generics etc maybe just have a base type, argument types, and properties
     properties*: Properties
     case kind*: TypeKind
     of tyNoneValue,
