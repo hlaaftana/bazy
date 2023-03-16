@@ -143,20 +143,6 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     for k, v in ins.entries.items:
       arr[run k] = run v
     result = toValue(arr)
-  of BuildComposite:
-    var arr = initTable[CompositeNameId, Value](ins.composite.len)#newArray[(CompositeNameId, Value)](ins.composite.len)
-    #var i = 0
-    for k, v in ins.composite.items:
-      arr[k] = run v#arr[i] = (k, run v)
-      #inc i
-    result = toValue(arr)
-  of GetComposite:
-    let x = run ins.getComposite
-    result = x.boxedValue.compositeValue.unref[ins.getCompositeId]#.unref.get(ins.getCompositeId)
-  of SetComposite:
-    let x = run ins.setComposite
-    result = run ins.setCompositeValue
-    x.boxedValue.compositeValue.unref[ins.setCompositeId] = result#.unref.set(ins.setCompositeId, result)
   of GetIndex:
     let x = run ins.getIndexAddress
     case x.kind

@@ -25,6 +25,7 @@ defineProperty Meta, PropertyTag(name: "Meta",
 
 defineProperty Fields, PropertyTag(name: "Fields",
   argumentTypes: @[Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32))],
+  # XXX use tags for field names
   typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
     if t.properties.hasTag(propertySelf) and args[0].boxedValue.tableValue == t.properties.table[propertySelf][0].boxedValue.tableValue:
       tmEqual
@@ -134,22 +135,13 @@ proc toInstruction*(st: Statement): Instruction =
     Instruction(kind: BuildSet, elements: map st.elements)
   of skTable:
     Instruction(kind: BuildTable, entries: map st.entries)
-  of skComposite:
-    Instruction(kind: BuildComposite, composite: toCompositeArray(map st.composite))
-  of skGetComposite:
-    Instruction(kind: GetComposite, getComposite: map st.getComposite,
-      getCompositeId: st.getCompositeName.getCompositeNameId)
-  of skSetComposite:
-    Instruction(kind: SetComposite, setComposite: map st.setComposite,
-      setCompositeId: st.setCompositeName.getCompositeNameId,
-      setCompositeValue: map st.setCompositeValue)
   of skGetIndex:
     Instruction(kind: GetIndex, getIndexAddress: map st.getIndexAddress,
       getIndex: st.getIndex)
   of skSetIndex:
     Instruction(kind: SetIndex, setIndexAddress: map st.setIndexAddress,
       setIndex: st.setIndex,
-      setIndexValue: map st.setCompositeValue)
+      setIndexValue: map st.setIndexValue)
   of skUnaryInstruction:
     Instruction(kind: st.unaryInstructionKind, unary: map st.unary)
   of skBinaryInstruction:
@@ -291,7 +283,7 @@ proc resolve*(scope: Scope, ex: Expression, name: string, bound: TypeBound): Var
       msg: "no overloads with bound " & $bound & " for " & $ex)
   result = overloads[0]
   when false:
-    # XXX can implement generic evaluation here
+    # can implement generic evaluation here
     # maybe lazyExpression compiled with a new scope with the type variables
     # but then we would need to save every version
     # can generate new variables but that would fill up scope
@@ -325,12 +317,7 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
 
 proc compileProperty*(scope: Scope, ex: Expression, lhs: Statement, name: string, bound: TypeBound): Statement =
   result = nil
-  if lhs.knownType.kind == tyComposite and lhs.knownType.fields.hasKey(name):
-    result = Statement(kind: skGetComposite,
-      knownType: lhs.knownType.fields[name],
-      getComposite: lhs,
-      getCompositeName: name)
-  elif lhs.knownType.kind == tyTuple and lhs.knownType.properties.hasTag(Fields) and (
+  if lhs.knownType.kind == tyTuple and lhs.knownType.properties.hasTag(Fields) and (
     let tab = lhs.knownType.properties.table[Fields][0].boxedValue.tableValue;
     let nam = toValue(name);
     tab.contains(nam)):
@@ -472,7 +459,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
             let pt = t.param(i)
             if matchBound(-argumentTypes[i], pt):
               # optimize checking types we know match
-              # XXX do this recursively?
+              # XXX (3?) do this recursively?
               d[0][i] = Ty(Any)
             else:
               d[0][i] = pt
@@ -484,9 +471,9 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
 
 proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement =
-  # XXX (1) named & default arguments with signature property meaning handle colon expressions
+  # XXX (1) account for Fields and Defaults properties of function arguments tuple type
   if ex.address.isIdentifier(name):
-    # XXX should meta calls take precedence
+    # XXX should meta calls take evaluation priority or somehow be considered equal in overloading with runtime calls
     result = compileMetaCall(scope, name, ex, bound, argumentStatements)
   if result.isNil:
     var argumentTypes = newSeq[Type](ex.arguments.len)
@@ -524,7 +511,7 @@ proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): St
   for i, e in ex.elements:
     var val: Expression
     if e.kind == Colon:
-      assert e.left.kind == Name, "composite literal has non-name left hand side on colon expression"
+      assert e.left.kind == Name, "tuple field has non-name left hand side on colon expression"
       fields[toValue(e.left.identifier)] = toValue(i.int32)
       val = e.right
     else:
@@ -537,25 +524,6 @@ proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): St
     result.knownType.elements.add(element.knownType)
   if fields.len != 0:
     result.knownType.properties.table[Fields] = @[toValue(fields)]
-  when false:
-    if ex.elements.len != 0 and (ex.elements[0].kind == Colon or
-      ex.elements[0].isSingleColon):
-      if bound.boundType.kind == tyComposite:
-        assert bound.boundType.fields.len == ex.elements.len, "tuple bound type lengths do not match"
-      result = Statement(kind: skComposite, knownType:
-        Type(kind: tyComposite, fields: initTable[string, Type](ex.elements.len)))
-      for e in ex.elements:
-        if e.isSingleColon: continue
-        assert e.kind == Colon, "composite literal must only have colon expressions"
-        assert e.left.kind == Name, "composite literal has non-name left hand side on colon expression"
-        let k = e.left.identifier
-        let bv = if bound.boundType.kind == tyComposite and k in bound.boundType.fields:
-          bound.boundType.fields[k] * bound.variance
-        else:
-          defaultBound
-        let v = map(e.right, bv)
-        result.composite.add((key: k, value: v))
-        result.knownType.fields[k] = v.knownType
 
 proc compileArrayExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   result = Statement(kind: skList, knownType: Ty(List))

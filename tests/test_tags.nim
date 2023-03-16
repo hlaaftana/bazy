@@ -11,3 +11,7 @@ block:
   doAssert a != fakeA
   doAssert a != fakeA2
   doAssert fakeA != fakeA2
+  let a3 = tag("a")
+  doAssert a == a3
+  let b2 = tag("b")
+  doAssert b == b2
