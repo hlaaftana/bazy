@@ -73,7 +73,6 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyExpression: 0,
   tyStatement: 0,
   tyScope: 0,
-  tyComposite: -1,
   tyType: 1,
   tyAny: 0,
   tyUnion: -1,
@@ -125,8 +124,6 @@ proc nth*(t: Type, i: int): Type =
       result = t.keyType.unbox
     else:
       result = t.valueType.unbox
-  of tyComposite:
-    discard # inapplicable
   of tyType:
     result = t.typeValue.unbox
   of tyUnion, tyIntersection:
@@ -237,16 +234,6 @@ proc match*(matcher, t: Type): TypeMatch =
       min(
         match(+matcher.keyType.unbox, t.keyType.unbox),
         match(+matcher.valueType.unbox, t.valueType.unbox))
-    of tyComposite:
-      proc tableMatch[T](t1, t2: Table[T, Type]): TypeMatch =
-        result = tmEqual
-        if t1.len != t2.len: return tmNone
-        for k, v1 in t1:
-          if k notin t2: return tmNone
-          let m = match(+v1, t2[k])
-          if m <= tmNone: return m
-          elif m < result: result = m
-      tableMatch(matcher.fields, t.fields)
     of tyType:
       match(+matcher.typeValue.unbox, t.typeValue.unbox)
     of allTypeKinds - concreteTypeKinds: tmUnknown # unreachable
@@ -349,7 +336,7 @@ proc commonSuperType*(a, b: Type, doUnion = true): Type =
 import arrays
 
 proc checkType*(value: Value, t: Type): bool =
-  # XXX this is broken for boxed values
+  # XXX (3) this is broken for boxed values
   template eachAre(iter; types: seq[Type]): untyped =
     let ts = types; var yes = true; var i = 0
     for it in iter:
@@ -393,15 +380,6 @@ proc checkType*(value: Value, t: Type): bool =
   of tyExpression: value.kind == vkExpression
   of tyStatement: value.kind == vkStatement
   of tyScope: value.kind == vkScope
-  of tyComposite:
-    value.kind == vkComposite and (block:
-      var res = false
-      var i = 0
-      for key, value in value.boxedValue.compositeValue.unref:#.items:
-        if (i >= value.boxedValue.compositeValue.unref.len) or (not checkType(value, t.fields[key.getCompositeName])):
-          res = false; break
-        inc i
-      i == t.fields.len and res)
   of tyType: value.kind == vkType and t.typeValue.unbox.match(value.boxedValue.typeValue).matches
   of tyAny: true
   of tyNone: false
@@ -482,12 +460,6 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
     if t.kind == pattern.kind:
       match(pattern.keyType, t.keyType)
       match(pattern.valueType, t.valueType)
-  of tyComposite:
-    if t.kind == pattern.kind:
-      for k, v in t.fields:
-        let ty = pattern.fields.getOrDefault(k, Ty(None))
-        if not ty.isNone:
-          match(ty, v)
   of tyType:
     if t.kind == pattern.kind:
       match(pattern.typeValue, t.typeValue)
@@ -532,9 +504,6 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
   of tyTable:
     fill(pattern.keyType)
     fill(pattern.valueType)
-  of tyComposite:
-    for _, f in pattern.fields.mpairs:
-      fill(f)
   of tyType:
     fill(pattern.typeValue)
   of tyUnion, tyIntersection:

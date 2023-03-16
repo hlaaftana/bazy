@@ -28,9 +28,6 @@ type
       ## both seq and string are references to save memory
     vkSet
     vkTable
-    vkComposite
-      ## like tuple, but fields are tied to names and unordered
-      ## (really the names define the order and the names can at least be shortstrings)
     vkFunction
       ## function
     vkNativeFunction
@@ -53,7 +50,7 @@ else:
 type
   FullValueObj* {.unlikelyCycles.} = object
     `type`*: ref Type
-      # XXX actually use and account for this without losing performance
+      # XXX (3) actually use and account for this without losing performance
     case kind*: ValueKind
     of vkNone: discard
     of vkBool:
@@ -76,7 +73,7 @@ type
       float64Value*: float64
     of vkType:
       typeValue*: Type
-    of vkTag: discard # XXX
+    of vkTag: discard # XXX (2) use tags
     of vkArray:
       tupleValue*: Array[Value]
     of vkString:
@@ -87,10 +84,6 @@ type
       setValue*: HashSet[Value]
     of vkTable:
       tableValue*: Table[Value, Value]
-    of vkComposite:
-      compositeValue*: Table[CompositeNameId, Value]#ArrayRef[tuple[id: CompositeNameId, value: Value]]
-      # ^ arrayref version here crashes orc compiler
-      # XXX probably better than table to use seq
     of vkFunction:
       functionValue*: Function
     of vkNativeFunction:
@@ -103,8 +96,6 @@ type
     of vkScope:
       scopeValue*: Scope
   FullValue* = ref FullValueObj
-  
-  CompositeNameId* = int
 
   #OpaqueValue* = ref object of RootObj 
 
@@ -135,7 +126,7 @@ type
   
   Value* = ValueObj
 
-  # xxx update this
+  # XXX (2) update or replace this with Tag
   PropertyTag* = ref object
     name*: string
     argumentTypes*: seq[Type]
@@ -163,7 +154,6 @@ type
     tySet,
     tyTable,
     tyExpression, tyStatement, tyScope,
-    tyComposite,
     tyType,
     # typeclass
     tyAny,
@@ -179,6 +169,7 @@ type
     bound*: TypeBound
   
   Type* {.unlikelyCycles.} = object # could be cyclic
+    # XXX for easier generics etc maybe just have a base type, argument types, and properties
     properties*: Properties
     case kind*: TypeKind
     of tyNoneValue,
@@ -188,22 +179,17 @@ type
       tyAny, tyNone:
       discard
     of tyFunction:
-      # XXX (2) signature with argument names and default values can be a property
+      # XXX (1) account for Fields and Defaults property of the `arguments` tuple type
       # only considered at callsite like nim, no semantic value
-      # argument types could go in type or part of the property (good for runtime checking)
       arguments*: Box[Type] # tuple type, includes varargs
       returnType*: Box[Type]
     of tyTuple:
-      # XXX (1) maybe allow names in a property to reflect regular named tuples which would then extend to named arguments
-      # maybe signature property instead, ordered names can be accessors instead of like composite
       elements*: seq[Type]
       varargs*: Box[Type] # for now only trailing
     of tyList, tySet:
       elementType*: Box[Type]
     of tyTable:
       keyType*, valueType*: Box[Type]
-    of tyComposite:
-      fields*: Table[string, Type]
     of tyType:
       typeValue*: Box[Type]
     of tyUnion, tyIntersection:
@@ -273,9 +259,6 @@ type
     BuildList
     BuildSet
     BuildTable
-    BuildComposite
-    GetComposite
-    SetComposite
     GetIndex
     SetIndex
     # binary
@@ -327,15 +310,6 @@ type
       elements*: Array[Instruction]
     of BuildTable:
       entries*: Array[tuple[key, value: Instruction]]
-    of BuildComposite:
-      composite*: Array[tuple[id: CompositeNameId, value: Instruction]]
-    of GetComposite:
-      getComposite*: Instruction
-      getCompositeId*: CompositeNameId
-    of SetComposite:
-      setComposite*: Instruction
-      setCompositeId*: CompositeNameId
-      setCompositeValue*: Instruction
     of GetIndex:
       getIndexAddress*: Instruction
       getIndex*: int
@@ -373,9 +347,6 @@ type
     skList
     skSet
     skTable
-    skComposite
-    skGetComposite
-    skSetComposite
     skGetIndex
     skSetIndex
     # custom instructions
@@ -424,15 +395,6 @@ type
       elements*: seq[Statement]
     of skTable:
       entries*: seq[tuple[key, value: Statement]]
-    of skComposite:
-      composite*: seq[tuple[key: string, value: Statement]]
-    of skGetComposite:
-      getComposite*: Statement
-      getCompositeName*: string
-    of skSetComposite:
-      setComposite*: Statement
-      setCompositeName*: string
-      setCompositeValue*: Instruction
     of skGetIndex:
       getIndexAddress*: Statement
       getIndex*: int
@@ -463,6 +425,12 @@ type
   Context* = ref object
     ## current module or function
     imports*: seq[Context]
+      # XXX imports should not work like this/exist
+      # modules should probably be like JS or lua where
+      # the module creates a module object which is what gets imported
+      # closures should "copy", as in when a new stack is created
+      # it should be filled on the spot with specific variables
+      # this might mean vkReference is required
     stack*: Stack
     stackSize*: int
     top*: Scope
@@ -486,65 +454,6 @@ type
 
 static:
   doAssert sizeof(Value) <= 2 * sizeof(int)
-
-var
-  compositeNameIdTable*: Table[string, CompositeNameId]
-  compositeNames*: seq[string]
-
-proc getCompositeNameId*(name: string): CompositeNameId =
-  compositeNameIdTable.withValue(name, id):
-    result = id[]
-  do:
-    result = CompositeNameId(compositeNames.len)
-    compositeNameIdTable[name] = result
-    compositeNames.add(name)
-
-proc getCompositeName*(id: CompositeNameId): string =
-  compositeNames[id.int]
-
-when false:
-  import algorithm
-
-  proc toCompositeArray*[T](table: Array[tuple[key: string, value: T]]): Array[tuple[id: CompositeNameId, value: T]] =
-    result = newArray[typeof result[0]](table.len)
-    for i, (k, v) in table:
-      let id = k.getCompositeNameId
-      result[i] = (id, v)
-    seq[typeof result[0]](result).sort(proc (a, b: auto): int = cmp(a[0], b[0]))
-
-  proc toCompositeArray*[T](table: Table[string, T]): Array[tuple[id: CompositeNameId, value: T]] =
-    result = newArray[typeof result[0]](table.len)
-    var i = 0
-    for k, v in table:
-      let id = k.getCompositeNameId
-      result[i] = (id, v)
-      inc i
-    seq[typeof result[0]](result).sort(proc (a, b: typeof(result[0])): int = cmp(a[0], b[0]))
-
-  proc get*[T](arr: Array[tuple[id: CompositeNameId, value: T]], id: CompositeNameId): T =
-    arr[binarySearch(seq[typeof arr[0]](arr), id,
-      proc (item: typeof(arr[0]), id: CompositeNameId): int = cmp(item[0], id))][1]
-
-  proc set*[T](arr: var Array[tuple[id: CompositeNameId, value: T]], id: CompositeNameId, val: T) =
-    arr[binarySearch(seq[typeof arr[0]](arr), id,
-      proc (item: typeof(arr[0]), id: CompositeNameId): int = cmp(item[0], id))][1] =
-        val
-else:
-  import algorithm
-  proc toCompositeArray*[T](table: Array[tuple[key: string, value: T]]): Array[tuple[id: CompositeNameId, value: T]] =
-    result = newArray[typeof result[0]](table.len)
-    for i, (k, v) in table:
-      let id = k.getCompositeNameId
-      result[i] = (id, v)
-    (when useArrays:
-      result.toOpenArray(0, result.len - 1)
-    else:
-      seq[typeof result[0]](result)).sort(proc (a, b: auto): int = cmp(a[0], b[0]))
-
-  proc toCompositeArray*[T](table: Table[string, T]): Table[CompositeNameId, T] =
-    for k, v in table:
-      let id = k.getCompositeNameId
-      result[id] = v
 
 proc get*(stack: Stack, index: int): lent Value {.inline.} =
   stack.stack[index]
@@ -687,23 +596,13 @@ proc `$`*(value: FullValue): string =
   of vkInt64: $value.int64Value
   of vkUint64: $value.uint64Value
   of vkFloat64: $value.float64Value
-  of vkTag: "" # XXX todo
+  of vkTag: "" # XXX (2) todo
   of vkList: ($value.listValue.unref)[1..^1]
   of vkString: value.stringValue.unref
   of vkArray:
     var s = ($value.tupleValue.unref)[1..^1]
     s[0] = '('
     s[^1] = ')'
-    s
-  of vkComposite:
-    var s = "("
-    for k, v in value.compositeValue.unref:#.items:
-      if s.len != len"(":
-        s.add(", ")
-      s.add(k.getCompositeName)
-      s.add(": ")
-      s.add($v)
-    s.add(')')
     s
   of vkType: $value.typeValue
   of vkFunction: "<function>"
@@ -766,7 +665,6 @@ proc `$`*(t: Type): string =
   of tyList: "List(" & $t.elementType & ")"
   of tySet: "Set(" & $t.elementType & ")"
   of tyTable: "Table(" & $t.keyType & ", " & $t.valueType & ")"
-  of tyComposite: "Composite" & $t.fields
   of tyType: "Type " & $t.typeValue
   of tyUnion: "Union(" & $t.operands & ")"
   of tyIntersection: "Intersection(" & $t.operands & ")"

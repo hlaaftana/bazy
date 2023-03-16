@@ -44,8 +44,6 @@ proc toValue*(x: Type): Value = Value(kind: vkType, boxedValue: FullValue(kind: 
 proc toValue*(x: Box[Type]): Value = Value(kind: vkType, boxedValue: FullValue(kind: vkType, typeValue: x.unbox))
 proc toValue*(x: sink HashSet[Value]): Value = withkindbox(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindbox(table, x)
-proc toValue*(x: sink Table[CompositeNameId, Value]#[Array[(CompositeNameId, Value)]]#): Value = withkindbox(composite, x)
-proc toValue*(x: sink Table[string, Value]): Value = toValue(toCompositeArray(x))
 proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkindbox(nativeFunction, x)
 proc toValue*(x: Function): Value = withkindbox(function, x)
 proc toValue*(x: Expression): Value = withkindbox(expression, x)
@@ -77,11 +75,6 @@ proc getType*(x: FullValue): Type =
     result = Type(kind: tyTuple, elements: newSeq[Type](val.len))
     for i in 0 ..< x.tupleValue.unref.len:
       result.elements[i] = val[i].getType
-  of vkComposite:
-    let val = x.compositeValue.unref
-    result = Type(kind: tyComposite, fields: initTable[string, Type](val.unref.len))
-    for k, v in val.unref:#.items:
-      result.fields[k.getCompositeName] = v.getType
   of vkType:
     result = Type(kind: tyType, typeValue: box x.typeValue)
   of vkFunction, vkNativeFunction:
@@ -134,13 +127,6 @@ when false:
       for i in 0 ..< newArray.len:
         newArray[i] = copy value.tupleValue.unref[i]
       toValue(newArray)
-    of vkComposite:
-      var newTable = initTable[CompositeNameId, Value](value.compositeValue.unref.len)#newArray[(CompositeNameId, Value)](value.compositeValue[].len)
-      #var i = 0
-      for k, v in value.compositeValue.unref:#.items:
-        newTable[k] = copy v#i] = (k, copy v)
-        #inc i
-      Value(kind: vkComposite, compositeValue: newTable.toRef)#toValue(newTable)
     of vkEffect,
       vkSet, vkTable, vkExpression, vkStatement, vkScope:
       # unimplemented
@@ -162,7 +148,6 @@ when false:
         of vkString: fromPtr string
         of vkArray: cast[pointer](v.tupleValue).tagPointer(v.kind.uint16)
         of vkReference: fromPtr reference
-        of vkComposite: fromPtr composite
         of vkType: fromPtr type
         of vkNativeFunction: fromPtr nativeFunction
         of vkFunction: fromPtr function
@@ -190,7 +175,6 @@ when false:
       of vkString: castPointer string
       of vkArray: result.tupleValue = cast[typeof(result.tupleValue)](untagPointer(val))
       of vkReference: castPointer reference
-      of vkComposite: castPointer composite
       of vkType: castPointer type
       of vkNativeFunction: castPointer nativeFunction
       of vkFunction: castPointer function
