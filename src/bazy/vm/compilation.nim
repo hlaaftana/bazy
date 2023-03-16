@@ -1,33 +1,33 @@
-import "."/[primitives, arrays, runtime, types, values], ../language/[expressions, number, shortstring], std/[tables, sets, strutils]
+import "."/[primitives, arrays, runtime, types, values, tags], ../language/[expressions, number, shortstring], std/[tables, sets, strutils]
 
 when defined(gcDestructors):
   template defineProperty(name, value): untyped {.dirty.} =
     let `name`* = block:
-      var propertySelf {.inject.}: PropertyTag
+      var propertySelf {.inject.}: Property
       propertySelf = value
       propertySelf
 else:
   template defineProperty(name, value): untyped =
-    proc getProperty: PropertyTag {.gensym.} =
-      var propertySelf {.global, inject.}: PropertyTag
+    proc getProperty: Property {.gensym.} =
+      var propertySelf {.global, inject.}: Property
       if propertySelf.isNil:
         propertySelf = value
       result = propertySelf
-    template `name`*: PropertyTag {.inject.} = getProperty()
+    template `name`*: Property {.inject.} = getProperty()
 
-defineProperty Meta, PropertyTag(name: "Meta",
-  argumentTypes: @[Type(kind: tyBaseType, baseKind: tyFunction)],
-  typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
-    if t.properties.hasTag(propertySelf):
-      match(args[0].boxedValue.typeValue, t.properties.table[propertySelf][0].boxedValue.typeValue)
+defineProperty Meta, Property(tag: uniqueTag("Meta"),
+  argumentType: Type(kind: tyBaseType, baseKind: tyFunction),
+  typeMatcher: proc (t: Type, arg: Value): TypeMatch =
+    if t.properties.hasKey(propertySelf):
+      match(arg.boxedValue.typeValue, t.properties[propertySelf].boxedValue.typeValue)
     else:
       tmFalse)
 
-defineProperty Fields, PropertyTag(name: "Fields",
-  argumentTypes: @[Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32))],
+defineProperty Fields, Property(tag: uniqueTag("Fields"),
+  argumentType: Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32)),
   # XXX use tags for field names
-  typeMatcher: proc (t: Type, args: seq[Value]): TypeMatch =
-    if t.properties.hasTag(propertySelf) and args[0].boxedValue.tableValue == t.properties.table[propertySelf][0].boxedValue.tableValue:
+  typeMatcher: proc (t: Type, arg: Value): TypeMatch =
+    if t.properties.hasKey(propertySelf) and arg.boxedValue.tableValue == t.properties[propertySelf].boxedValue.tableValue:
       tmEqual
     else:
       tmAlmostEqual)
@@ -196,7 +196,7 @@ proc symbols*(scope: Scope, name: string, bound: TypeBound, doImports = true): s
     result.add(symbols(scope.parent, name, bound, doImports = false))
   for i, v in scope.variables:
     var t = v.getType
-    # XXX test this works (generic substitution)
+    # XXX (4) test this works (generic substitution)
     if v.genericParams.len != 0:
       var matches: ParameterInstantiation = initTable[TypeParameter, Type](v.genericParams.len)
       try:
@@ -317,8 +317,8 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
 
 proc compileProperty*(scope: Scope, ex: Expression, lhs: Statement, name: string, bound: TypeBound): Statement =
   result = nil
-  if lhs.knownType.kind == tyTuple and lhs.knownType.properties.hasTag(Fields) and (
-    let tab = lhs.knownType.properties.table[Fields][0].boxedValue.tableValue;
+  if lhs.knownType.kind == tyTuple and lhs.knownType.properties.hasKey(Fields) and (
+    let tab = lhs.knownType.properties[Fields].boxedValue.tableValue;
     let nam = toValue(name);
     tab.contains(nam)):
     let ind = tab[nam].int32Value
@@ -349,13 +349,13 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
   # get all metas first and type statements accordingly
   var allMetas = overloads(scope, name,
     *funcType(Ty(Statement), realArgumentTypes).withProperties(
-      property(Meta, @[toValue funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)])))
+      property(Meta, toValue funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes))))
   if allMetas.len != 0:
     var makeStatement = newSeq[bool](ex.arguments.len)
     var metaTypes = newSeq[Type](allMetas.len)
     for i, v in allMetas:
       let ty = v.type
-      let metaTy = v.type.properties.getArguments(Meta)[0].boxedValue.typeValue
+      let metaTy = v.type.properties[Meta].boxedValue.typeValue
       metaTypes[i] = metaTy
       for i in 0 ..< ex.arguments.len:
         if matchBound(+Ty(Statement), ty.param(i + 1)):
@@ -523,7 +523,7 @@ proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): St
     result.elements.add(element)
     result.knownType.elements.add(element.knownType)
   if fields.len != 0:
-    result.knownType.properties.table[Fields] = @[toValue(fields)]
+    result.knownType.properties[Fields] = toValue(fields)
 
 proc compileArrayExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   result = Statement(kind: skList, knownType: Ty(List))

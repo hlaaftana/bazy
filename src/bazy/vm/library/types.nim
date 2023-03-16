@@ -21,4 +21,4 @@ module types:
       result = toValue Type(kind: tyFunction, arguments: seq[Type] @[], returnType: args[0].typeValue)
     fn "functionType", [anyType, anyType], anyType:
       result = toValue Type(kind: tyFunction, arguments: @[args[0].typeValue], returnType: args[1].typeValue)
-  # todo: .call / .[] for type arguments
+  # XXX (4) .call / .[] for type arguments, and generics in general

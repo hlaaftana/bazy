@@ -5,7 +5,8 @@ type
   Tag* = distinct TagImpl
 
 template impl(t: Tag): TagImpl = t.TagImpl
-proc `==`*(a, b: Tag): bool = a.impl == b.impl
+proc `==`*(a, b: Tag): bool {.borrow.}
+proc hash*(a: Tag): Hash {.borrow.}
 
 var
   symbols: Table[TagImpl, string]

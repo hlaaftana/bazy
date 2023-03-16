@@ -1,27 +1,27 @@
 import "."/[primitives, values], std/[tables, sets]
 
-proc hasTag*(properties: Properties, property: PropertyTag): bool {.inline.} =
-  properties.table.hasKey(property)
+type PropertyInstance* = object
+  tag*: Property
+  value*: Value
 
-proc getArguments*(properties: Properties, property: PropertyTag): seq[Value] {.inline.} =
-  properties.table[property]
+proc `$`*(p: PropertyInstance): string =
+  result = $p.tag
+  if p.value.kind != vkNone:
+    result.add('(')
+    result.add($p.value)
+    result.add(')')
 
-iterator items*(properties: Properties): Property =
-  for p, args in properties.table:
-    yield Property(tag: p, arguments: args)
+proc property*(tag: Property, arg: Value): PropertyInstance {.inline.} =
+  PropertyInstance(tag: tag, value: arg)
 
-proc property*(tag: PropertyTag, args: varargs[Value]): Property {.inline.} =
-  assert tag.argumentTypes.len == args.len, "argument length has to match"
-  Property(tag: tag, arguments: @args)
+proc property*(prop: PropertyInstance): PropertyInstance {.inline.} = prop
 
-proc property*(prop: Property): Property {.inline.} = prop
-
-proc properties*(ps: varargs[Property, property]): Properties =
-  result.table = initTable[PropertyTag, seq[Value]](ps.len)
+proc properties*(ps: varargs[PropertyInstance, property]): Table[Property, Value] =
+  result = initTable[Property, Value](ps.len)
   for p in ps:
-    result.table[p.tag] = p.arguments
+    result[p.tag] = p.value
 
-proc withProperties*(ty: sink Type, ps: varargs[Property, property]): Type {.inline.} =
+proc withProperties*(ty: sink Type, ps: varargs[PropertyInstance, property]): Type {.inline.} =
   ty.properties = properties(ps)
   ty
 
@@ -34,7 +34,7 @@ const
   matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
   atomicTypes* = {tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64,
+    tyInt64, tyUint64, tyFloat64, tyTag,
     tyString, tyExpression, tyStatement, tyScope}
   highestNonMatching* = tmFalse
   lowestMatching* = tmTrue
@@ -64,6 +64,7 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyInt64: 0,
   tyUint64: 0,
   tyFloat64: 0,
+  tyTag: 0,
   tyFunction: 2,
   tyTuple: -1,
   tyList: 1,
@@ -103,7 +104,7 @@ proc nth*(t: Type, i: int): Type =
   case t.kind
   of tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64,
+    tyInt64, tyUint64, tyFloat64, tyTag,
     tyString, tyExpression, tyStatement, tyScope,
     tyAny, tyNone:
     discard # inapplicable
@@ -268,7 +269,7 @@ proc match*(matcher, t: Type): TypeMatch =
       matcher.typeMatcher(t)
   of tyWithProperty:
     min(
-      if not t.properties.hasTag(matcher.withProperty): tmFiniteFalse else: tmAlmostEqual,
+      if not t.properties.hasKey(matcher.withProperty): tmFiniteFalse else: tmAlmostEqual,
       match(+matcher.typeWithProperty.unbox, t))
   of tyParameter:
     min(
@@ -280,7 +281,7 @@ proc match*(matcher, t: Type): TypeMatch =
   #    match(matcher.genericPattern[], t))
   result = min(result, tmAlmostEqual)
   if result.matches:
-    for p, args in matcher.properties.table:
+    for p, args in matcher.properties:
       if not p.typeMatcher.isNil:
         result = min(result, p.typeMatcher(t, args))
         if result <= tmNone: return result
@@ -365,8 +366,9 @@ proc checkType*(value: Value, t: Type): bool =
   of tyInt64: value.kind == vkInt64
   of tyUint64: value.kind == vkUint64
   of tyFloat64: value.kind == vkFloat64
+  of tyTag: value.kind == vkTag
   of tyFunction:
-    # XXX (2) no information about signature
+    # XXX (3) no information about signature
     value.kind in {vkFunction, vkNativeFunction}
   of tyTuple:
     value.kind == vkArray and value.boxedValue.tupleValue.unref.eachAre(t.elements)
@@ -400,12 +402,11 @@ proc checkType*(value: Value, t: Type): bool =
   of tyNot: not value.checkType(t.notType.unbox)
   of tyBaseType: value.getType.kind == t.baseKind # XXX unbox here is expensive
   of tyWithProperty:
-    value.checkType(t.typeWithProperty.unbox) and value.getType.properties.hasTag(t.withProperty)
+    value.checkType(t.typeWithProperty.unbox) and value.getType.properties.hasKey(t.withProperty)
   of tyCustomMatcher: not t.valueMatcher.isNil and t.valueMatcher(value)
   of tyParameter: value.checkType(t.parameter.bound.boundType)
-  #of tyGeneric: value.checkType(t.genericPattern[])
   if result:
-    for p, args in t.properties.table:
+    for p, args in t.properties:
       if not p.valueMatcher.isNil:
         result = result and p.valueMatcher(value, args)
         if not result: return result
@@ -436,7 +437,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
       table[param] = t
   of tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64,
+    tyInt64, tyUint64, tyFloat64, tyTag,
     tyString, tyExpression, tyStatement, tyScope,
     tyAny, tyNone:
     discard # atoms
@@ -488,7 +489,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     pattern = table[pattern.parameter]
   of tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64,
+    tyInt64, tyUint64, tyFloat64, tyTag,
     tyString, tyExpression, tyStatement, tyScope,
     tyAny, tyNone, tyBaseType, tyCustomMatcher:
     discard

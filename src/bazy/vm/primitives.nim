@@ -1,4 +1,4 @@
-import std/[tables, sets, hashes], "."/[arrays, pointertag], ../language/expressions, ../util/box, ../defines
+import std/[tables, sets, hashes], "."/[arrays, pointertag, tags], ../language/expressions, ../util/box, ../defines
 export box, unbox
 
 # type system should exist for both static and runtime dispatch
@@ -73,7 +73,8 @@ type
       float64Value*: float64
     of vkType:
       typeValue*: Type
-    of vkTag: discard # XXX (2) use tags
+    of vkTag:
+      tagValue*: Tag
     of vkArray:
       tupleValue*: Array[Value]
     of vkString:
@@ -126,20 +127,13 @@ type
   
   Value* = ValueObj
 
-  # XXX (2) update or replace this with Tag
-  PropertyTag* = ref object
-    name*: string
-    argumentTypes*: seq[Type]
+  # XXX (2) avoid DOD here but still find a way to translate this to the language
+  Property* = ref object
+    tag*: Tag
+    argumentType*: Type
     # these are supposed to act on `prop.value`:
-    typeMatcher*: proc (t: Type, arguments: seq[Value]): TypeMatch
-    valueMatcher*: proc (v: Value, arguments: seq[Value]): bool
-  
-  Property* = object
-    tag*: PropertyTag
-    arguments*: seq[Value]
-
-  Properties* = object
-    table*: Table[PropertyTag, seq[Value]]
+    typeMatcher*: proc (t: Type, propVal: Value): TypeMatch
+    valueMatcher*: proc (v: Value, propVal: Value): bool
 
   TypeKind* = enum
     # maybe add unknown type for values with unknown type at runtime
@@ -147,7 +141,7 @@ type
     # concrete
     tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64,
+    tyInt64, tyUint64, tyFloat64, tyTag,
     tyFunction, tyTuple,
     tyList,
     tyString,
@@ -169,12 +163,12 @@ type
     bound*: TypeBound
   
   Type* {.unlikelyCycles.} = object # could be cyclic
-    # XXX for easier generics etc maybe just have a base type, argument types, and properties
-    properties*: Properties
+    # XXX (4) for easier generics etc maybe just have a base type, argument types, and properties
+    properties*: Table[Property, Value]
     case kind*: TypeKind
     of tyNoneValue,
       tyInt32, tyUint32, tyFloat32, tyBool,
-      tyInt64, tyUint64, tyFloat64,
+      tyInt64, tyUint64, tyFloat64, tyTag,
       tyString, tyExpression, tyStatement, tyScope,
       tyAny, tyNone:
       discard
@@ -200,7 +194,7 @@ type
       baseKind*: TypeKind
     of tyWithProperty:
       typeWithProperty*: Box[Type]
-      withProperty*: PropertyTag
+      withProperty*: Property
     of tyCustomMatcher:
       typeMatcher*: proc (t: Type): TypeMatch
       valueMatcher*: proc (v: Value): bool
@@ -488,11 +482,14 @@ template mix(x) =
   mixin hash
   result = result !& hash(x)
 
-proc hash*(p: PropertyTag): Hash {.noSideEffect.} =
-  mix cast[pointer](p)
+proc hash*(p: Property): Hash {.noSideEffect.} =
+  if not p.isNil:
+    mix p.tag
+  else:
+    mix pointer(nil)
   result = !$ result
 
-proc `==`*(a, b: PropertyTag): bool = same(a, b)
+proc `==`*(a, b: Property): bool = a.isNil and b.isNil or (not a.isNil and not b.isNil and a.tag == b.tag)
 
 proc hash*(p: TypeParameter): Hash {.noSideEffect.} =
   mix cast[pointer](p)
@@ -596,7 +593,7 @@ proc `$`*(value: FullValue): string =
   of vkInt64: $value.int64Value
   of vkUint64: $value.uint64Value
   of vkFloat64: $value.float64Value
-  of vkTag: "" # XXX (2) todo
+  of vkTag: $value.tagValue
   of vkList: ($value.listValue.unref)[1..^1]
   of vkString: value.stringValue.unref
   of vkArray:
@@ -623,18 +620,7 @@ proc `$`*(value: Value): string =
   of vkEffect: "Effect(" & $value.effectValue.unref & ")"
   of boxedValueKinds: $value.boxedValue
 
-proc `$`*(p: PropertyTag): string =
-  p.name
-
-proc `$`*(p: Property): string =
-  result = $p.tag
-  if p.arguments.len != 0:
-    result.add('(')
-    for i, a in p.arguments:
-      if i != 0:
-        result.add(", ")
-      result.add($a)
-    result.add(')')
+proc `$`*(p: Property): string {.inline.} = $p.tag
 
 proc `$`*(tb: TypeBound): string
 
@@ -653,6 +639,7 @@ proc `$`*(t: Type): string =
   of tyInt64: "Int64"
   of tyUint64: "Uint64"
   of tyFloat64: "Float64"
+  of tyTag: "Tag"
   of tyString: "String"
   of tyExpression: "Expression"
   of tyStatement: "Statement"
@@ -681,10 +668,17 @@ proc `$`*(t: Type): string =
   #    else: inc i
   #    s.add(p.name & ": " & $b)
   #  s & "](" & $t.genericPattern[] & ")"
-  if t.properties.table.len != 0:
+  if t.properties.len != 0:
     result.add(" {") 
-    for tag, args in t.properties.table:
-      result.add($Property(tag: tag, arguments: args))
+    var afterFirst = false
+    for tag, val in t.properties:
+      if afterFirst: result.add(", ")
+      else: afterFirst = true
+      result.add($tag)
+      if val.kind != vkNone:
+        result.add('(')
+        result.add($val)
+        result.add(')')
     result.add('}')
 
 proc `$`*(tb: TypeBound): string =

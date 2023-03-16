@@ -63,7 +63,7 @@ proc getType*(x: FullValue): Type =
   of vkUint64: result = Ty(Uint64)
   of vkFloat64: result = Ty(Float64)
   of vkBool: result = Ty(Bool)
-  of vkTag: discard
+  of vkTag: result = Ty(Tag)
   of vkBoxed: result = getType(x.boxedValue)
   of vkList: result = Type(kind: tyList, elementType: x.listValue.unref[0].getType.box)
   of vkString: result = Ty(String)

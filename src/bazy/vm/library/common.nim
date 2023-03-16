@@ -25,7 +25,7 @@ proc templType*(arity: int): Type {.inline.} =
     args[i + 1] = Ty(Expression)
     bArgs[i] = Ty(Any)
   result = funcType(Ty(Statement), args)
-  result.properties = properties(property(Meta, @[toValue funcType(Ty(Any), bArgs)]))
+  result.properties = properties(property(Meta, toValue funcType(Ty(Any), bArgs)))
 
 template doTempl*(body): untyped =
   (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
@@ -43,7 +43,7 @@ proc typedTemplType*(arity: int): Type {.inline.} =
     args[i + 1] = Ty(Statement)
     bArgs[i] = Ty(Any)
   result = funcType(Ty(Statement), args)
-  result.properties = properties(property(Meta, @[toValue funcType(Ty(Any), bArgs)]))
+  result.properties = properties(property(Meta, toValue funcType(Ty(Any), bArgs)))
 
 proc typedTemplType*(realArgs: openarray[Type], returnType: Type): Type {.inline.} =
   var args = newSeq[Type](realArgs.len + 1)
@@ -51,7 +51,7 @@ proc typedTemplType*(realArgs: openarray[Type], returnType: Type): Type {.inline
   for i in 0 ..< realArgs.len:
     args[i + 1] = Ty(Statement)
   result = funcType(Ty(Statement), args)
-  result.properties = properties(property(Meta, @[toValue funcType(returnType, realArgs)]))
+  result.properties = properties(property(Meta, toValue funcType(returnType, realArgs)))
 
 template doTypedTempl*(body): untyped =
   (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
