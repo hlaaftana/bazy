@@ -34,7 +34,7 @@ const
   matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
   atomicTypes* = {tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64, tyTag,
+    tyInt64, tyUint64, tyFloat64,
     tyString, tyExpression, tyStatement, tyScope}
   highestNonMatching* = tmFalse
   lowestMatching* = tmTrue
@@ -64,7 +64,6 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyInt64: 0,
   tyUint64: 0,
   tyFloat64: 0,
-  tyTag: 0,
   tyFunction: 2,
   tyTuple: -1,
   tyList: 1,
@@ -104,7 +103,7 @@ proc nth*(t: Type, i: int): Type =
   case t.kind
   of tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64, tyTag,
+    tyInt64, tyUint64, tyFloat64,
     tyString, tyExpression, tyStatement, tyScope,
     tyAny, tyNone:
     discard # inapplicable
@@ -336,8 +335,10 @@ proc commonSuperType*(a, b: Type, doUnion = true): Type =
 
 import arrays
 
-proc checkType*(value: Value, t: Type): bool =
-  # XXX (3) this is broken for boxed values
+proc checkType*(value: Value, t: Type): bool
+  ## this sucks and reallocates boxed values
+
+proc checkType*(value: FullValueObj, t: Type): bool =
   template eachAre(iter; types: seq[Type]): untyped =
     let ts = types; var yes = true; var i = 0
     for it in iter:
@@ -366,23 +367,22 @@ proc checkType*(value: Value, t: Type): bool =
   of tyInt64: value.kind == vkInt64
   of tyUint64: value.kind == vkUint64
   of tyFloat64: value.kind == vkFloat64
-  of tyTag: value.kind == vkTag
   of tyFunction:
     # XXX (3) no information about signature
     value.kind in {vkFunction, vkNativeFunction}
   of tyTuple:
-    value.kind == vkArray and value.boxedValue.tupleValue.unref.eachAre(t.elements)
+    value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements)
   of tyList:
-    value.kind == vkList and value.boxedValue.listValue.unref.eachAre(t.elementType.unbox)
+    value.kind == vkList and value.listValue.unref.eachAre(t.elementType.unbox)
   of tyString: value.kind == vkString
   of tySet:
-    value.kind == vkSet and value.boxedValue.setValue.eachAre(t.elementType.unbox)
+    value.kind == vkSet and value.setValue.eachAre(t.elementType.unbox)
   of tyTable:
-    value.kind == vkTable and value.boxedValue.tableValue.eachAreTable(t.keyType.unbox, t.valueType.unbox)
+    value.kind == vkTable and value.tableValue.eachAreTable(t.keyType.unbox, t.valueType.unbox)
   of tyExpression: value.kind == vkExpression
   of tyStatement: value.kind == vkStatement
   of tyScope: value.kind == vkScope
-  of tyType: value.kind == vkType and t.typeValue.unbox.match(value.boxedValue.typeValue).matches
+  of tyType: value.kind == vkType and t.typeValue.unbox.match(value.typeValue).matches
   of tyAny: true
   of tyNone: false
   of tyUnion:
@@ -400,16 +400,51 @@ proc checkType*(value: Value, t: Type): bool =
         break
     res
   of tyNot: not value.checkType(t.notType.unbox)
-  of tyBaseType: value.getType.kind == t.baseKind # XXX unbox here is expensive
+  of tyBaseType:
+    # please remove this type eventually
+    type Res = enum unknown, knownTrue, knownFalse
+    var res = unknown
+    var vkinds: set[ValueKind]
+    template vkind(vk: ValueKind) = vkinds = {vk}
+    case t.baseKind
+    of tyNoneValue: vkind vkNone
+    of tyInt32: vkind vkInt32
+    of tyUint32: vkind vkUint32
+    of tyFloat32: vkind vkFloat32
+    of tyBool: vkind vkBool
+    of tyInt64: vkind vkInt64
+    of tyUint64: vkind vkUint64
+    of tyFloat64: vkind vkFloat64
+    of tyString: vkind vkString
+    of tyExpression: vkind vkExpression
+    of tyStatement: vkind vkStatement
+    of tyScope: vkind vkScope
+    of tyFunction: vkinds = {vkNativeFunction, vkFunction}
+    of tyTuple: vkind vkArray
+    of tyList: vkind vkList
+    of tySet: vkind vkSet
+    of tyTable: vkind vkTable
+    of tyType: vkind vkType
+    of tyAny: res = knownTrue
+    of tyNone, tyUnion, tyIntersection, tyNot, tyBaseType, tyWithProperty,
+      tyCustomMatcher, tyParameter: res = knownFalse
+    case res
+    of knownTrue: true
+    of knownFalse: false
+    of unknown: value.kind in vkinds
   of tyWithProperty:
     value.checkType(t.typeWithProperty.unbox) and value.getType.properties.hasKey(t.withProperty)
-  of tyCustomMatcher: not t.valueMatcher.isNil and t.valueMatcher(value)
+  of tyCustomMatcher: not t.valueMatcher.isNil and t.valueMatcher(value.toSmallValue)
   of tyParameter: value.checkType(t.parameter.bound.boundType)
   if result:
     for p, args in t.properties:
       if not p.valueMatcher.isNil:
-        result = result and p.valueMatcher(value, args)
+        result = result and p.valueMatcher(value.toSmallValue, args)
         if not result: return result
+
+proc checkType*(value: Value, t: Type): bool =
+  let fvo = value.toFullValueObj
+  checkType(fvo, t)
 
 type
   GenericMatchError* = object of TypeError
@@ -437,7 +472,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
       table[param] = t
   of tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64, tyTag,
+    tyInt64, tyUint64, tyFloat64,
     tyString, tyExpression, tyStatement, tyScope,
     tyAny, tyNone:
     discard # atoms
@@ -468,7 +503,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
       # wonky
       match(pattern.typeValue.unbox, t)
   of tyUnion, tyIntersection, tyNot:
-    discard # XXX what
+    discard # should not be able to match anything
   of tyWithProperty:
     if t.kind == pattern.kind:
       match(pattern.typeWithProperty, t.typeWithProperty)
@@ -489,7 +524,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     pattern = table[pattern.parameter]
   of tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64, tyTag,
+    tyInt64, tyUint64, tyFloat64,
     tyString, tyExpression, tyStatement, tyScope,
     tyAny, tyNone, tyBaseType, tyCustomMatcher:
     discard

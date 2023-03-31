@@ -50,9 +50,46 @@ proc toValue*(x: Expression): Value = withkindbox(expression, x)
 proc toValue*(x: Statement): Value = withkindbox(statement, x)
 proc toValue*(x: Scope): Value = withkindbox(scope, x)
 
+proc toFullValueObj*(x: Value): FullValueObj =
+  case x.kind
+  of vkNone: FullValueObj(kind: vkNone)
+  of vkInt32: FullValueObj(kind: vkInt32, int32Value: x.int32Value)
+  of vkUint32: FullValueObj(kind: vkUint32, uint32Value: x.uint32Value) 
+  of vkFloat32: FullValueObj(kind: vkFloat32, float32Value: x.float32Value) 
+  of vkBool: FullValueObj(kind: vkBool, boolValue: x.boolValue) 
+  of boxedValueKinds: x.boxedValue[]
+  of vkEffect: x.effectValue.unbox.toFullValueObj
+
+proc toSmallValue*(x: FullValueObj | FullValue): Value =
+  let unboxedKind = x.kind notin boxedValueKinds
+  if unboxedKind and x.type.isNil:
+    case x.kind
+    of vkNone: result = Value(kind: vkNone)
+    of vkInt32: result = Value(kind: vkInt32, int32Value: x.int32Value)
+    of vkUint32: result = Value(kind: vkUint32, uint32Value: x.uint32Value) 
+    of vkFloat32: result = Value(kind: vkFloat32, float32Value: x.float32Value) 
+    of vkBool: result = Value(kind: vkBool, boolValue: x.boolValue) 
+    of vkEffect: result = Value(kind: vkEffect, effectValue: x.effectValue)
+    of boxedValueKinds: discard # unreachable
+  else:
+    result = Value(kind: if unboxedKind: vkBoxed else: x.kind)
+    result.boxedValue = toRef x
+
+proc unboxStripType*(x: FullValueObj | FullValue): Value =
+  case x.kind
+  of vkNone: result = Value(kind: vkNone)
+  of vkInt32: result = Value(kind: vkInt32, int32Value: x.int32Value)
+  of vkUint32: result = Value(kind: vkUint32, uint32Value: x.uint32Value) 
+  of vkFloat32: result = Value(kind: vkFloat32, float32Value: x.float32Value) 
+  of vkBool: result = Value(kind: vkBool, boolValue: x.boolValue) 
+  of vkEffect: result = Value(kind: vkEffect, effectValue: x.effectValue)
+  of boxedValueKinds:
+    result = Value(kind: x.kind)
+    result.boxedValue = toRef x
+
 proc getType*(x: Value): Type
 
-proc getType*(x: FullValue): Type =
+proc getType*(x: FullValueObj): Type =
   if not x.type.isNil: return x.type[]
   case x.kind
   of vkNone: result = Ty(NoneValue)
@@ -63,8 +100,7 @@ proc getType*(x: FullValue): Type =
   of vkUint64: result = Ty(Uint64)
   of vkFloat64: result = Ty(Float64)
   of vkBool: result = Ty(Bool)
-  of vkTag: result = Ty(Tag)
-  of vkBoxed: result = getType(x.boxedValue)
+  of vkBoxed: result = getType(x.boxedValue[])
   of vkList: result = Type(kind: tyList, elementType: x.listValue.unref[0].getType.box)
   of vkString: result = Ty(String)
   of vkExpression: result = Ty(Expression)
@@ -93,7 +129,8 @@ proc getType*(x: FullValue): Type =
       result.valueType = v.getType.box
       break
   of vkEffect:
-    result = x.effectValue.unref.getType # XXX do what here
+    # probably should never be here
+    result = x.effectValue.unref.getType
 
 proc getType*(x: Value): Type =
   case x.kind
@@ -106,9 +143,10 @@ proc getType*(x: Value): Type =
   of vkFloat64: result = Ty(Float64)
   of vkBool: result = Ty(Bool)
   of boxedValueKinds - {vkInt64, vkUint64, vkFloat64}:
-    result = x.boxedValue.getType
+    result = x.boxedValue[].getType
   of vkEffect:
-    result = x.effectValue.unref.getType # XXX do what here
+    # probably should never be here
+    result = x.effectValue.unref.getType
 
 when false:
   proc copy*(value: Value): Value =

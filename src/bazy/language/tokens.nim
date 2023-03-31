@@ -11,6 +11,7 @@ type
 
   # XXX should also have filename and ending column
   # maybe separate from token or use smaller integer sizes
+  # i think just turn into ref
   TokenInfo* = tuple[line, column: int]
 
   TokenObj* = object

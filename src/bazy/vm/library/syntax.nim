@@ -10,6 +10,7 @@ module syntax:
     let st = scope.compile(args[0], +Ty(Any))
     result = toValue constant(scope.context.evaluateStatic(st.toInstruction), st.knownType)
   
+  # XXX (4) generic assignments or functions
   proc makeFn(scope: Scope, arguments: seq[Expression], body: Expression,
     name: string, returnBound: TypeBound, returnBoundSet: bool): Statement =
     let context = scope.context.childContext()

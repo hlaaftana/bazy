@@ -1,10 +1,11 @@
-import "."/[primitives, arrays, runtime, types, values, tags], ../language/[expressions, number, shortstring], std/[tables, sets, strutils]
+import "."/[primitives, arrays, runtime, types, values, ids], ../language/[expressions, number, shortstring], std/[tables, sets, strutils]
 
 when defined(gcDestructors):
   template defineProperty(name, value): untyped {.dirty.} =
     let `name`* = block:
       var propertySelf {.inject.}: Property
       propertySelf = value
+      propertySelf.id = newPropertyId()
       propertySelf
 else:
   template defineProperty(name, value): untyped =
@@ -12,10 +13,11 @@ else:
       var propertySelf {.global, inject.}: Property
       if propertySelf.isNil:
         propertySelf = value
+        propertySelf.id = newPropertyId()
       result = propertySelf
     template `name`*: Property {.inject.} = getProperty()
 
-defineProperty Meta, Property(tag: uniqueTag("Meta"),
+defineProperty Meta, Property(name: "Meta",
   argumentType: Type(kind: tyBaseType, baseKind: tyFunction),
   typeMatcher: proc (t: Type, arg: Value): TypeMatch =
     if t.properties.hasKey(propertySelf):
@@ -23,9 +25,8 @@ defineProperty Meta, Property(tag: uniqueTag("Meta"),
     else:
       tmFalse)
 
-defineProperty Fields, Property(tag: uniqueTag("Fields"),
+defineProperty Fields, Property(name: "Fields",
   argumentType: Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32)),
-  # XXX use tags for field names
   typeMatcher: proc (t: Type, arg: Value): TypeMatch =
     if t.properties.hasKey(propertySelf) and arg.boxedValue.tableValue == t.properties[propertySelf].boxedValue.tableValue:
       tmEqual

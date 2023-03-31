@@ -1,4 +1,4 @@
-import std/[tables, sets, hashes], "."/[arrays, pointertag, tags], ../language/expressions, ../util/box, ../defines
+import std/[tables, sets, hashes], "."/[arrays, pointertag, ids], ../language/expressions, ../util/box, ../defines
 export box, unbox
 
 # type system should exist for both static and runtime dispatch
@@ -14,12 +14,10 @@ type
       ## embedded effect value for exceptions/return/yield/whatever
     #vkShortestString
     #  ## word size string
-    vkBoxed
+    vkBoxed # XXX (3) maybe do BoxedInt32, BoxedUint32 etc
     vkInt64, vkUint64, vkFloat64
     vkType
       ## type value
-    vkTag
-      ## typed tag, or ID, unique per type
     vkArray
       ## like java array but typed like TS, implementation of tuples
     vkString
@@ -73,8 +71,6 @@ type
       float64Value*: float64
     of vkType:
       typeValue*: Type
-    of vkTag:
-      tagValue*: Tag
     of vkArray:
       tupleValue*: Array[Value]
     of vkString:
@@ -127,9 +123,9 @@ type
   
   Value* = ValueObj
 
-  # XXX (2) avoid DOD here but still find a way to translate this to the language
   Property* = ref object
-    tag*: Tag
+    id*: PropertyId
+    name*: string
     argumentType*: Type
     # these are supposed to act on `prop.value`:
     typeMatcher*: proc (t: Type, propVal: Value): TypeMatch
@@ -141,7 +137,7 @@ type
     # concrete
     tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64, tyTag,
+    tyInt64, tyUint64, tyFloat64,
     tyFunction, tyTuple,
     tyList,
     tyString,
@@ -159,6 +155,7 @@ type
     tyParameter
 
   TypeParameter* = ref object
+    id*: TypeParameterId # this needs to be assigned
     name*: string
     bound*: TypeBound
   
@@ -168,7 +165,7 @@ type
     case kind*: TypeKind
     of tyNoneValue,
       tyInt32, tyUint32, tyFloat32, tyBool,
-      tyInt64, tyUint64, tyFloat64, tyTag,
+      tyInt64, tyUint64, tyFloat64,
       tyString, tyExpression, tyStatement, tyScope,
       tyAny, tyNone:
       discard
@@ -411,7 +408,7 @@ type
     knownType*: Type
     stackIndex*: int
     scope*: Scope
-    # XXX make this a special hashset-like type and maybe attach it to the parameters
+    # XXX (4) maybe make this a tuple type too with signature
     genericParams*: seq[TypeParameter]
     lazyExpression*: Expression
     evaluated*: bool
@@ -419,12 +416,12 @@ type
   Context* = ref object
     ## current module or function
     imports*: seq[Context]
-      # XXX imports should not work like this/exist
+      # XXX (5) imports should not work like this/exist
       # modules should probably be like JS or lua where
       # the module creates a module object which is what gets imported
-      # closures should "copy", as in when a new stack is created
-      # it should be filled on the spot with specific variables
-      # this might mean vkReference is required
+      # stacks should never persist, persistent memory should be vkReference
+      # static memory can be tied to the Variable object
+      # static code should still run exactly like normal code
     stack*: Stack
     stackSize*: int
     top*: Scope
@@ -482,20 +479,18 @@ template mix(x) =
   mixin hash
   result = result !& hash(x)
 
-proc hash*(p: Property): Hash {.noSideEffect.} =
-  if not p.isNil:
-    mix p.tag
-  else:
-    mix pointer(nil)
-  result = !$ result
+template idObject[T: ref](t: type T) {.dirty.} =
+  proc hash*(p: t): Hash {.noSideEffect.} =
+    if not p.isNil:
+      mix p.id
+    else:
+      mix pointer(nil)
+    result = !$ result
 
-proc `==`*(a, b: Property): bool = a.isNil and b.isNil or (not a.isNil and not b.isNil and a.tag == b.tag)
+  proc `==`*(a, b: t): bool = a.isNil and b.isNil or (not a.isNil and not b.isNil and a.id == b.id)
 
-proc hash*(p: TypeParameter): Hash {.noSideEffect.} =
-  mix cast[pointer](p)
-  result = !$ result
-
-proc `==`*(a, b: TypeParameter): bool = same(a, b)
+idObject(Property)
+idObject(TypeParameter)
 
 proc hash*(v: FullValueObj): Hash {.noSideEffect.}
 proc hash*(v: Value): Hash {.noSideEffect.}
@@ -593,7 +588,6 @@ proc `$`*(value: FullValue): string =
   of vkInt64: $value.int64Value
   of vkUint64: $value.uint64Value
   of vkFloat64: $value.float64Value
-  of vkTag: $value.tagValue
   of vkList: ($value.listValue.unref)[1..^1]
   of vkString: value.stringValue.unref
   of vkArray:
@@ -620,7 +614,7 @@ proc `$`*(value: Value): string =
   of vkEffect: "Effect(" & $value.effectValue.unref & ")"
   of boxedValueKinds: $value.boxedValue
 
-proc `$`*(p: Property): string {.inline.} = $p.tag
+proc `$`*(p: Property): string {.inline.} = p.name
 
 proc `$`*(tb: TypeBound): string
 
@@ -639,7 +633,6 @@ proc `$`*(t: Type): string =
   of tyInt64: "Int64"
   of tyUint64: "Uint64"
   of tyFloat64: "Float64"
-  of tyTag: "Tag"
   of tyString: "String"
   of tyExpression: "Expression"
   of tyStatement: "Statement"

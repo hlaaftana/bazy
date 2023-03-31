@@ -1,5 +1,7 @@
 import "."/[primitives, arrays, values, types], std/[sets, tables]
 
+# XXX (5) eventually use stack machine or something for bytecode and no recursion
+
 type EffectHandler* = proc (effect: Value): bool
   ## returns true to continue execution
 
@@ -166,6 +168,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
       x.boxedValue.stringValue.unref[ins.setIndex] = result.int32Value.char
     else: discard # error
   of AddInt:
+    # XXX (3) account for boxing probably best with vkBoxedInt32
     let a = run ins.binary1
     let b = run ins.binary2
     result = toValue(a.int32Value + b.int32Value)
