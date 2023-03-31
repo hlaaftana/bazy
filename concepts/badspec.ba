@@ -1,10 +1,12 @@
 # `do` for indented block, inferred in indents outside parens etc.
+# more like punctuation than a keyword, so syntax highlighting should make it subtle
 # `foo(a, b)`, `foo.(a, b)`, `a.foo(b)`, `foo a, b` for calls
 # `a.foo b`, `(a.foo)(b)`, `a.foo.(b)` for calling `a.foo`
 # `(foo a, b)` => `((foo a), b)`, `a, b` => `(a, b)`
 # operators exist, in the usual case `foo a = b` is `foo(a = b)`
 # operators can be words, but only a predetermined list that cannot be normal identifiers
-# foo bar a, b parses as foo(bar(a), b) not foo(bar(a, b)) conflicted on this
+# foo bar a, b parses as foo(bar(a), b) not foo(bar(a, b))
+# if you want foo(bar(a, b)) do `foo do bar a, b`
 # foo bar a, b do c parses as foo(bar(a), b, c)
 
 binary_search(a, k) =

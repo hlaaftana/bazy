@@ -14,11 +14,9 @@ next(args: Arguments) =
   else for result x = ""
     quote = 0 char # calling literal with type instead of type with literal
     done = escaped = false
-    while args.index < args.str.size
+    while not done and args.index < args.str.size
       ch = args.str[args.index]
-      if done
-        break
-      else if not escaped and ch == '\\'
+      if not escaped and ch == '\\'
         escaped = true
       else if not escaped and ch == quote
         quote = 0

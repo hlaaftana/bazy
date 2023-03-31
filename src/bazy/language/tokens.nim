@@ -9,10 +9,10 @@ type
   
   CharacterTokenKind* = range[tkBackslash..tkCloseCurly]
 
-  # XXX should also have filename and ending column
-  # maybe separate from token or use smaller integer sizes
-  # i think just turn into ref
-  TokenInfo* = tuple[line, column: int]
+  # XXX should also have filename
+  TokenInfo* {.byref.} = object
+    line*: uint16
+    column*: uint8
 
   TokenObj* = object
     when doLineColumn:
@@ -55,6 +55,10 @@ const
     for sc in CharacterTokens:
       result.incl(sc)
     result
+
+proc `$`*(token: TokenInfo): string =
+  # change later?
+  result = $(line: token.line, column: token.column)
 
 proc `$`*(token: Token): string =
   result = case token.kind

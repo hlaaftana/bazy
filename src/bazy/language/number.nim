@@ -1,11 +1,12 @@
 type
-  NumberKind* = enum Integer Floating Unsigned
+  NumberKind* = enum Integer, Floating, Unsigned
 
   NumberReprObj* = object
     digits*: seq[byte]
     kind*: NumberKind
     negative*: bool
-    exp*, bits*: int
+    exp*: int16
+    bits*: uint8
 
 when defined(js):
   import ../util/objects

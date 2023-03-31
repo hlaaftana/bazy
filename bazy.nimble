@@ -18,14 +18,14 @@ when (compiles do: import nimbleutils):
 
 task docs, "build docs for all modules":
   when declared(buildDocs):
-    buildDocs(gitUrl = "https://github.com/hlaaftana/bazy")
+    buildDocs(gitUrl = "https://github.com/metagn/bazy")
   else:
     echo "docs task not implemented, need nimbleutils"
 
 task tests, "run tests for multiple backends":
   when declared(runTests):
     runTests(optionCombos = @[
-      "",
+      "--gc:refc",
       "--gc:orc",
       #"--gc:orc -d:useMalloc",
       #"--gc:orc -d:danger",

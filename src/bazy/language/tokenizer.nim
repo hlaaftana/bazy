@@ -138,8 +138,8 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
 
   var
     stage = inBase
-    lastZeros: Natural = 0
-    recordedExp = 0
+    lastZeros = 0 # Natural
+    recordedExp: int16 = 0
   
   var prevPos2: int
   when doLineColumn:
@@ -234,8 +234,9 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
     of inExp, inExpNeg:
       case c.asChar
       of '0'..'9':
-        let val = (c.byte - '0'.byte).int
-        recordedExp = recordedExp * 10 + (if stage == inExpNeg: -val else: val)
+        var val = (c.byte - '0'.byte).int16
+        if stage == inExpNeg: val = -val
+        recordedExp = recordedExp * 10 + val
       of 'i', 'I':
         result.kind = Integer
         stage = inBits
@@ -251,7 +252,7 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
     of inBits:
       case c.asChar
       of '0'..'9':
-        result.bits = (result.bits * 10) + (c.byte - '0'.byte).int
+        result.bits = (result.bits * 10) + (c.byte - '0'.byte)
       else:
         tz.resetPos()
         return
@@ -289,13 +290,21 @@ proc recordSymbolPlus*(tz: var Tokenizer, extra: char): string =
       tz.resetPos()
       return
 
+template clampType[T](val: T, newType: type): untyped =
+  newType(min(val, T(high(newType))))
+
+when defined(js):
+  template clampType[T: SomeInteger](val: T, newType: type uint32): untyped =
+    newType(val)
+
 proc nextToken*(tz: var Tokenizer): Token =
   result = Token(kind: tkNone)
   template fill(t: Token): Token =
     var tok = t
     when doLineColumn:
-      tok.info.line = ln
-      tok.info.column = cl
+      tok.info = TokenInfo(
+        line: clampType(ln, typeof(tok.info.line)),
+        column: clampType(cl, typeof(tok.info.column)))
     tz.lastKind = tok.kind
     tok
 
