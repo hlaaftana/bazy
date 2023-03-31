@@ -33,7 +33,7 @@ defineProperty Fields, Property(name: "Fields",
     else:
       tmAlmostEqual)
 
-# also Defaults purely for initialization/conversion
+# XXX (!) also Defaults purely for initialization/conversion
 
 proc newContext*(imports: seq[Context]): Context =
   result = Context(stack: Stack(), imports: imports)
@@ -599,7 +599,6 @@ proc compileBlock*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       result.knownType = element.knownType
 
 proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
-  # move some things out to procs
   case ex.kind
   of None: result = Statement(kind: skNone, knownType: Ty(None))
   of Number: result = compileNumber(ex, bound)

@@ -5,7 +5,7 @@ proc parse*(str: string): Expression =
   var tokenizer = newTokenizer(str)
   result = parser.parse(tokenizer.tokenize())
 
-when not defined(js):
+when not defined(js) and not defined(nimscript):
   import bazy/vm/[compilation, primitives, library/prelude]
 
   let Prelude* = prelude()

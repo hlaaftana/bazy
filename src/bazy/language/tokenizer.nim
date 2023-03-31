@@ -290,6 +290,7 @@ proc recordSymbolPlus*(tz: var Tokenizer, extra: char): string =
       return
 
 proc nextToken*(tz: var Tokenizer): Token =
+  result = Token(kind: tkNone)
   template fill(t: Token): Token =
     var tok = t
     when doLineColumn:

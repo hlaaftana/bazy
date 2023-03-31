@@ -201,7 +201,11 @@ else
 
   for inp, outp in tests.items:
     let parsed = parse(inp)
-    check $parsed == outp
+    let a = $parsed
+    let b = outp
+    checkpoint "parsed: " & a
+    checkpoint "expected: " & b
+    check a == b
 
 import bazy/language/shortstring
 
@@ -247,11 +251,16 @@ test "equivalent syntax":
   for a, b in equivalents.items:
     let a = reduced(parse(a))
     let b = reduced(parse(b))
-    checkpoint "a: " & a.repr
-    checkpoint "b: " & b.repr
+    let aRepr = a.repr
+    let bRepr = b.repr
+    checkpoint "a: " & aRepr
+    checkpoint "b: " & bRepr
     checkpoint "a: " & $a
     checkpoint "b: " & $b
-    check a == b
+    when defined(js):
+      check aRepr == bRepr
+    else:
+      check a == b
 
 when not defined(nimscript) and defined(testsBenchmark):
   import std/monotimes, strutils
@@ -262,6 +271,7 @@ when not defined(nimscript) and defined(testsBenchmark):
     let time = formatFloat((b.ticks - a.ticks).float / 1_000_000, precision = 2)
     echo name, " took ", time, " ms"
 else:
+  # nimscript is actually really slow here
   template bench(name, body) = body
 
 test "parse files without crashing":

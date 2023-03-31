@@ -85,7 +85,6 @@ type
       functionValue*: Function
     of vkNativeFunction:
       nativeFunctionValue*: proc (args: openarray[Value]): Value {.nimcall.}
-      # replace with single value argument?
     of vkExpression:
       expressionValue*: Expression
     of vkStatement:

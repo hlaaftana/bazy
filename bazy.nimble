@@ -27,11 +27,12 @@ task tests, "run tests for multiple backends":
     runTests(optionCombos = @[
       "",
       "--gc:orc",
-      "--gc:orc -d:useMalloc",
+      #"--gc:orc -d:useMalloc",
       #"--gc:orc -d:danger",
       #"-d:bazyUseUnicode=false",
       #"-d:bazyDoLineColumn=false"
     ])
+    runTests(@["tests/test_parser.nim"], backends = {js, nims})
   else:
     echo "tests task not implemented, need nimbleutils"
 

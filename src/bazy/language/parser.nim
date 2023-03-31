@@ -41,7 +41,7 @@ proc defaultOptions*(): ParserOptions =
     curlyBlocks: false,
     pathOperators: true,
     operatorIndentMakesBlock: true,
-    backslashLine: false,#true, # should be false
+    backslashLine: false,
     backslashPostArgument: true,
     colonPostArgument: false,
     weirdOperatorIndentUnwrap: true,
@@ -436,67 +436,19 @@ proc collectLineExpression*(exprs: sink seq[Expression], info: TokenInfo): Expre
     else:
       result = Expression(kind: OpenCall, address: callee, arguments: @[result], info: callee.info)
 
-proc recordLineLevel*(parser: var Parser, info: TokenInfo, closed = false): Expression =
-  type CommaKind = enum
+type
+  CommaKind = enum
     NoComma, CommaCall, CommaList
-  var
+  LineRecording = object
     lineExprs: seq[Expression]
     comma: CommaKind
-    waiting = false
     singleExprs: seq[Expression]
     indent: Expression
     indentIsDo: bool
     postArg: Expression
-  defer: # rather defer than put this at the end and try to put `break` everywhere
-    if singleExprs.len != 0:
-      lineExprs.add(collectLineExpression(singleExprs, info))
-      reset(singleExprs)
-    if not indent.isNil:
-      if (parser.options.operatorIndentMakesBlock or indentIsDo) and
-        lineExprs.len == 1 and lineExprs[0].kind in IndentableCallKinds:
-        if parser.options.weirdOperatorIndentUnwrap and
-          (let expandKinds =
-            if indentIsDo: {Prefix, Infix, ExpressionKind.Colon}
-            else: {Infix, ExpressionKind.Colon};
-            lineExprs[0].kind in expandKinds):
-          proc last(ex: var Expression): var Expression =
-            if ex.kind == ExpressionKind.Colon:
-              result = ex.right
-            else:
-              result = ex.arguments[^1]
-          var ex = lineExprs[0]
-          while (let last = ex.last; last.kind in expandKinds):
-            ex = last
-          if ex.last.kind in IndentableCallKinds:
-            ex.last.arguments.add(indent)
-          else:
-            (ex.last) = Expression(kind: OpenCall,
-              address: ex.last, arguments: @[indent]).inferInfo()
-        elif parser.options.makeOperatorInfixOnIndent and
-          lineExprs[0].kind in {Postfix, Prefix}:
-          if lineExprs[0].arguments.len == 1:
-            lineExprs[0] = makeInfix(lineExprs[0].address, lineExprs[0].arguments[0], indent)
-          else:
-            lineExprs[0] = Expression(kind: Infix,
-              address: lineExprs[0].address,
-              arguments: lineExprs[0].arguments & indent).inferInfo()
-        else:
-          lineExprs[0].arguments.add(indent)
-      else:
-        lineExprs.add(indent)
-    if not postArg.isNil:
-      if lineExprs[0].kind in IndentableCallKinds:
-        lineExprs[0].arguments.add(postArg)
-      else:
-        lineExprs.add(postArg)
-    if lineExprs.len == 0:
-      result = Expression(kind: ExpressionKind.None, info: info)
-    elif comma == CommaList:
-      result = Expression(kind: Comma, elements: lineExprs, info: info)
-    elif lineExprs.len == 1:
-      result = lineExprs[0]
-    else:
-      result = Expression(kind: OpenCall, address: lineExprs[0], arguments: lineExprs[1..^1], info: info)
+
+proc recordLineLevelUnfinished*(parser: var Parser, info: TokenInfo, closed = false): LineRecording =
+  var waiting = false
   template finish = return
   for token in parser.nextTokens:
     case token.kind
@@ -506,17 +458,17 @@ proc recordLineLevel*(parser: var Parser, info: TokenInfo, closed = false): Expr
         # outside line scope
         finish()
       waiting = true
-      if singleExprs.len != 0: # consider ,, typo as ,
-        let ex = collectLineExpression(singleExprs, info)
-        reset(singleExprs)
-        if not closed and comma == NoComma and ex.kind == OpenCall:
+      if result.singleExprs.len != 0: # consider ,, typo as ,
+        let ex = collectLineExpression(move result.singleExprs, info)
+        when defined(nimscript): result.singleExprs = @[]
+        if not closed and result.comma == NoComma and ex.kind == OpenCall:
           assert ex.arguments.len == 1, "opencall with more than 1 argument should be impossible before comma"
-          comma = CommaCall
-          lineExprs.add(ex.address)
-          lineExprs.add(ex.arguments)
+          result.comma = CommaCall
+          result.lineExprs.add(ex.address)
+          result.lineExprs.add(ex.arguments)
         else:
-          if comma == NoComma: comma = CommaList
-          lineExprs.add(ex)
+          if result.comma == NoComma: result.comma = CommaList
+          result.lineExprs.add(ex)
     of tkNewline, tkIndent:
       if waiting or (token.kind == tkNewline and closed):
         if token.kind == tkNewline:
@@ -532,7 +484,7 @@ proc recordLineLevel*(parser: var Parser, info: TokenInfo, closed = false): Expr
           of tkNone, tkWhitespace, tkNewline: discard
           elif tok.kind == tkIndent and not indentRecorded:
             inc parser.pos
-            indent = parser.recordBlockLevel(indented = true)
+            result.indent = parser.recordBlockLevel(indented = true)
             indentRecorded = true
             lastPos = parser.pos
             parser.conservePosNextIteration()
@@ -551,9 +503,9 @@ proc recordLineLevel*(parser: var Parser, info: TokenInfo, closed = false): Expr
               else: break
             let value = parser.recordLineLevel(tok.info, closed) # closed is clearly false here
             if name.isNil:
-              postArg = value
+              result.postArg = value
             else:
-              postArg = Expression(kind: ExpressionKind.Colon, left: name, right: value, info: tok.info)
+              result.postArg = Expression(kind: ExpressionKind.Colon, left: name, right: value, info: tok.info)
             lastPos = parser.pos
             parser.conservePosNextIteration()
           else:
@@ -569,17 +521,17 @@ proc recordLineLevel*(parser: var Parser, info: TokenInfo, closed = false): Expr
       # outside line scope
       finish()
     of tkColon:
-      singleExprs.add(newSymbolExpression(short":").withInfo(token.info))
+      result.singleExprs.add(newSymbolExpression(short":").withInfo(token.info))
     elif token.kind == tkBackslash and parser.options.backslashParenLine and
       parser.pos + 1 < parser.tokens.len and
       parser.tokens[parser.pos + 1].kind == tkOpenParen:
       inc parser.pos, 2
-      singleExprs.add(parser.recordLineLevel(token.info, closed = false))
+      result.singleExprs.add(parser.recordLineLevel(token.info, closed = false))
       assert parser.tokens[parser.pos].kind == tkCloseParen, "wrong delimiter for backslash paren line"
       inc parser.pos
     elif token.kind == tkBackslash and parser.options.backslashLine:
       inc parser.pos
-      singleExprs.add(parser.recordLineLevel(token.info, closed))
+      result.singleExprs.add(parser.recordLineLevel(token.info, closed))
       finish()
     elif token.kind == tkSymbol and token.short == short"do":
       waiting = false
@@ -587,15 +539,70 @@ proc recordLineLevel*(parser: var Parser, info: TokenInfo, closed = false): Expr
       while parser.tokens[parser.pos].kind in {tkNewline, tkWhitespace}:
         # skip newlines to not confuse line recorder
         inc parser.pos
-      indent = parser.recordWideLine(token.info)
-      indentIsDo = true
+      result.indent = parser.recordWideLine(token.info)
+      result.indentIsDo = true
       finish()
     else:
       let ex = parser.recordSingle(token.info)
       waiting = false # symbols do not bypass this
-      singleExprs.add(ex)
+      result.singleExprs.add(ex)
       parser.conservePosNextIteration()
   finish()
+
+proc finishLineRecording*(parser: var Parser, info: TokenInfo, recording: sink LineRecording): Expression =
+  if recording.singleExprs.len != 0:
+    recording.lineExprs.add(collectLineExpression(move recording.singleExprs, info))
+    when defined(nimscript): recording.singleExprs = @[]
+  if not recording.indent.isNil:
+    if (parser.options.operatorIndentMakesBlock or recording.indentIsDo) and
+      recording.lineExprs.len == 1 and recording.lineExprs[0].kind in IndentableCallKinds:
+      if parser.options.weirdOperatorIndentUnwrap and
+        (let expandKinds =
+          if recording.indentIsDo: {Prefix, Infix, ExpressionKind.Colon}
+          else: {Infix, ExpressionKind.Colon};
+          recording.lineExprs[0].kind in expandKinds):
+        proc last(ex: var Expression): var Expression =
+          if ex.kind == ExpressionKind.Colon:
+            result = ex.right
+          else:
+            result = ex.arguments[^1]
+        var ex = recording.lineExprs[0]
+        while (let last = ex.last; last.kind in expandKinds):
+          ex = last
+        if ex.last.kind in IndentableCallKinds:
+          ex.last.arguments.add(recording.indent)
+        else:
+          (ex.last) = Expression(kind: OpenCall,
+            address: ex.last, arguments: @[recording.indent]).inferInfo()
+      elif parser.options.makeOperatorInfixOnIndent and
+        (let ex = recording.lineExprs[0]; ex.kind in {Postfix, Prefix}):
+        if ex.arguments.len == 1:
+          recording.lineExprs[0] = makeInfix(ex.address, ex.arguments[0], recording.indent)
+        else:
+          recording.lineExprs[0] = Expression(kind: Infix,
+            address: ex.address,
+            arguments: ex.arguments & recording.indent).inferInfo()
+      else:
+        recording.lineExprs[0].arguments.add(recording.indent)
+    else:
+      recording.lineExprs.add(recording.indent)
+  if not recording.postArg.isNil:
+    if recording.lineExprs[0].kind in IndentableCallKinds:
+      recording.lineExprs[0].arguments.add(recording.postArg)
+    else:
+      recording.lineExprs.add(recording.postArg)
+  if recording.lineExprs.len == 0:
+    result = Expression(kind: ExpressionKind.None, info: info)
+  elif recording.comma == CommaList:
+    result = Expression(kind: Comma, elements: recording.lineExprs, info: info)
+  elif recording.lineExprs.len == 1:
+    result = recording.lineExprs[0]
+  else:
+    result = Expression(kind: OpenCall, address: recording.lineExprs[0], arguments: recording.lineExprs[1..^1], info: info)
+
+proc recordLineLevel*(parser: var Parser, info: TokenInfo, closed = false): Expression =
+  var recording = recordLineLevelUnfinished(parser, info, closed)
+  result = finishLineRecording(parser, info, recording)
 
 proc parse*(tokens: sink seq[Token]): Expression =
   var parser = newParser(tokens)
