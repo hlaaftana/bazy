@@ -30,6 +30,7 @@ type
       backslashParenLine*
     : bool
     postArgumentColonKeywords*: seq[ShortString] # performance hazard
+    postArgumentCallKeywords*: seq[ShortString]
 
   Parser* = ref object
     tokens*: seq[Token]
@@ -485,28 +486,39 @@ proc recordLineLevelUnfinished*(parser: var Parser, info: Info, closed = false):
             indentRecorded = true
             lastPos = parser.pos
             parser.conservePosNextIteration()
-          elif (parser.options.backslashPostArgument and tok.kind == tkBackslash) or
-            (parser.options.postArgumentColonKeywords.len != 0 and tok.kind == tkSymbol and
-              tok.short in parser.options.postArgumentColonKeywords):
+          else:
+            type PostArgumentKind = enum backslash, colon, call
+            let postArgKind =
+              if parser.options.backslashPostArgument and tok.kind == tkBackslash:
+                backslash
+              elif parser.options.postArgumentColonKeywords.len != 0 and tok.kind == tkSymbol and
+                tok.short in parser.options.postArgumentColonKeywords:
+                colon
+              elif parser.options.postArgumentCallKeywords.len != 0 and tok.kind == tkSymbol and
+                tok.short in parser.options.postArgumentCallKeywords:
+                call
+              else:
+                break
             let name =
-              if tok.kind == tkSymbol:
+              if postArgKind == colon:
                 Expression(kind: Name, identifier: $tok.short, info: tok.info)
               else:
                 nil
-            inc parser.pos
-            for tok in parser.nextTokens:
-              case tok.kind
-              of tkNone, tkWhitespace, tkNewline: discard
-              else: break
-            let value = parser.recordLineLevel(tok.info, closed) # closed is clearly false here
-            if name.isNil:
-              result.postArg = value
+            if postArgKind == call:
+              parser.tokens[parser.pos] = Token(kind: tkWord, raw: $tok.short, quoted: true, info: tok.info)
             else:
+              inc parser.pos
+              for tok in parser.nextTokens:
+                case tok.kind
+                of tkNone, tkWhitespace, tkNewline: discard
+                else: break
+            let value = parser.recordLineLevel(tok.info, closed) # closed is clearly false here
+            if postArgKind == colon:
               result.postArg = Expression(kind: ExpressionKind.Colon, left: name, right: value, info: tok.info)
+            else:
+              result.postArg = value
             lastPos = parser.pos
             parser.conservePosNextIteration()
-          else:
-            break
         parser.pos = lastPos
         finish()
       waiting = false

@@ -8,7 +8,7 @@ type
     line*, column*: uint16
 
 proc `==`*(a, b: CachedFile): bool {.borrow.}
-template hash*(a: CachedFile): bool = hash(uint32(a))
+template hash*(a: CachedFile): Hash = hash(uint32(a))
 
 var
   fileCacheVar: Table[CachedFile, tuple[filename: string, filenameHash: Hash]] # !global

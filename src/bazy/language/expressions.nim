@@ -69,7 +69,7 @@ proc `[]`*(ex: Expression, i: int): Expression =
     if i == 0: ex.address else: ex.arguments[i - 1]
   of Comma, Tuple, Array, Set: ex.elements[i]
   of Block, SemicolonBlock: ex.statements[i]
-  else: assert false; nil # unreachable
+  else: assert false; nil # invalid
 
 proc withInfo*(ex: sink Expression, info: Info): Expression {.inline.} =
   result = ex

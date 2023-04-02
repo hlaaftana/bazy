@@ -64,7 +64,7 @@ when not defined(js) and not defined(nimscript):
         of "parse":
           var
             input, outputFile: string
-            binary: bool
+            binary, repr: bool
           var i = 1
           while i < params.len:
             template nextOrFail(message: string = "expected argument"): string =
@@ -78,9 +78,10 @@ when not defined(js) and not defined(nimscript):
             of "--expression", "-e": input = nextOrFail("expected expression")
             of "--output", "--out", "-o": outputFile = nextOrFail("expected output file")
             of "--binary", "-b": binary = true
+            of "--repr", "-r": repr = true
             inc i
           let ex = parse(input)
-          let res = if binary: $binary(ex) else: $ex
+          let res = if binary: $binary(ex) elif repr: repr(ex) else: $ex
           if outputFile == "": stdout.write(res)
           else: writeFile(outputFile, res)
         else: discard
