@@ -192,7 +192,7 @@ proc repr*(ex: Expression): string {.noSideEffect.}  =
 
 import unicode
 
-proc unescape*(s: sink string): string =
+proc unescape*(s: string): string =
   # result.len <= s.len
   # if result.len == s.len, result == s
   var

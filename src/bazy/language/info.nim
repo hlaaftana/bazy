@@ -31,4 +31,3 @@ proc `$`*(a: CachedFile): string =
 
 proc `$`*(info: Info): string =
   result = $info.file & "(" & $info.line & ", " & $info.column
-    
