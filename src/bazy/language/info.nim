@@ -10,8 +10,13 @@ type
 proc `==`*(a, b: CachedFile): bool {.borrow.}
 template hash*(a: CachedFile): Hash = hash(uint32(a))
 
+when defined(nimscript):
+  {.pragma: notCompileTime, compileTime.}
+else:
+  {.pragma: notCompileTime.}
+
 var
-  fileCacheVar: Table[CachedFile, tuple[filename: string, filenameHash: Hash]] # !global
+  fileCacheVar {.notCompileTime.}: Table[CachedFile, tuple[filename: string, filenameHash: Hash]] # !global
 
 proc getCachedFile*(filename: string): CachedFile =
   let hash = hash(filename)
