@@ -1,4 +1,4 @@
-import number, shortstring, tokens, ../defines, std/strutils
+import number, shortstring, tokens, ../defines, std/strutils, info
 
 when useUnicode:
   import std/unicode
@@ -29,6 +29,7 @@ else:
 
 type
   TokenizerOptions* = object
+    file*: CachedFile
     symbolWords*: seq[ShortString]
     stringBackslashEscape*, stringQuoteEscape*: bool
     backslashBreakNewline*, commaIgnoreIndent*: bool
@@ -302,7 +303,8 @@ proc nextToken*(tz: var Tokenizer): Token =
   template fill(t: Token): Token =
     var tok = t
     when doLineColumn:
-      tok.info = TokenInfo(
+      tok.info = Info(
+        file: tz.options.file,
         line: clampType(ln, typeof(tok.info.line)),
         column: clampType(cl, typeof(tok.info.column)))
     tz.lastKind = tok.kind
@@ -453,7 +455,7 @@ proc nextToken*(tz: var Tokenizer): Token =
         if c == '`':
           add Token(kind: tkWord, raw: s, quoted: true)
         else:
-          add Token(kind: tkString, content: s)
+          add Token(kind: tkString, content: s, singleQuote: c == '\'')
       of '0'..'9':
         tz.resetPos()
         let n = recordNumber(tz)

@@ -1,4 +1,4 @@
-import shortstring, number, tokens, operators, ../util/objects, ../defines
+import shortstring, number, operators, ../util/objects, ../defines, info
 export same
 
 type
@@ -15,13 +15,14 @@ type
     Block, SemicolonBlock
   Expression* {.acyclic.} = ref object
     when doLineColumn:
-      info*: TokenInfo
+      info*: Info
     case kind*: ExpressionKind
     of None: discard
     of Number:
       number*: NumberRepr
     of String:
       str*: string
+      singleQuote*: bool
     of Name:
       identifier*: string
     of Symbol:
@@ -70,7 +71,7 @@ proc `[]`*(ex: Expression, i: int): Expression =
   of Block, SemicolonBlock: ex.statements[i]
   else: assert false; nil # unreachable
 
-proc withInfo*(ex: sink Expression, info: TokenInfo): Expression {.inline.} =
+proc withInfo*(ex: sink Expression, info: Info): Expression {.inline.} =
   result = ex
   when doLineColumn:
     result.info = info

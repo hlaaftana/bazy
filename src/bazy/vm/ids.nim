@@ -9,7 +9,7 @@ template id(kind) {.dirty.} =
   proc hash*(a: `kind Id`): Hash {.borrow.}
   # 0 reserved for none values
   # can change with something else later
-  var `counter kind`: IdImpl = 0
+  var `counter kind`: IdImpl = 0 # !global
   proc `new kind Id`*(): `kind Id` =
     inc `counter kind`
     `kind Id`(`counter kind`)

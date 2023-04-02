@@ -1,5 +1,8 @@
 import number, shortstring, ../defines
 
+when doLineColumn:
+  import info
+
 type
   TokenKind* = enum
     tkNone, tkWhitespace, tkIndent, tkIndentBack, tkNewLine
@@ -8,18 +11,16 @@ type
     tkString, tkNumber, tkWord, tkSymbol
   
   CharacterTokenKind* = range[tkBackslash..tkCloseCurly]
-
-  # XXX should also have filename
-  TokenInfo* {.byref.} = object
-    line*: uint16
-    column*: uint8
+  
+  QuoteKind* = enum singleQuote, doubleQuote
 
   TokenObj* = object
     when doLineColumn:
-      info*: TokenInfo
+      info*: Info
     case kind*: TokenKind
     of tkString:
       content*: string
+      singleQuote*: bool
     of tkNumber:
       num*: NumberRepr
     of tkWord:
@@ -28,6 +29,8 @@ type
     of tkSymbol:
       short*: ShortString
     else: discard
+
+when false: {.hint: $sizeof(TokenObj).}
 
 # reduces copying on JS, not sure if improves performance on C
 when refToken:
@@ -56,10 +59,6 @@ const
       result.incl(sc)
     result
 
-proc `$`*(token: TokenInfo): string =
-  # change later?
-  result = $(line: token.line, column: token.column)
-
 proc `$`*(token: Token): string =
   result = case token.kind
   of tkNone: "<none>"
@@ -69,7 +68,9 @@ proc `$`*(token: Token): string =
   of tkNewLine: "\p"
   of tkBackslash..tkCloseCurly:
     $CharacterTokens[token.kind]
-  of tkString: "\"" & token.content & "\""
+  of tkString:
+    let c = [false: '"', true: '\''][token.singleQuote]
+    c & token.content & c
   of tkNumber: $token.num
   of tkWord: token.raw
   of tkSymbol: $token.short

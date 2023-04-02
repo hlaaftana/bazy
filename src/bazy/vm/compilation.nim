@@ -2,7 +2,7 @@ import "."/[primitives, arrays, runtime, types, values, ids], ../language/[expre
 
 when defined(gcDestructors):
   template defineProperty(name, value): untyped {.dirty.} =
-    let `name`* = block:
+    let `name`* = block: # !global
       var propertySelf {.inject.}: Property
       propertySelf = value
       propertySelf.id = newPropertyId()

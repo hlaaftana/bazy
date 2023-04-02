@@ -1,4 +1,4 @@
-import shortstring, tokens, expressions, operators
+import shortstring, tokens, expressions, operators, info
 
 #[
 
@@ -58,18 +58,15 @@ iterator nextTokens*(p: var Parser): Token =
     yield t
     inc p.pos
   
-proc info*(p: var Parser): TokenInfo {.inline.} =
+proc info*(p: var Parser): Info {.inline.} =
   p.tokens[p.pos].info
 
 template conservePosNextIteration(p: var Parser) =
   dec p.pos
 
-proc makeStringExpression*(s: sink string): Expression {.inline.} =
-  Expression(kind: String, str: unescape(s))
+proc recordLineLevel*(parser: var Parser, info: Info, closed = false): Expression
 
-proc recordLineLevel*(parser: var Parser, info: TokenInfo, closed = false): Expression
-
-proc recordWideLine*(parser: var Parser, info: TokenInfo, closed = false): Expression =
+proc recordWideLine*(parser: var Parser, info: Info, closed = false): Expression =
   var s: seq[Expression]
   var semicoloned = false
   for t in parser.nextTokens:
@@ -119,7 +116,7 @@ proc recordBlockLevel*(parser: var Parser, indented = false): Expression =
       parser.conservePosNextIteration()
     reset backslashNames
 
-proc recordBrack*(parser: var Parser, info: TokenInfo): Expression =
+proc recordBrack*(parser: var Parser, info: Info): Expression =
   var s: seq[Expression]
   var ended = false
   for t in parser.nextTokens:
@@ -137,7 +134,7 @@ proc recordBrack*(parser: var Parser, info: TokenInfo): Expression =
   assert ended, "missing ending brack"
   Expression(kind: Array, elements: s, info: info)
 
-proc recordParen*(parser: var Parser, info: TokenInfo): Expression =
+proc recordParen*(parser: var Parser, info: Info): Expression =
   var commad = false
   var s: seq[Expression]
   var ended = false
@@ -161,7 +158,7 @@ proc recordParen*(parser: var Parser, info: TokenInfo): Expression =
   #elif not commad and s.len == 0: Expression(kind: ExpressionKind.None)
   else: Expression(kind: Tuple, elements: s, info: info)
 
-proc recordCurly*(parser: var Parser, info: TokenInfo): Expression =
+proc recordCurly*(parser: var Parser, info: Info): Expression =
   var s: seq[Expression]
   var commad = false
   var ended = false
@@ -182,7 +179,7 @@ proc recordCurly*(parser: var Parser, info: TokenInfo): Expression =
   if commad: Expression(kind: Set, elements: s, info: info)
   else: Expression(kind: Block, statements: s, info: info)
 
-proc recordSingle*(parser: var Parser, info: TokenInfo): Expression =
+proc recordSingle*(parser: var Parser, info: Info): Expression =
   # +a is a path
   # a.b[c] is a path
   # a+b/c is a path and implies (a + b) / c
@@ -225,10 +222,10 @@ proc recordSingle*(parser: var Parser, info: TokenInfo): Expression =
         finish()
       let ex = case token.kind
         of tkString:
-          if lastDot:
-            Expression(kind: String, str: unescape(token.content), info: token.info)
-          else:
-            Expression(kind: String, str: token.content, info: token.info)
+          Expression(kind: String,
+            str: if result.isNil or lastDot: unescape(token.content) else: token.content,
+            singleQuote: token.singleQuote,
+            info: token.info)
         of tkNumber: Expression(kind: Number, number: token.num, info: token.info)
         of tkWord: Expression(kind: Name, identifier: token.raw, info: token.info)
         else: nil
@@ -415,7 +412,7 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
     if not e.isNil:
       result.add(e)
 
-proc collectLineExpression*(exprs: sink seq[Expression], info: TokenInfo): Expression =
+proc collectLineExpression*(exprs: sink seq[Expression], info: Info): Expression =
   if exprs.len == 0: return Expression(kind: ExpressionKind.None, info: info)
   var terms = reduceOperators(exprs)
   result = terms.pop
@@ -447,7 +444,7 @@ type
     indentIsDo: bool
     postArg: Expression
 
-proc recordLineLevelUnfinished*(parser: var Parser, info: TokenInfo, closed = false): LineRecording =
+proc recordLineLevelUnfinished*(parser: var Parser, info: Info, closed = false): LineRecording =
   var waiting = false
   template finish = return
   for token in parser.nextTokens:
@@ -549,7 +546,7 @@ proc recordLineLevelUnfinished*(parser: var Parser, info: TokenInfo, closed = fa
       parser.conservePosNextIteration()
   finish()
 
-proc finishLineRecording*(parser: var Parser, info: TokenInfo, recording: sink LineRecording): Expression =
+proc finishLineRecording*(parser: var Parser, info: Info, recording: sink LineRecording): Expression =
   if recording.singleExprs.len != 0:
     recording.lineExprs.add(collectLineExpression(move recording.singleExprs, info))
     when defined(nimscript): recording.singleExprs = @[]
@@ -600,7 +597,7 @@ proc finishLineRecording*(parser: var Parser, info: TokenInfo, recording: sink L
   else:
     result = Expression(kind: OpenCall, address: recording.lineExprs[0], arguments: recording.lineExprs[1..^1], info: info)
 
-proc recordLineLevel*(parser: var Parser, info: TokenInfo, closed = false): Expression =
+proc recordLineLevel*(parser: var Parser, info: Info, closed = false): Expression =
   var recording = recordLineLevelUnfinished(parser, info, closed)
   result = finishLineRecording(parser, info, recording)
 
