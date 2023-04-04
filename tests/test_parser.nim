@@ -197,6 +197,8 @@ else
   e
 )), else: f)""",
     "foo(a \"a\" \"abcd\")": "foo(a(\"a\"(\"abcd\")))",
+    "a(b, c) -> d = e; a(b, c) -> d => e = f(g, h) -> i => j":
+      "(((a(b, c) -> d) = e); ((a(b, c) -> d) => (e = ((f(g, h) -> i) => j))))"
   }
 
   for inp, outp in tests.items:

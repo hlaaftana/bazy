@@ -14,7 +14,10 @@ type
     Accusative # ? @ etc
     Separation # , maybe
     Assignment
-    Lambda
+    Lambda # should not be different from Assignment, i.e.
+    # (a, b) => c = (d, e) => f
+    # should be (a, b) => ((c = (d, e) => f))
+    # not (a, b) => ((c = (d, e)) => f)
     Statement # postfix if/for
     None
   
@@ -60,8 +63,10 @@ proc precedence*(symbol: ShortString): Precedence =
   of short"and", short"&&": And
   of short"or", short"||": Or
   of short"for", short"if", short"while", short"unless", short"until", short"do": Statement # not sure if these can be keywords
-  elif (L = symbol.len; L > 1 and symbol[L - 2 .. L - 1] in [short"=>", short"->"]):
-    Lambda
+  elif (L = symbol.len; L > 1 and symbol[L - 2 .. L - 1] == short"=>"):
+    Assignment
+  elif L > 1 and symbol[L - 2 .. L - 1] == short"->":
+    Separation
   else:
     case symbol[0]
     of '^': Exponent
