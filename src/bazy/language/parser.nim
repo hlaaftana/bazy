@@ -8,8 +8,6 @@ notes:
 * some kind of delimiter counter/stack on parser object would stop infinite loops from errors
 * keep track of indents with a counter (maybe not)
 * maybe make distinction between indent and normal argument, or `do` and indent, no idea
-* maybe operators like <| or god versions like <-| accept commands with commas on left hand side
-  (commands-after-operators already works on the right hand side but without commas)
 * maybe make commas and semicolons operators, this would depend on
   command-after-operator transformation for `a b, c d`
   these would not be infixes, they would be one list of expressions
@@ -332,30 +330,33 @@ proc reduceOperators*(exprs: sink seq[Expression], lowestKind = low(Precedence))
       e.kind == Symbol and e.precedence == precedence
     let assoc = Associativities[prec]
     var mustPrefix = true
-    var prefixStack: seq[Expression]
+    var
+      prefixStack: seq[Expression]
+      prefixStackLast = -1
     var i = 0
     while i < exprs.len:
       var e = exprs[i]
       if e.isNil: discard
       elif e.isOperator:
         if mustPrefix:
+          prefixStackLast = i
           prefixStack.add(e)
         mustPrefix = true
       else:
-        let psl = prefixStack.len
-        while prefixStack.len != 0:
-          e = Expression(kind: Prefix, address: prefixStack.pop, arguments: @[e]).inferInfo()
-        for j in i - psl ..< i:
-          delete exprs[j]
+        for j in countdown(prefixStackLast, 0):
+          if not exprs[j].isNil:
+            e = Expression(kind: Prefix, address: move exprs[j], arguments: @[e]).inferInfo()
+            delete exprs[j]
         exprs[i] = e
         mustPrefix = false
+        prefixStack = @[]
       inc i
     if mustPrefix:
       let startIndex = max(0, exprs.len - prefixStack.len - 2)
       var e = exprs[startIndex]
-      for i in startIndex + 1 ..< exprs.len:
-        e = Expression(kind: Postfix, address: exprs[i], arguments: @[e]).inferInfo()
-        delete exprs[i]
+      for j in startIndex + 1 ..< exprs.len:
+        e = Expression(kind: Postfix, address: move exprs[j], arguments: @[e]).inferInfo()
+        delete exprs[j]
       exprs[startIndex] = e
     case assoc
     of Left:
@@ -625,6 +626,15 @@ proc parse*(tokens: sink seq[Token]): Expression =
 
 when isMainModule:
   import tokenizer
+  var t = newTokenizer("var a = b, c = d\n  e")
+  t.options.symbolWords.add(short"var")
+  var p = newParser(t.tokenize)
+  p.options.precedence = proc (s: ShortString): Precedence =
+    if s == short"var":
+      Statement
+    else:
+      s.precedence
+  echo p.recordBlockLevel.repr
 
   #echo parse(tokenize(readFile("concepts/test.ba")))
 
@@ -746,7 +756,6 @@ else
   e
   f
 """
-  else:
     tp """
 try do
   a
