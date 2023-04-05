@@ -180,7 +180,7 @@ proc recordCurly*(parser: var Parser, info: Info): Expression =
       s.add(parser.recordWideLine(t.info, closed = not parser.options.curlyBlocks or commad))
       parser.conservePosNextIteration()
   assert ended, "missing ending curly"
-  if commad: Expression(kind: Set, elements: s, info: info)
+  if not parser.options.curlyBlocks or commad: Expression(kind: Set, elements: s, info: info)
   else: Expression(kind: Block, statements: s, info: info)
 
 proc recordSingle*(parser: var Parser, info: Info): Expression =
