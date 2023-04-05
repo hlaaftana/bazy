@@ -31,6 +31,7 @@ type
     : bool
     postArgumentColonKeywords*: seq[ShortString] # performance hazard
     postArgumentCallKeywords*: seq[ShortString]
+    precedence*: proc (symbol: ShortString): Precedence
 
   Parser* = ref object
     tokens*: seq[Token]
@@ -52,6 +53,10 @@ proc defaultOptions*(): ParserOptions =
 
 proc newParser*(tokens: sink seq[Token] = @[], options = defaultOptions()): Parser {.inline.} =
   Parser(tokens: tokens, options: options)
+
+proc newSymbolExpression*(p: Parser, s: ShortString): Expression {.inline.} =
+  let prec = if p.options.precedence.isNil: s.precedence else: p.options.precedence(s)
+  Expression(kind: Symbol, symbol: s, precedence: prec)
 
 iterator nextTokens*(p: var Parser): Token =
   while p.pos < p.tokens.len:
@@ -203,7 +208,7 @@ proc recordSingle*(parser: var Parser, info: Info): Expression =
       result = Expression(kind: PathPrefix, address: precedingSymbol, arguments: @[result], info: info)
     if precedingDot:
       result = Expression(kind: PathPrefix,
-        address: newSymbolExpression(short".").withInfo(info),
+        address: parser.newSymbolExpression(short".").withInfo(info),
         arguments: @[result], info: info)
   template finish = return
   for token in parser.nextTokens:
@@ -287,7 +292,7 @@ proc recordSingle*(parser: var Parser, info: Info): Expression =
     of tkSymbol, tkBackslash:
       if lastWhitespace and not lastDot:
         finish()
-      let ex = newSymbolExpression(
+      let ex = parser.newSymbolExpression(
         if token.kind == tkSymbol: token.short
         else: short"\\").withInfo(token.info)
       if result.isNil:
@@ -459,7 +464,8 @@ proc recordLineLevelUnfinished*(parser: var Parser, info: Info, closed = false):
       if result.singleExprs.len != 0: # consider ,, typo as ,
         let ex = collectLineExpression(move result.singleExprs, info)
         when defined(nimscript): result.singleExprs = @[]
-        if not closed and result.comma == NoComma and ex.kind == OpenCall:
+        if not closed and result.comma == NoComma and (ex.kind == OpenCall or
+          (ex.kind == Prefix and ex.address.kind == Symbol and ex.address.precedence == Statement)):
           assert ex.arguments.len == 1, "opencall with more than 1 argument should be impossible before comma"
           result.comma = CommaCall
           result.lineExprs.add(ex.address)
@@ -530,7 +536,7 @@ proc recordLineLevelUnfinished*(parser: var Parser, info: Info, closed = false):
       # outside line scope
       finish()
     of tkColon:
-      result.singleExprs.add(newSymbolExpression(short":").withInfo(token.info))
+      result.singleExprs.add(parser.newSymbolExpression(short":").withInfo(token.info))
     elif token.kind == tkBackslash and parser.options.backslashParenLine and
       parser.pos + 1 < parser.tokens.len and
       parser.tokens[parser.pos + 1].kind == tkOpenParen:
