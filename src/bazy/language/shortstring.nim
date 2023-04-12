@@ -3,12 +3,12 @@ runnableExamples:
     for s in ["", "a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh"]:
       block:
         let ss = s.toShortString
-        doAssert $ss == s
+        doAssert $ss == s, $(ss, s)
         for i in 0 ..< s.len:
           doAssert s[i] == ss[i]
       block:
         let ss = s.toShortString(optimized = false)
-        doAssert $ss == s
+        doAssert $ss == s, $(ss, s)
         for i in 0 ..< s.len:
           doAssert s[i] == ss[i]
     doAssert short"ab" < short"abc"
@@ -74,15 +74,19 @@ template set(ss: var ShortString, i: int, c: char) =
 
 proc `[]`*(ss: ShortString, i: int): char {.inline.} =
   rangeCheck i >= 0 and i < shortStringMaxSize
-  get(ss, i)
+  {.push checks: off.}
+  result = get(ss, i)
+  {.pop.}
 
 proc `[]=`*(ss: var ShortString, i: int, c: char) {.inline.} =
   rangeCheck i >= 0 and i < shortStringMaxSize
+  {.push checks: off.}
   set(ss, i, c)
+  {.pop.}
 
 proc len*(ss: ShortString): int =
   # unrolled loop
-  {.push rangeChecks: off.}
+  {.push checks: off.}
   template doIndex(i: int) =
     if get(ss, i) == char(0):
       return i
@@ -106,19 +110,23 @@ template `[]=`*(ss: var ShortString, i: BackwardsIndex, c: char) =
 proc `[]`*(ss: ShortString, sl: Slice[int]): ShortString {.inline.} =
   rangeCheck sl.a >= 0 and sl.a < shortStringMaxSize and sl.b >= 0 and sl.b < shortStringMaxSize
   when shortStringIsArray:
+    {.push checks: off.}
     for i in sl.a .. sl.b:
       set(result, i - sl.a, get(ss, i))
+    {.pop.}
   else:
     ShortString((ss.uint shl (sl.a * charBits)) shr ((sl.len - sl.b + sl.a - 1) * charBits))
 
 proc `[]=`*(ss: var ShortString, sl: Slice[int], ss2: ShortString) {.inline.} =
   rangeCheck sl.a >= 0 and sl.a < shortStringMaxSize and sl.b >= 0 and sl.b < shortStringMaxSize
+  {.push checks: off.}
   for i in sl:
     set(ss, i, get(ss2, i - sl.a))
+  {.pop.}
 
 iterator items*(ss: ShortString): char =
   # not unrolled because nim doesnt allow return
-  {.push rangeChecks: off.}
+  {.push checks: off.}
   var i = 0
   while i < shortStringMaxSize:
     let c = get(ss, i)
@@ -166,13 +174,14 @@ when not defined(js) and not defined(nimscript):
       else:
         x
 
-proc `$`*(ss: ShortString): string =
+proc `$`*(ss: ShortString, optimized: static bool = true): string =
+  {.push checks: off.}
   when nimvm:
     result = newStringOfCap(sizeof(ShortString))
     for c in ss.items:
       result.add(c)
   else:
-    when defined(js) or defined(nimscript) or (cpuEndian == bigEndian and not declared(swapEndian)):
+    when defined(js) or defined(nimscript) or not optimized or (cpuEndian == bigEndian and not declared(swapEndian)):
       result = newStringOfCap(sizeof(ShortString))
       for c in ss.items:
         result.add(c)
@@ -183,9 +192,10 @@ proc `$`*(ss: ShortString): string =
       else:
         result = newString(ss.len)
         cast[ptr uint](addr result[0])[] = toLittleEndian(ss.uint)
+  {.pop.}
 
 iterator mitems*(ss: var ShortString): var char =
-  {.push rangeChecks: off.}
+  {.push checks: off.}
   var i = 0
   while i < shortStringMaxSize:
     var c = get(ss, i)
@@ -197,7 +207,7 @@ iterator mitems*(ss: var ShortString): var char =
   {.pop.}
 
 proc add*(ss: var ShortString, c: char) =
-  {.push rangeChecks: off.}
+  {.push checks: off.}
   var i = 0
   while i < shortStringMaxSize:
     let c = get(ss, i)
@@ -210,6 +220,7 @@ proc add*(ss: var ShortString, c: char) =
 
 proc toShortString*(s: openarray[char], optimized: static bool = true): ShortString =
   rangeCheck s.len <= shortStringMaxSize
+  {.push checks: off.}
   when nimvm:
     for i, c in s:
       result[i] = c
@@ -218,20 +229,17 @@ proc toShortString*(s: openarray[char], optimized: static bool = true): ShortStr
       for i, c in s:
         result[i] = c
     else:
-      if s.len == 0:
+      let L = s.len
+      if L == 0:
         # bypass nil
         result = ShortString(0)
       else:
-        # this might still be invalid memory access
-        #ShortString(cast[ptr uint](unsafeAddr s[0])[] and
-        #  # use unsigned to bypass overflow
-        #  (1u shl (result.len.uint * charBits.uint + 1u) - 1u))
-        # XXX benchmark if this is faster (benchmark in general)
-        let offset = shortStringMaxSize - s.len
+        let offset = shortStringMaxSize - L
         result = ShortString(
           (cast[ptr uint](unsafeAddr s[0])[].toLittleEndian shl
             (offset * charBits)) shr
               (offset * charBits))
+  {.pop.}
 
 template short*(s: static string): ShortString =
   toShortString(s)
@@ -244,6 +252,26 @@ when isMainModule:
     let b = cpuTime()
     echo "took ", b - a
   bench:
-    for i in 1..100000000:
+    for i in 1..50000000:
       for s in ["", "a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh"]:
         discard s.toShortString.len
+  bench:
+    for i in 1..50000000:
+      for s in ["", "a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh"]:
+        discard s.toShortString(false).len
+  bench:
+    for i in 1..50000000:
+      for s in ["", "a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh"]:
+        discard s.toShortString.len
+  bench:
+    for i in 1..50000000:
+      for s in ["", "a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh"]:
+        discard s.toShortString(false).len
+  bench:
+    for i in 1..50000000:
+      for s in ["", "a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh"]:
+        discard s.toShortString.len
+  bench:
+    for i in 1..50000000:
+      for s in ["", "a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh"]:
+        discard s.toShortString(false).len

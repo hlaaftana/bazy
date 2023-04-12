@@ -33,7 +33,7 @@ defineProperty Fields, Property(name: "Fields",
     else:
       tmAlmostEqual)
 
-# XXX (!) also Defaults purely for initialization/conversion
+# XXX (1) also Defaults purely for initialization/conversion
 
 proc newContext*(imports: seq[Context]): Context =
   result = Context(stack: Stack(), imports: imports)
