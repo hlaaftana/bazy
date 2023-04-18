@@ -3,16 +3,12 @@ import ../defines
 when useArrays:
   import arrayimpl
   export arrayimpl
-  when arraysEmbedLength:
-    type ArrayRef*[T] = Array[T]
-    template toArrayRef*(foo): ArrayRef = toArray(foo)
-  else:
-    type ArrayRef*[T] = ref Array[T]
-    template toArrayRef*(foo): ArrayRef =
-      var r: ref typeof(toArray(foo))
-      new(r)
-      r[] = toArray(foo)
-      r
+  type ArrayRef*[T] = ref Array[T]
+  template toArrayRef*(foo): ArrayRef =
+    var r: ref typeof(toArray(foo))
+    new(r)
+    r[] = toArray(foo)
+    r
 else:
   template distinctSeq(name) {.dirty.} =
     type `name`*[T] = distinct seq[T]
@@ -50,3 +46,16 @@ else:
     var res = new(typeof(toArray(foo)))
     res[] = toArray(foo)
     res
+
+proc `==`*[T](a, b: ArrayRef[T]): bool {.inline.} =
+  mixin `==`
+  system.`==`(a, b) or (not a.isNil and not b.isNil and a[] == b[])
+
+import hashes
+
+proc hash*[T](x: ArrayRef[T]): Hash =
+  mixin hash
+  if x.isNil:
+    hash(pointer nil)
+  else:
+    hash(x[])

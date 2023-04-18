@@ -82,7 +82,7 @@ type
     of vkTable:
       tableValue*: Table[Value, Value]
     of vkFunction:
-      functionValue*: Function
+      functionValue*: TreeWalkFunction
     of vkNativeFunction:
       nativeFunctionValue*: proc (args: openarray[Value]): Value {.nimcall.}
     of vkExpression:
@@ -219,7 +219,7 @@ type
     imports*: Array[Stack]
     stack*: Array[Value]
 
-  Function* = object
+  TreeWalkFunction* = object
     stack*: Stack
       ## persistent stack
       ## gets shallow copied when function is run
@@ -260,13 +260,13 @@ type
   BinaryInstructionKind* = range[AddInt .. DivFloat]
   UnaryInstructionKind* = range[NegInt .. NegFloat]
 
-  InstructionObj* {.acyclic.} = object
+  InstructionObj* {.acyclic.} = object ## compact version of Statement
     case kind*: InstructionKind
     of NoOp: discard
     of Constant:
       constantValue*: Value
     of FunctionCall:
-      function*: Instruction # evaluates to Function or native function
+      function*: Instruction # evaluates to TreeWalkFunction or native function
       arguments*: Array[Instruction]
     of Dispatch:
       dispatchFunctions*: Array[(Array[Type], Instruction)]

@@ -1,4 +1,4 @@
-import "."/[primitives, arrays, runtime, types, values, ids], ../language/[expressions, number, shortstring], std/[tables, sets, strutils]
+import "."/[primitives, arrays, treewalk, types, values, ids], ../language/[expressions, number, shortstring], std/[tables, sets, strutils]
 
 when defined(gcDestructors):
   template defineProperty(name, value): untyped {.dirty.} =
@@ -646,10 +646,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       msg: "bound " & $bound & " does not match type " & $result.knownType &
        " in expression " & $ex)
 
-type Program* = Function #[object
-  # this is just function
-  stack*: Stack
-  instruction*: Instruction]#
+type Program* = TreeWalkFunction
 
 proc compile*(ex: Expression, imports: seq[Context], bound: TypeBound = +Ty(Any)): Program =
   #new(result)

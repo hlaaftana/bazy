@@ -19,7 +19,7 @@ template run(instr: Instruction, stack, effectHandler): Value =
     return val
   val
 
-proc call*(fun: Function, args: sink Array[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
+proc call*(fun: TreeWalkFunction, args: sink Array[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
   var newStack = fun.stack.shallowRefresh()
   for i in 0 ..< args.len:
     newStack.set(i, args[i])

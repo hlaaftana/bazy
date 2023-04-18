@@ -43,6 +43,6 @@ import hashes
 proc hash*[T](x: Box[T]): Hash =
   mixin hash
   if x.isNil:
-    hash(nil)
+    hash(pointer nil)
   else:
     hash(x.unbox)

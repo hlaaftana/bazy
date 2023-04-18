@@ -33,7 +33,7 @@ module syntax:
       v.knownType.returnType = body.knownType.box
     bodyScope.context.refreshStack()
     let fun = toValue(
-      Function(stack: bodyScope.context.stack.shallowRefresh(), instruction: body.toInstruction))
+      TreeWalkFunction(stack: bodyScope.context.stack.shallowRefresh(), instruction: body.toInstruction))
     if not v.isNil:
       context.refreshStack()
       scope.context.stack.set(v.stackIndex, fun)
