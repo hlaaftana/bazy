@@ -421,6 +421,10 @@ type
       # stacks should never persist, persistent memory should be vkReference
       # static memory can be tied to the Variable object
       # static code should still run exactly like normal code
+      # XXX for now keep this but use it less
+      # register memory can still exist as well as constant memory that gets inlined
+      # XXX (5) maybe vkReference shouldn't exist and Value should always have value semantics
+      # for serialization and initialization in bytecode etc
     stack*: Stack
     stackSize*: int
     top*: Scope

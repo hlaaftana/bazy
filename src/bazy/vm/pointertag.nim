@@ -1,4 +1,4 @@
-const pointerTaggable* = sizeof(uint) == 8
+const pointerTaggable* = sizeof(pointer) == 8
 
 when pointerTaggable:
   type TaggedPointer* = uint64

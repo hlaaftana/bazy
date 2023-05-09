@@ -336,7 +336,7 @@ proc commonSuperType*(a, b: Type, doUnion = true): Type =
 import arrays
 
 proc checkType*(value: Value, t: Type): bool
-  ## this sucks and reallocates boxed values
+  ## this sucks
 
 proc checkType*(value: FullValueObj, t: Type): bool =
   template eachAre(iter; types: seq[Type]): untyped =
