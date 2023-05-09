@@ -3,8 +3,8 @@ import "."/[primitives, compilation, arrays]
 # xxx do some kind of register last use analysis to merge some registers
 
 type
-  Register* = distinct int32
-  BytePos* = distinct int32
+  Register* = distinct uint16
+  BytePos* = distinct uint16
 
   StackInstructionKind* = enum
     NoOp
@@ -35,6 +35,7 @@ type
     NegInt32, NegFloat32
   
   StackInstruction* = object
+    # cannot recurse
     pos*: BytePos
     case kind*: StackInstructionKind
     of NoOp: discard
@@ -42,19 +43,28 @@ type
       src*: tuple[res: Register, constant: Value] # xxx ???? Value?
     of SetRegisterRegister:
       srr*: tuple[res, val: Register]
-    of FunctionCall: discard
-    of Dispatch: discard
-    of VariableGet: discard
-    of VariableSet: discard
-    of FromImportedStack: discard
-    of SetAddress: discard
-    of ArmStack: discard
+    of FunctionCall:
+      call*: tuple[]
+    of Dispatch:
+      dispatch*: tuple[]
+    of VariableGet:
+      vg*: tuple[]
+    of VariableSet:
+      vs*: tuple[]
+    of FromImportedStack:
+      fis*: tuple[]
+    of SetAddress:
+      sadr*: tuple[]
+    of ArmStack:
+      arm*: tuple[]
     of IfJump:
       ifj*: tuple[cond: Register, truePos, falsePos: BytePos]
     of Jump:
       jmp*: tuple[pos: BytePos]
-    of EmitEffect: discard
-    of HandleEffect: discard
+    of EmitEffect:
+      emit*: tuple[]
+    of HandleEffect:
+      handle*: tuple[]
     of GetConstantIndex:
       gci*: tuple[res, coll: Register, ind: int32]
     of SetConstantIndex:
@@ -69,16 +79,143 @@ type
     of NegInt32, NegFloat32:
       unary*: tuple[res, arg: Register]
 
-  StackContext* = object
+  StackFunction* = ref object
     instructions*: seq[StackInstruction]
+    byteCount*: int
     registerCount*: int
+  
+  StackResultKind = enum
+    Value
+    Statement
+    SetRegister
+  
+  StackResult = object
+    case kind: StackResultKind
+    of Value:
+      value: Register
+    of Statement: discard
+    of SetRegister:
+      register: Register
 
-proc stack*(context: Context, s: Statement, stack: var StackContext): Register =
-  # result is register of value
+const instructionKindMap: array[low(BinaryInstructionKind) .. high(UnaryInstructionKind), StackInstructionKind] = [
+  # binary
+  AddInt: AddInt32, SubInt: SubInt32, MulInt: MulInt32, DivInt: DivInt32,
+  AddFloat: AddFloat32, SubFloat: SubFloat32, MulFloat: MulFloat32, DivFloat: DivFloat32,
+  # unary
+  NegInt: NegInt32, NegFloat: NegFloat32
+]
+
+proc byteCount*(atom: Register | int32 | BytePos): int =
+  result = sizeof(atom)
+
+proc byteCount*[T: tuple](tup: T): int =
+  for a in fields(tup):
+    result += sizeof(a)
+
+proc byteCount*(instr: StackInstruction): int =
+  result = sizeof(instr.kind)
+  for a in instr.fields:
+    when a is tuple:
+      result += byteCount(a)
+
+proc addBytes*(bytes: var openarray[byte], i: var int, instr: StackInstruction) =
+  template add(b: byte) =
+    bytes[i] = b
+    inc i
+  template add(r: Register | BytePos) =
+    let u = r.uint16
+    add(byte((u shr 8) and 0xFF))
+    add(byte(u and 0xFF))
+  template add(ii: int32) =
+    let u = cast[uint32](ii)
+    add(byte((u shr 24) and 0xFF))
+    add(byte((u shr 16) and 0xFF))
+    add(byte((u shr 0) and 0xFF))
+    add(byte(u and 0xFF))
+  template add(tup: tuple) =
+    for a in tup.fields:
+      add(a)
+  add instr.kind.byte
+  case instr.kind
+  of NoOp: discard
+  of SetRegisterConstant:
+    discard "add instr.src" # XXX serialize values
+  of SetRegisterRegister:
+    add instr.srr
+  of FunctionCall:
+    add instr.call
+  of Dispatch:
+    add instr.dispatch
+  of VariableGet:
+    add instr.vg
+  of VariableSet:
+    add instr.vs
+  of FromImportedStack:
+    add instr.fis
+  of SetAddress:
+    add instr.sadr
+  of ArmStack:
+    add instr.arm
+  of IfJump:
+    add instr.ifj
+  of Jump:
+    add instr.jmp
+  of EmitEffect:
+    add instr.emit
+  of HandleEffect:
+    add instr.handle
+  of GetConstantIndex:
+    add instr.gci
+  of SetConstantIndex:
+    add instr.sci
+  of GetRegisterIndex:
+    add instr.gri
+  of SetRegisterIndex:
+    add instr.sri
+  of AddInt32, SubInt32, MulInt32, DivInt32,
+    AddFloat32, SubFloat32, MulFloat32, DivFloat32:
+    add instr.binary
+  of NegInt32, NegFloat32:
+    add instr.unary
+
+proc add(fn: StackFunction, instr: StackInstruction) =
+  var instr = instr
+  instr.pos = fn.byteCount.BytePos
+  fn.instructions.add(instr)
+  fn.byteCount += instr.byteCount
+
+proc newRegister(fn: StackFunction): Register =
+  result = fn.registerCount.Register
+  inc fn.registerCount
+
+proc stack*(context: Context, fn: StackFunction, result: var StackResult, s: Statement) =
+  type Instr = StackInstruction
+  template stackValue(s: Statement): Register =
+    var res = StackResult(kind: Value)
+    stack(context, fn, res, s)
+    res.value
+  var statementResult = StackResult(kind: Statement)
+  template statement(s: Statement) =
+    stack(context, fn, statementResult, s)
+  let resultKind = result.kind
   case s.kind
   of skNone:
-    discard # this should push NoValue but whatever
-  of skConstant: discard
+    case resultKind
+    of SetRegister:
+      fn.add(Instr(kind: SetRegisterConstant, src: (res: result.register, constant: Value(kind: vkNone))))
+    of Value:
+      result.value = fn.newRegister()
+      fn.add(Instr(kind: SetRegisterConstant, src: (res: result.value, constant: Value(kind: vkNone))))
+    of Statement: discard
+  of skConstant:
+    case resultKind
+    of SetRegister:
+      fn.add(Instr(kind: SetRegisterConstant, src: (res: result.register, constant: s.constant)))
+    of Value, Statement:
+      let reg = fn.newRegister()
+      fn.add(Instr(kind: SetRegisterConstant, src: (res: reg, constant: s.constant)))
+      if result.kind == Value:
+        result.value = reg
   of skFunctionCall: discard
   of skDispatch: discard
   of skSequence: discard
@@ -101,7 +238,8 @@ proc stack*(context: Context, s: Statement, stack: var StackContext): Register =
   of skUnaryInstruction: discard
   of skBinaryInstruction: discard
 
-proc stacked*(context: Context, body: Statement): StackContext =
-  var stack = StackContext()
-  discard stack(context, body, stack)
+proc stacked*(context: Context, body: Statement): StackFunction =
+  var stack = StackFunction()
+  var res = StackResult(kind: Value)
+  stack(context, stack, res, body)
   result = stack
