@@ -6,7 +6,7 @@ type
   Register* = distinct uint16
   BytePos* = distinct uint16
 
-  StackInstructionKind* = enum
+  LinearInstructionKind* = enum
     NoOp
     SetRegisterConstant # push
     SetRegisterRegister # mov
@@ -34,17 +34,17 @@ type
     # unary
     NegInt32, NegFloat32
   
-  StackInstruction* = object
+  LinearInstruction* = object
     # cannot recurse
     pos*: BytePos
-    case kind*: StackInstructionKind
+    case kind*: LinearInstructionKind
     of NoOp: discard
     of SetRegisterConstant:
       src*: tuple[res: Register, constant: Value] # xxx ???? Value?
     of SetRegisterRegister:
       srr*: tuple[res, val: Register]
     of FunctionCall:
-      call*: tuple[]
+      call*: tuple[callee: Register, ]
     of Dispatch:
       dispatch*: tuple[]
     of VariableGet:
@@ -79,25 +79,25 @@ type
     of NegInt32, NegFloat32:
       unary*: tuple[res, arg: Register]
 
-  StackFunction* = ref object
-    instructions*: seq[StackInstruction]
+  LinearFunction* = ref object
+    instructions*: seq[LinearInstruction]
     byteCount*: int
     registerCount*: int
   
-  StackResultKind = enum
+  ResultKind = enum
     Value
     Statement
     SetRegister
   
-  StackResult = object
-    case kind: StackResultKind
+  Result = object
+    case kind: ResultKind
     of Value:
       value: Register
     of Statement: discard
     of SetRegister:
       register: Register
 
-const instructionKindMap: array[low(BinaryInstructionKind) .. high(UnaryInstructionKind), StackInstructionKind] = [
+const instructionKindMap: array[low(BinaryInstructionKind) .. high(UnaryInstructionKind), LinearInstructionKind] = [
   # binary
   AddInt: AddInt32, SubInt: SubInt32, MulInt: MulInt32, DivInt: DivInt32,
   AddFloat: AddFloat32, SubFloat: SubFloat32, MulFloat: MulFloat32, DivFloat: DivFloat32,
@@ -112,13 +112,13 @@ proc byteCount*[T: tuple](tup: T): int =
   for a in fields(tup):
     result += sizeof(a)
 
-proc byteCount*(instr: StackInstruction): int =
+proc byteCount*(instr: LinearInstruction): int =
   result = sizeof(instr.kind)
   for a in instr.fields:
     when a is tuple:
       result += byteCount(a)
 
-proc addBytes*(bytes: var openarray[byte], i: var int, instr: StackInstruction) =
+proc addBytes*(bytes: var openarray[byte], i: var int, instr: LinearInstruction) =
   template add(b: byte) =
     bytes[i] = b
     inc i
@@ -178,25 +178,28 @@ proc addBytes*(bytes: var openarray[byte], i: var int, instr: StackInstruction) 
   of NegInt32, NegFloat32:
     add instr.unary
 
-proc add(fn: StackFunction, instr: StackInstruction) =
+proc add(fn: LinearFunction, instr: LinearInstruction) =
   var instr = instr
   instr.pos = fn.byteCount.BytePos
   fn.instructions.add(instr)
   fn.byteCount += instr.byteCount
 
-proc newRegister(fn: StackFunction): Register =
+proc newRegister(fn: LinearFunction): Register =
   result = fn.registerCount.Register
   inc fn.registerCount
 
-proc stack*(context: Context, fn: StackFunction, result: var StackResult, s: Statement) =
-  type Instr = StackInstruction
-  template stackValue(s: Statement): Register =
-    var res = StackResult(kind: Value)
-    stack(context, fn, res, s)
+# maybe special registers for specific behaviors
+# i.e. a single register to load constants into
+
+proc linearize*(context: Context, fn: LinearFunction, result: var Result, s: Statement) =
+  type Instr = LinearInstruction
+  template value(s: Statement): Register =
+    var res = Result(kind: Value)
+    linearize(context, fn, res, s)
     res.value
-  var statementResult = StackResult(kind: Statement)
+  var statementResult = Result(kind: Statement)
   template statement(s: Statement) =
-    stack(context, fn, statementResult, s)
+    linearize(context, fn, statementResult, s)
   let resultKind = result.kind
   case s.kind
   of skNone:
@@ -206,7 +209,7 @@ proc stack*(context: Context, fn: StackFunction, result: var StackResult, s: Sta
     of Value:
       result.value = fn.newRegister()
       fn.add(Instr(kind: SetRegisterConstant, src: (res: result.value, constant: Value(kind: vkNone))))
-    of Statement: discard
+    of Statement: discard # nothing
   of skConstant:
     case resultKind
     of SetRegister:
@@ -238,8 +241,8 @@ proc stack*(context: Context, fn: StackFunction, result: var StackResult, s: Sta
   of skUnaryInstruction: discard
   of skBinaryInstruction: discard
 
-proc stacked*(context: Context, body: Statement): StackFunction =
-  var stack = StackFunction()
-  var res = StackResult(kind: Value)
-  stack(context, stack, res, body)
+proc linear*(context: Context, body: Statement): LinearFunction =
+  var stack = LinearFunction()
+  var res = Result(kind: Value)
+  linearize(context, stack, res, body)
   result = stack
