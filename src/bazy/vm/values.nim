@@ -54,9 +54,10 @@ proc toFullValueObj*(x: Value): FullValueObj =
   case x.kind
   of vkNone: FullValueObj(kind: vkNone)
   of vkInt32: FullValueObj(kind: vkInt32, int32Value: x.int32Value)
-  of vkUint32: FullValueObj(kind: vkUint32, uint32Value: x.uint32Value) 
-  of vkFloat32: FullValueObj(kind: vkFloat32, float32Value: x.float32Value) 
-  of vkBool: FullValueObj(kind: vkBool, boolValue: x.boolValue) 
+  of vkUint32: FullValueObj(kind: vkUint32, uint32Value: x.uint32Value)
+  of vkFloat32: FullValueObj(kind: vkFloat32, float32Value: x.float32Value)
+  of vkBool: FullValueObj(kind: vkBool, boolValue: x.boolValue)
+  of vkReference: FullValueObj(kind: vkReference, referenceValue: x.referenceValue)
   of boxedValueKinds: x.boxedValue[]
   of vkEffect: x.effectValue.unbox.toFullValueObj
 
@@ -69,6 +70,7 @@ proc toSmallValue*(x: FullValueObj | FullValue): Value =
     of vkUint32: result = Value(kind: vkUint32, uint32Value: x.uint32Value) 
     of vkFloat32: result = Value(kind: vkFloat32, float32Value: x.float32Value) 
     of vkBool: result = Value(kind: vkBool, boolValue: x.boolValue) 
+    of vkReference: result = Value(kind: vkReference, referenceValue: x.referenceValue)
     of vkEffect: result = Value(kind: vkEffect, effectValue: x.effectValue)
     of boxedValueKinds: discard # unreachable
   else:
@@ -100,6 +102,7 @@ proc getType*(x: FullValueObj): Type =
   of vkUint64: result = Ty(Uint64)
   of vkFloat64: result = Ty(Float64)
   of vkBool: result = Ty(Bool)
+  of vkReference: result = Type(kind: tyReference, elementType: box x.referenceValue[].getType)
   of vkBoxed: result = getType(x.boxedValue[])
   of vkList: result = Type(kind: tyList, elementType: x.listValue.unref[0].getType.box)
   of vkString: result = Ty(String)
@@ -142,6 +145,7 @@ proc getType*(x: Value): Type =
   of vkUint64: result = Ty(Uint64)
   of vkFloat64: result = Ty(Float64)
   of vkBool: result = Ty(Bool)
+  of vkReference: result = Type(kind: tyReference, elementType: box x.referenceValue[].getType)
   of boxedValueKinds - {vkInt64, vkUint64, vkFloat64}:
     result = x.boxedValue[].getType
   of vkEffect:

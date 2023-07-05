@@ -14,6 +14,9 @@ type
       ## embedded effect value for exceptions/return/yield/whatever
     #vkShortestString
     #  ## word size string
+    vkReference
+      ## reference value, can be mutable
+      ## only value kind with reference semantics
     vkBoxed # XXX (3) maybe do BoxedInt32, BoxedUint32 etc
     vkInt64, vkUint64, vkFloat64
     vkType
@@ -61,6 +64,8 @@ type
       float32Value*: float32
     of vkEffect:
       effectValue*: Box[Value]
+    of vkReference:
+      referenceValue*: ref FullValueObj
     of vkBoxed:
       boxedValue*: FullValue
     of vkInt64:
@@ -110,6 +115,8 @@ type
       float32Value*: float32
     of vkEffect:
       effectValue*: Box[Value]
+    of vkReference:
+      referenceValue*: ref FullValueObj
     of boxedValueKinds:
       boxedValue*: FullValue
   
@@ -137,6 +144,7 @@ type
     tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
     tyInt64, tyUint64, tyFloat64,
+    tyReference,
     tyFunction, tyTuple,
     tyList,
     tyString,
@@ -176,7 +184,7 @@ type
     of tyTuple:
       elements*: seq[Type]
       varargs*: Box[Type] # for now only trailing
-    of tyList, tySet:
+    of tyReference, tyList, tySet:
       elementType*: Box[Type]
     of tyTable:
       keyType*, valueType*: Box[Type]
@@ -407,7 +415,7 @@ type
     knownType*: Type
     stackIndex*: int
     scope*: Scope
-    # XXX (4) maybe make this a tuple type too with signature
+    # XXX (4) maybe make this a tuple type too with signature for named and default generic params
     genericParams*: seq[TypeParameter]
     lazyExpression*: Expression
     evaluated*: bool
@@ -419,12 +427,16 @@ type
       # modules should probably be like JS or lua where
       # the module creates a module object which is what gets imported
       # stacks should never persist, persistent memory should be vkReference
-      # static memory can be tied to the Variable object
-      # static code should still run exactly like normal code
-      # XXX for now keep this but use it less
-      # register memory can still exist as well as constant memory that gets inlined
-      # XXX (5) maybe vkReference shouldn't exist and Value should always have value semantics
-      # for serialization and initialization in bytecode etc
+      # static code should still run exactly like normal code, static memory
+      # can still use vkReference which will be re-allocated at runtime with
+      # the final static value of the reference
+      # values not accessed from a vkReference always have value semantics and are internally immutable
+      # comments might be outdated:
+        # for now keep this but use it less
+        # register memory can still exist as well as constant memory that gets inlined
+        # maybe vkReference shouldn't exist and Value should always have value semantics
+        # for serialization and initialization in bytecode etc
+        # or just have a rule to allocate a new reference every time a vkReference constant is loaded
     stack*: Stack
     stackSize*: int
     top*: Scope
@@ -587,6 +599,7 @@ proc `$`*(value: FullValue): string =
   of vkFloat32: $value.float32Value
   of vkBool: $value.boolValue
   of vkEffect: "Effect(" & $value.effectValue.unref & ")"
+  of vkReference: "ref(" & $value.referenceValue.unref & ")"
   of vkBoxed: $value.boxedValue
   of vkInt64: $value.int64Value
   of vkUint64: $value.uint64Value
@@ -614,6 +627,7 @@ proc `$`*(value: Value): string =
   of vkUint32: $value.uint32Value
   of vkFloat32: $value.float32Value
   of vkBool: $value.boolValue
+  of vkReference: "ref(" & $value.referenceValue.unref & ")"
   of vkEffect: "Effect(" & $value.effectValue.unref & ")"
   of boxedValueKinds: $value.boxedValue
 
@@ -645,6 +659,7 @@ proc `$`*(t: Type): string =
   of tyFunction:
     "Function(" & $t.arguments & ") -> " & $t.returnType
   of tyTuple: "Tuple(" & $t.elements & (if t.varargs.isNone: ")" else: ", " & $t.varargs & "...)")
+  of tyReference: "Reference(" & $t.elementType & ")"
   of tyList: "List(" & $t.elementType & ")"
   of tySet: "Set(" & $t.elementType & ")"
   of tyTable: "Table(" & $t.keyType & ", " & $t.valueType & ")"

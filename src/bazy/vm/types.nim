@@ -64,6 +64,7 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyInt64: 0,
   tyUint64: 0,
   tyFloat64: 0,
+  tyReference: 1,
   tyFunction: 2,
   tyTuple: -1,
   tyList: 1,
@@ -117,7 +118,7 @@ proc nth*(t: Type, i: int): Type =
       result = t.elements[i]
     else:
       result = t.varargs.unbox
-  of tyList, tySet:
+  of tyReference, tyList, tySet:
     result = t.elementType.unbox
   of tyTable:
     if i == 0:
@@ -209,7 +210,7 @@ proc match*(matcher, t: Type): TypeMatch =
     case matcher.kind
     of atomicTypes * concreteTypeKinds:
       tmAlmostEqual
-    of tyList, tySet:
+    of tyReference, tyList, tySet:
       match(+matcher.elementType.unbox, t.elementType.unbox)
     of tyTuple:
       if matcher.elements.len != t.elements.len and matcher.varargs.isNone and t.varargs.isNone:
@@ -372,6 +373,8 @@ proc checkType*(value: FullValueObj, t: Type): bool =
     value.kind in {vkFunction, vkNativeFunction}
   of tyTuple:
     value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements)
+  of tyReference:
+    value.kind == vkReference and value.referenceValue.unref.checkType(t.elementType.unbox)
   of tyList:
     value.kind == vkList and value.listValue.unref.eachAre(t.elementType.unbox)
   of tyString: value.kind == vkString
@@ -415,6 +418,7 @@ proc checkType*(value: FullValueObj, t: Type): bool =
     of tyInt64: vkind vkInt64
     of tyUint64: vkind vkUint64
     of tyFloat64: vkind vkFloat64
+    of tyReference: vkind vkReference
     of tyString: vkind vkString
     of tyExpression: vkind vkExpression
     of tyStatement: vkind vkStatement
@@ -489,7 +493,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
           match(pattern.elements[i], t.varargs.unbox)
         if not pattern.varargs.isNone:
           match(pattern.varargs, t.varargs)
-  of tyList, tySet:
+  of tyReference, tyList, tySet:
     if t.kind == pattern.kind:
       match(pattern.elementType, t.elementType)
   of tyTable:
@@ -535,7 +539,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     for e in pattern.elements.mitems:
       fill(e)
     fill(pattern.varargs)
-  of tyList, tySet:
+  of tyReference, tyList, tySet:
     fill(pattern.elementType)
   of tyTable:
     fill(pattern.keyType)

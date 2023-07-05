@@ -40,7 +40,9 @@ type
     case kind*: LinearInstructionKind
     of NoOp: discard
     of SetRegisterConstant:
-      src*: tuple[res: Register, constant: Value] # xxx ???? Value?
+      src*: tuple[res: Register, constant: Value]
+        # xxx should be an index in constant pool instead
+        # reference constants also have special behavior when loaded
     of SetRegisterRegister:
       srr*: tuple[res, val: Register]
     of FunctionCall:
@@ -188,7 +190,7 @@ proc newRegister(fn: LinearFunction): Register =
   result = fn.registerCount.Register
   inc fn.registerCount
 
-# maybe special registers for specific behaviors
+# xxx maybe special registers for specific behaviors
 # i.e. a single register to load constants into
 
 proc linearize*(context: Context, fn: LinearFunction, result: var Result, s: Statement) =

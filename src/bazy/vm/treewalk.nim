@@ -1,6 +1,6 @@
 import "."/[primitives, arrays, values, types], std/[sets, tables]
 
-# XXX (5) eventually use stack machine or something for bytecode and no recursion
+# XXX (5) use linearizer for bytecode and evaluate that without recursion
 
 type EffectHandler* = proc (effect: Value): bool
   ## returns true to continue execution
