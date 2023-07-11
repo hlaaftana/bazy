@@ -351,6 +351,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
   for i in 1 ..< realArgumentTypes.len:
     realArgumentTypes[i] = union(Ty(Expression), Ty(Statement))
   # get all metas first and type statements accordingly
+  # XXX (4) make generics work with meta property
   var allMetas = overloads(scope, name,
     *funcType(Ty(Statement), realArgumentTypes).withProperties(
       property(Meta, toValue funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes))))

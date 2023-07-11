@@ -4,30 +4,36 @@ import "."/[primitives, compilation, arrays]
 
 type
   Register* = distinct uint16
+    # xxx maybe unify with constants, index constant pool when negative
   BytePos* = distinct uint16
 
   LinearInstructionKind* = enum
     NoOp
     SetRegisterConstant # push
     SetRegisterRegister # mov
-    FunctionCall
+    UnaryCall
+    BinaryCall
+    TernaryCall
+    TupleCall
     Dispatch
-    VariableGet
-    VariableSet
-    FromImportedStack
-    SetAddress
-    ArmStack
+    VariableGet # go
+    VariableSet # go
+    FromImportedStack # go
+    SetAddress # go
+    ArmStack # stay but arm constants
     IfJump
     Jump
     # effect, can emulate goto
     EmitEffect
-    HandleEffect
+    PushEffectHandler
+    PopEffectHandler
     # collection
-    #BuildTuple BuildList BuildSet BuildTable
-    GetConstantIndex
-    SetConstantIndex
-    GetRegisterIndex
-    SetRegisterIndex
+    InitTuple
+    InitTupleConstSize
+    GetIndex
+    SetIndex
+    GetConstIndex
+    SetConstIndex
     # binary
     AddInt32, SubInt32, MulInt32, DivInt32
     AddFloat32, SubFloat32, MulFloat32, DivFloat32
@@ -45,8 +51,14 @@ type
         # reference constants also have special behavior when loaded
     of SetRegisterRegister:
       srr*: tuple[res, val: Register]
-    of FunctionCall:
-      call*: tuple[callee: Register, ]
+    of UnaryCall:
+      ucall*: tuple[callee, arg1: Register]
+    of BinaryCall:
+      bcall*: tuple[callee, arg1, arg2: Register]
+    of TernaryCall:
+      tcall*: tuple[callee, arg1, arg2, arg3: Register]
+    of TupleCall:
+      tupcall*: tuple[callee, args: Register]
     of Dispatch:
       dispatch*: tuple[]
     of VariableGet:
@@ -65,15 +77,21 @@ type
       jmp*: tuple[pos: BytePos]
     of EmitEffect:
       emit*: tuple[]
-    of HandleEffect:
-      handle*: tuple[]
-    of GetConstantIndex:
+    of PushEffectHandler:
+      pueh*: tuple[]
+    of PopEffectHandler:
+      poeh*: tuple[]
+    of InitTuple:
+      itup*: tuple[res, siz: Register]
+    of InitTupleConstSize:
+      itcs*: tuple[res: Register, siz: int32]
+    of GetConstIndex:
       gci*: tuple[res, coll: Register, ind: int32]
-    of SetConstantIndex:
+    of SetConstIndex:
       sci*: tuple[coll: Register, ind: int32, val: Register]
-    of GetRegisterIndex:
+    of GetIndex:
       gri*: tuple[res, coll, ind: Register]
-    of SetRegisterIndex:
+    of SetIndex:
       sri*: tuple[coll, ind, val: Register]
     of AddInt32, SubInt32, MulInt32, DivInt32,
       AddFloat32, SubFloat32, MulFloat32, DivFloat32:
@@ -144,8 +162,14 @@ proc addBytes*(bytes: var openarray[byte], i: var int, instr: LinearInstruction)
     discard "add instr.src" # XXX serialize values
   of SetRegisterRegister:
     add instr.srr
-  of FunctionCall:
-    add instr.call
+  of UnaryCall:
+    add instr.ucall
+  of BinaryCall:
+    add instr.bcall
+  of TernaryCall:
+    add instr.tcall
+  of TupleCall:
+    add instr.tupcall
   of Dispatch:
     add instr.dispatch
   of VariableGet:
@@ -164,15 +188,21 @@ proc addBytes*(bytes: var openarray[byte], i: var int, instr: LinearInstruction)
     add instr.jmp
   of EmitEffect:
     add instr.emit
-  of HandleEffect:
-    add instr.handle
-  of GetConstantIndex:
+  of PushEffectHandler:
+    add instr.pueh
+  of PopEffectHandler:
+    add instr.poeh
+  of InitTuple:
+    add instr.itup
+  of InitTupleConstSize:
+    add instr.itcs
+  of GetConstIndex:
     add instr.gci
-  of SetConstantIndex:
+  of SetConstIndex:
     add instr.sci
-  of GetRegisterIndex:
+  of GetIndex:
     add instr.gri
-  of SetRegisterIndex:
+  of SetIndex:
     add instr.sri
   of AddInt32, SubInt32, MulInt32, DivInt32,
     AddFloat32, SubFloat32, MulFloat32, DivFloat32:
