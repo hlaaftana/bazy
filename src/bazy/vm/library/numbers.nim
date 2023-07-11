@@ -91,5 +91,5 @@ module numbers:
   binarySingleAlias "<<", "shl", int32
   binarySingle "xor", uint32
   binarySingle "xor", int32
-  # todo: conversions, hex, binary
+  # todo: 64 bit, conversions, hex, binary
   # maybe more instructions

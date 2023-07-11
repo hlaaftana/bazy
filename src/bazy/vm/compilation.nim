@@ -1,4 +1,4 @@
-import "."/[primitives, arrays, treewalk, types, values, ids], ../language/[expressions, number, shortstring], std/[tables, sets, strutils]
+import "."/[primitives, arrays, treewalk, types, values, ids], ../language/[expressions, number, shortstring], std/[hashes, tables, sets, strutils]
 
 when defined(gcDestructors):
   template defineProperty(name, value): untyped {.dirty.} =
@@ -34,6 +34,9 @@ defineProperty Fields, Property(name: "Fields",
       tmAlmostEqual)
 
 # XXX (1) also Defaults purely for initialization/conversion
+
+proc newVariable*(name: string, knownType: Type = default(Type)): Variable =
+  Variable(name: name, nameHash: name.hash, knownType: knownType)
 
 proc newContext*(imports: seq[Context]): Context =
   result = Context(stack: Stack(), imports: imports)
@@ -184,30 +187,30 @@ proc getType*(variable: Variable): Type =
 proc shallowReference*(v: Variable, `type`: Type = v.getType): VariableReference {.inline.} =
   VariableReference(variable: v, type: `type`, address: VariableAddress(indices: @[v.stackIndex]))
 
-proc symbols*(scope: Scope, name: string, bound: TypeBound, doImports = true): seq[VariableReference] =
+proc symbols*(scope: Scope, name: string, bound: TypeBound, doImports = true, nameHash = name.hash): seq[VariableReference] =
   if scope.isNil: return
   if doImports:
     for i, im in scope.context.imports:
-      let addrs = symbols(im.top, name, bound)
+      let addrs = symbols(im.top, name, bound, nameHash = nameHash)
       for a in addrs:
         var b = a
         b.address.indices.add(i)
         result.add(b)
   if not scope.parent.isNil:
-    result.add(symbols(scope.parent, name, bound, doImports = false))
+    result.add(symbols(scope.parent, name, bound, doImports = false, nameHash = nameHash))
   for i, v in scope.variables:
-    var t = v.getType
-    # XXX (4) test this works (generic substitution)
-    if v.genericParams.len != 0:
-      var matches: ParameterInstantiation = initTable[TypeParameter, Type](v.genericParams.len)
-      try:
-        matchParameters(t, bound.boundType, matches)
-      except GenericMatchError:
-        matches.clear()
-      if matches.len != 0:
-        fillParameters(t, matches)
-    if name == v.name and bound.matchBound(t):
-      result.add(v.shallowReference(t))
+    if (v.nameHash == 0 or v.nameHash == nameHash) and name == v.name:
+      var t = v.getType
+      if v.genericParams.len != 0:
+        var matches: ParameterInstantiation = initTable[TypeParameter, Type](v.genericParams.len)
+        try:
+          matchParameters(t, bound.boundType, matches)
+        except GenericMatchError:
+          matches.clear()
+        if matches.len != 0:
+          fillParameters(t, matches)
+      if bound.matchBound(t):
+        result.add(v.shallowReference(t))
 
 import algorithm
 

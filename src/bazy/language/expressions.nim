@@ -22,7 +22,7 @@ type
       number*: NumberRepr
     of String:
       str*: string
-      singleQuote*: bool
+      singleQuote*: bool # xxx move to kind enum
     of Name:
       identifier*: string
     of Symbol:

@@ -130,6 +130,8 @@ a = 0
     "(1, (2, 3), 4)[1][0]": toValue(2),
     "a = (1, (2, 3), 4); a[0] == 1 and a[1][1] == 3": toValue(true),
     "`.[]=`(a: Int, b: Int, c: Int) = a * b + c; 3[4] = 5": toValue(17),
+    # also tests generics:
+    "a = ref 1; update a, 1 + unref a; a": Value(kind: vkReference, referenceValue: toValue(2).toFullValueObj.toRef),
   }
   
   for inp, outp in tests.items:

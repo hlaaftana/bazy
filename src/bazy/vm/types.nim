@@ -1,4 +1,4 @@
-import "."/[primitives, values], std/[tables, sets]
+import "."/[primitives, values, ids], std/[tables, sets]
 
 type PropertyInstance* = object
   tag*: Property
@@ -302,10 +302,14 @@ proc `<=`*(a, b: Type): bool {.inline.} = compare(a, b) <= 0
 proc `>`*(a, b: Type): bool {.inline.} = compare(a, b) > 0
 proc `>=`*(a, b: Type): bool {.inline.} = compare(a, b) >= 0
 
-proc commonSubType*(a, b: Type, doUnion = true): Type =
-  let
+proc commonSubType*(a, b: Type, doUnion = true, variance = Covariant): Type =
+  var m1, m2: TypeMatch
+  if variance == Covariant:
     m1 = a.match(b)
     m2 = b.match(a)
+  else:
+    m1 = (a * variance).match(b)
+    m2 = (b * variance).match(a)
   let cmp = compare(m1, m2)
   if cmp > 0:
     b
@@ -318,10 +322,14 @@ proc commonSubType*(a, b: Type, doUnion = true): Type =
   else:
     Ty(None)
 
-proc commonSuperType*(a, b: Type, doUnion = true): Type =
-  let
+proc commonSuperType*(a, b: Type, doUnion = true, variance = Covariant): Type =
+  var m1, m2: TypeMatch
+  if variance == Covariant:
     m1 = a.match(b)
     m2 = b.match(a)
+  else:
+    m1 = (a * variance).match(b)
+    m2 = (b * variance).match(a)
   let cmp = compare(m1, m2)
   if cmp > 0:
     a
@@ -456,7 +464,10 @@ type
     presumed*: Type
     conflicting*: Type
 
-proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
+proc newTypeParameter*(name: string, bound: TypeBound = +Ty(Any)): TypeParameter =
+  TypeParameter(id: newTypeParameterId(), name: name, bound: bound)
+
+proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, variance = Covariant) =
   template match(a, b: Type) = matchParameters(a, b, table)
   template match(a, b: Box[Type]) = matchParameters(a.unbox, b.unbox, table)
   case pattern.kind
@@ -464,7 +475,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
     let param = pattern.parameter
     if param in table:
       let oldType = table[param]
-      let newType = commonSuperType(oldType, t, doUnion = false)
+      let newType = commonSuperType(oldType, t, doUnion = false, variance = variance)
       if newType.isNone:
         raise (ref GenericMatchError)(
           msg: "param " & $param & " had type " & $newType & " but got " & $t,
@@ -483,16 +494,20 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation) =
   of tyFunction:
     if t.kind == tyFunction:
       match(pattern.arguments, t.arguments)
-      match(pattern.returnType, t.returnType)
+      matchParameters(pattern.returnType.unbox, t.returnType.unbox, table, variance = Contravariant)
   of tyTuple:
     if t.kind == tyTuple:
-      for i in 0 ..< t.elements.len:
-        match(pattern.nth(i), t.elements[i])
-      if pattern.elements.len > t.elements.len and not t.varargs.isNone:
-        for i in t.elements.len ..< pattern.elements.len:
-          match(pattern.elements[i], t.varargs.unbox)
-        if not pattern.varargs.isNone:
-          match(pattern.varargs, t.varargs)
+      let
+        pl = pattern.elements.len
+        tl = t.elements.len
+      if pl == tl or not (t.varargs.isNone and pattern.varargs.isNone):
+        for i in 0 ..< min(pl, tl):
+          match(pattern.nth(i), t.elements[i])
+        if pl > tl and not t.varargs.isNone:
+          for i in tl ..< pl:
+            match(pattern.elements[i], t.varargs.unbox)
+          if not pattern.varargs.isNone:
+            match(pattern.varargs, t.varargs)
   of tyReference, tyList, tySet:
     if t.kind == pattern.kind:
       match(pattern.elementType, t.elementType)

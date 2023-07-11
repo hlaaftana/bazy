@@ -38,10 +38,8 @@ type
     vkStatement
     vkScope
     # bigints can be added
-  
-  BoxedValueKind* = range[vkBoxed..high(ValueKind)]
 
-const boxedValueKinds* = {low(BoxedValueKind)..high(BoxedValueKind)}
+const boxedValueKinds* = {vkBoxed..high(ValueKind)}
 
 when disableUnlikelyCycles:
   {.pragma: unlikelyCycles, acyclic.}
@@ -412,6 +410,7 @@ type
   
   Variable* = ref object
     name*: string
+    nameHash*: Hash
     knownType*: Type
     stackIndex*: int
     scope*: Scope

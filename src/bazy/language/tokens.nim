@@ -20,7 +20,7 @@ type
     case kind*: TokenKind
     of tkString:
       content*: string
-      singleQuote*: bool
+      singleQuote*: bool # xxx move to kind enum
     of tkNumber:
       num*: NumberRepr
     of tkWord:
