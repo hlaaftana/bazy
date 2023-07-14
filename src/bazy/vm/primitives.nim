@@ -127,14 +127,6 @@ type
   
   Value* = ValueObj
 
-  Property* = ref object
-    id*: PropertyId
-    name*: string
-    argumentType*: Type
-    # these are supposed to act on `prop.value`:
-    typeMatcher*: proc (t: Type, propVal: Value): TypeMatch
-    valueMatcher*: proc (v: Value, propVal: Value): bool
-
   TypeKind* = enum
     # maybe add unknown type for values with unknown type at runtime
     tyNone,
@@ -158,6 +150,30 @@ type
     tyCustomMatcher,
     # generic parameter
     tyParameter
+    
+  TypeMatch* = enum
+    # in order of strength
+    tmUnknown, tmNone, tmFiniteFalse, tmFalse, tmTrue, tmFiniteTrue, tmGeneric, tmAlmostEqual, tmEqual
+
+  Variance* = enum
+    Covariant
+    Contravariant
+    Invariant
+    Ultravariant
+  
+  ParameterInstantiation* = Table[TypeParameter, Type]
+
+  Property* = ref object
+    id*: PropertyId
+    name*: string
+    argumentType*: Type
+    # these are supposed to act on `prop.value`:
+    typeMatcher*: proc (t: Type, propVal: Value): TypeMatch
+    valueMatcher*: proc (v: Value, propVal: Value): bool
+    # XXX (6) maybe add compare
+    # not sure if these are temporary:
+    genericMatcher*: proc (pattern: Type, propVal: Value, t: Type, table: var ParameterInstantiation, variance = Covariant)
+    genericFiller*: proc (pattern: var Type, propVal: var Value, table: ParameterInstantiation)
 
   TypeParameter* = ref object
     id*: TypeParameterId # this needs to be assigned
@@ -200,23 +216,13 @@ type
     of tyCustomMatcher:
       typeMatcher*: proc (t: Type): TypeMatch
       valueMatcher*: proc (v: Value): bool
-      # could add custom compare
+      # XXX (6) maybe add compare
     of tyParameter:
       parameter*: TypeParameter
     #of tyGeneric:
     #  parameters*: Table[TypeParameter, TypeBound]
     #  genericPattern*: ref Type
-    
-  TypeMatch* = enum
-    # in order of strength
-    tmUnknown, tmNone, tmFiniteFalse, tmFalse, tmTrue, tmFiniteTrue, tmGeneric, tmAlmostEqual, tmEqual
 
-  Variance* = enum
-    Covariant
-    Contravariant
-    Invariant
-    Ultravariant
-  
   TypeBound* = object
     boundType*: Type
     variance*: Variance
@@ -329,8 +335,10 @@ type
     skVariableGet
     skVariableSet
     skFromImportedStack
-    skSetAddress
+      # XXX (5) should go, closure variables should be loaded to local stack with ArmStack
+    skSetAddress # XXX (5) remove, only use skVariableSet
     skArmStack
+      # XXX (5) should load closure variables too
     # goto
     skIf
     skWhile
@@ -405,8 +413,6 @@ type
       binaryInstructionKind*: BinaryInstructionKind
       binary1*, binary2*: Instruction
   Statement* = ref StatementObj
-  
-  ParameterInstantiation* = Table[TypeParameter, Type]
   
   Variable* = ref object
     name*: string

@@ -291,6 +291,7 @@ proc compare*(m1, m2: TypeMatch): int {.inline.} =
 
 proc compare*(t1, t2: Type): int =
   ## t1 < t2 mirrors being a subtype
+  # XXX (6) maybe add more logic to this? the current system might be too ambiguous
   let
     m1 = t1.match(t2)
     m2 = t2.match(t1)
@@ -530,6 +531,9 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
       match(pattern.typeWithProperty.unbox, t)
   of tyBaseType, tyCustomMatcher:
     discard # no type to traverse
+  for a, v in pattern.properties:
+    if unlikely(not a.genericMatcher.isNil):
+      a.genericMatcher(pattern, v, t, table, variance)
 
 proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
   template fill(a: var Type) = fillParameters(a, table)
@@ -568,3 +572,6 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     fill(pattern.notType)
   of tyWithProperty:
     fill(pattern.typeWithProperty)
+  for a, v in pattern.properties.mpairs:
+    if unlikely(not a.genericFiller.isNil):
+      a.genericFiller(pattern, v, table)

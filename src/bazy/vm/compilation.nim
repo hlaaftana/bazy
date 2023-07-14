@@ -23,7 +23,13 @@ defineProperty Meta, Property(name: "Meta",
     if t.properties.hasKey(propertySelf):
       match(arg.boxedValue.typeValue, t.properties[propertySelf].boxedValue.typeValue)
     else:
-      tmFalse)
+      tmFalse,
+  genericMatcher: proc (pattern: Type, arg: Value, t: Type, table: var ParameterInstantiation, variance = Covariant) =
+    let tyVal = arg.boxedValue.typeValue
+    if t.kind == tyFunction and tyVal.kind == tyFunction:
+      matchParameters(tyVal, t, table, variance),
+  genericFiller: proc (pattern: var Type, arg: var Value, table: ParameterInstantiation) =
+    fillParameters(arg.boxedValue.typeValue, table))
 
 defineProperty Fields, Property(name: "Fields",
   argumentType: Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32)),
@@ -365,7 +371,8 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
       for i in 0 ..< ex.arguments.len:
         if matchBound(+Ty(Statement), ty.param(i + 1)):
           makeStatement[i] = true
-          argumentTypes[i] = commonSubType(argumentTypes[i], metaTy.param(i))
+          # this should be correct but it was commonSubType before
+          argumentTypes[i] = commonSuperType(argumentTypes[i], metaTy.param(i))
     for i, x in makeStatement:
       if x:
         try:
