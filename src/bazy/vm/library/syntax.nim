@@ -1,4 +1,4 @@
-import ".."/[primitives, compilation, types, values], ../../language/[expressions, shortstring]
+import ".."/[primitives, compilation, types, values], ../../language/[expressions, shortstring], std/tables
 
 import common
 
@@ -10,12 +10,13 @@ module syntax:
     let st = scope.compile(args[0], +Ty(Any))
     result = toValue constant(scope.context.evaluateStatic(st.toInstruction), st.knownType)
   
-  # XXX (4) generic assignments or functions
+  # XXX (3) generic assignments or functions
   proc makeFn(scope: Scope, arguments: seq[Expression], body: Expression,
     name: string, returnBound: TypeBound, returnBoundSet: bool): Statement =
     let context = scope.context.childContext()
     let bodyScope = context.top
     var argTypes = newSeq[Type](arguments.len)
+    var argNames = initTable[Value, Value](arguments.len)
     for i in 0 ..< arguments.len:
       var arg = arguments[i]
       if arg.kind == Colon:
@@ -23,8 +24,15 @@ module syntax:
         arg = arg.left
       else:
         argTypes[i] = Ty(Any)
-      discard bodyScope.define($arg, argTypes[i])
-    var fnType = funcType(returnBound.boundType, argTypes)
+      let name = $arg
+      if name.len != 0 and name[0] != '_':
+        argNames[toValue name] = toValue i.int32
+      discard bodyScope.define(name, argTypes[i])
+    let fnTypeArguments = tupleType(argTypes).withProperties(
+      property(Fields, toValue argNames))
+    let fnType = Type(kind: tyFunction,
+      returnType: returnBound.boundType.box,
+      arguments: fnTypeArguments.box)
     var v: Variable
     if name.len != 0:
       v = scope.define(name, fnType)

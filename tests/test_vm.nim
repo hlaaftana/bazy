@@ -87,7 +87,7 @@ fibo(i: Int): Int =
 
 [fibo(3), fibo(4), fibo(5)]""": toValue(@[toValue(2), toValue(3), toValue(5)]),
 
-    # closures: xxx (5) mutable variables should be reference
+    # closures: xxx (1) mutable variables should be reference
     "a = 1; foo() = a; foo()": toValue(1),
     "a = 1; foo() = (b = 2; bar() = (c = 3; (a, b, c)); bar()); foo()": toValue(toArray([toValue(1), toValue(2), toValue(3)])),
     """
@@ -202,7 +202,7 @@ static
   a = foo()
   _ = a.setter.(3)
 a.getter.()""": toValue(3),
-    # XXX (5) not working yet (a gives 1):
+    # XXX (1) not working yet (a gives 1):
     "1": when true: toValue(1) else: {
     """
 foo() =

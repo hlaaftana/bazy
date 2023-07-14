@@ -15,6 +15,9 @@ notes:
 
 ]#
 
+# XXX (5) use a stream of tokens (Tokenizer.nextToken)
+# for lookaheads below, use buffer
+
 type
   ParserOptions* = object
     curlyBlocks*,
@@ -482,6 +485,7 @@ proc recordLineLevelUnfinished*(parser: var Parser, info: Info, closed = false):
               parser.conservePosNextIteration()
               break
       else:
+        # XXX (5) lookahead
         var lastPos = parser.pos
         var indentRecorded = false
         for tok in parser.nextTokens:
@@ -539,6 +543,7 @@ proc recordLineLevelUnfinished*(parser: var Parser, info: Info, closed = false):
     of tkColon:
       result.singleExprs.add(parser.newSymbolExpression(short":").withInfo(token.info))
     elif token.kind == tkBackslash and parser.options.backslashParenLine and
+      # XXX (5) lookahead
       parser.pos + 1 < parser.tokens.len and
       parser.tokens[parser.pos + 1].kind == tkOpenParen:
       inc parser.pos, 2

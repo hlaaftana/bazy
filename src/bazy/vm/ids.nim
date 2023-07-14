@@ -17,4 +17,4 @@ template id(kind) {.dirty.} =
 id(Property)
 id(TypeParameter)
 
-# XXX maybe intern strings?
+# XXX maybe intern identifiers or strings?

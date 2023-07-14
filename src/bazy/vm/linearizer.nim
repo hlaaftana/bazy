@@ -3,8 +3,8 @@ import "."/[primitives, compilation, arrays]
 # xxx do some kind of register last use analysis to merge some registers
 
 type
-  Register* = distinct uint16
-    # xxx maybe unify with constants, index constant pool when negative
+  Register* = distinct uint16 # 32 bit would be nice
+    # xxx maybe unify with constants, make signed, index constant pool when negative
   BytePos* = distinct uint16
 
   LinearInstructionKind* = enum
@@ -159,7 +159,7 @@ proc addBytes*(bytes: var openarray[byte], i: var int, instr: LinearInstruction)
   case instr.kind
   of NoOp: discard
   of SetRegisterConstant:
-    discard "add instr.src" # XXX serialize values
+    discard "add instr.src" # XXX serialize values (but not here, in constant pool)
   of SetRegisterRegister:
     add instr.srr
   of UnaryCall:
@@ -216,12 +216,14 @@ proc add(fn: LinearFunction, instr: LinearInstruction) =
   fn.instructions.add(instr)
   fn.byteCount += instr.byteCount
 
+# xxx add way to read instruction
+
 proc newRegister(fn: LinearFunction): Register =
   result = fn.registerCount.Register
   inc fn.registerCount
 
 # xxx maybe special registers for specific behaviors
-# i.e. a single register to load constants into
+# i.e. a single register to load constants into (not this)
 
 proc linearize*(context: Context, fn: LinearFunction, result: var Result, s: Statement) =
   type Instr = LinearInstruction

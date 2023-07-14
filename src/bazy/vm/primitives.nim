@@ -17,7 +17,7 @@ type
     vkReference
       ## reference value, can be mutable
       ## only value kind with reference semantics
-    vkBoxed # XXX (3) maybe do BoxedInt32, BoxedUint32 etc
+    vkBoxed # XXX (4) maybe do BoxedInt32, BoxedUint32 etc
     vkInt64, vkUint64, vkFloat64
     vkType
       ## type value
@@ -49,7 +49,8 @@ else:
 type
   FullValueObj* {.unlikelyCycles.} = object
     `type`*: ref Type
-      # XXX (3) actually use and account for this without losing performance
+      # XXX (4) actually use and account for this without losing performance
+      # for now it's mostly seen, but nothing initializes values with it 
     case kind*: ValueKind
     of vkNone: discard
     of vkBool:
@@ -181,7 +182,7 @@ type
     bound*: TypeBound
   
   Type* {.unlikelyCycles.} = object # could be cyclic
-    # XXX (4) for easier generics etc maybe just have a base type, argument types, and properties
+    # XXX (3) for easier generics etc maybe just have a base type, argument types, and properties
     properties*: Table[Property, Value]
     case kind*: TypeKind
     of tyNoneValue,
@@ -191,7 +192,7 @@ type
       tyAny, tyNone:
       discard
     of tyFunction:
-      # XXX (1) account for Fields and Defaults property of the `arguments` tuple type
+      # XXX (2) account for Fields and Defaults property of the `arguments` tuple type
       # only considered at callsite like nim, no semantic value
       arguments*: Box[Type] # tuple type, includes varargs
       returnType*: Box[Type]
@@ -335,10 +336,10 @@ type
     skVariableGet
     skVariableSet
     skFromImportedStack
-      # XXX (5) should go, closure variables should be loaded to local stack with ArmStack
-    skSetAddress # XXX (5) remove, only use skVariableSet
+      # XXX (1) should go, closure variables should be loaded to local stack with ArmStack
+    skSetAddress # XXX (1) remove, only use skVariableSet
     skArmStack
-      # XXX (5) should load closure variables too
+      # XXX (1) should load closure variables too
     # goto
     skIf
     skWhile
@@ -420,7 +421,7 @@ type
     knownType*: Type
     stackIndex*: int
     scope*: Scope
-    # XXX (4) maybe make this a tuple type too with signature for named and default generic params
+    # XXX (3) maybe make this a tuple type too with signature for named and default generic params
     genericParams*: seq[TypeParameter]
     lazyExpression*: Expression
     evaluated*: bool
@@ -428,7 +429,7 @@ type
   Context* = ref object
     ## current module or function
     imports*: seq[Context]
-      # XXX (5) imports should not work like this/exist
+      # XXX (1) imports should not work like this/exist
       # modules should probably be like JS or lua where
       # the module creates a module object which is what gets imported
       # stacks should never persist, persistent memory should be vkReference

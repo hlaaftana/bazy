@@ -32,14 +32,10 @@ defineProperty Meta, Property(name: "Meta",
     fillParameters(arg.boxedValue.typeValue, table))
 
 defineProperty Fields, Property(name: "Fields",
-  argumentType: Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32)),
-  typeMatcher: proc (t: Type, arg: Value): TypeMatch =
-    if t.properties.hasKey(propertySelf) and arg.boxedValue.tableValue == t.properties[propertySelf].boxedValue.tableValue:
-      tmEqual
-    else:
-      tmAlmostEqual)
+  argumentType: Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32)))
 
-# XXX (1) also Defaults purely for initialization/conversion
+# XXX (2) also Defaults purely for initialization/conversion
+# maybe on function type? hard to use when on tuple type
 
 proc newVariable*(name: string, knownType: Type = default(Type)): Variable =
   Variable(name: name, nameHash: name.hash, knownType: knownType)
@@ -293,7 +289,7 @@ proc resolve*(scope: Scope, ex: Expression, name: string, bound: TypeBound): Var
       msg: "no overloads with bound " & $bound & " for " & $ex)
   result = overloads[0]
   when false:
-    # can implement generic evaluation here
+    # xxx can implement generic evaluation here
     # maybe lazyExpression compiled with a new scope with the type variables
     # but then we would need to save every version
     # can generate new variables but that would fill up scope
@@ -352,12 +348,12 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
   var argumentTypes = newSeq[Type](ex.arguments.len)
   for t in argumentTypes.mitems: t = Ty(Any)
   # XXX pass type bound as well as scope, to pass both to a compile proc
+  # maybe by passing a meta call context object
   var realArgumentTypes = newSeq[Type](ex.arguments.len + 1)
   realArgumentTypes[0] = Ty(Scope)
   for i in 1 ..< realArgumentTypes.len:
     realArgumentTypes[i] = union(Ty(Expression), Ty(Statement))
   # get all metas first and type statements accordingly
-  # XXX (4) make generics work with meta property
   var allMetas = overloads(scope, name,
     *funcType(Ty(Statement), realArgumentTypes).withProperties(
       property(Meta, toValue funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes))))
@@ -471,7 +467,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
             let pt = t.param(i)
             if matchBound(-argumentTypes[i], pt):
               # optimize checking types we know match
-              # XXX (3?) do this recursively?
+              # XXX (4?) do this recursively?
               d[0][i] = Ty(Any)
             else:
               d[0][i] = pt
@@ -483,7 +479,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
 
 proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement =
-  # XXX (1) account for Fields and Defaults properties of function arguments tuple type
+  # XXX (2) account for Fields and Defaults properties of function arguments tuple type
   if ex.address.isIdentifier(name):
     # XXX should meta calls take evaluation priority or somehow be considered equal in overloading with runtime calls
     result = compileMetaCall(scope, name, ex, bound, argumentStatements)

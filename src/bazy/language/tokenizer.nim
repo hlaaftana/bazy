@@ -1,5 +1,8 @@
 import number, shortstring, tokens, ../defines, std/strutils, info
 
+# if possible to allow any stream of characters rather than full string object
+# without using proc pointers, do it
+
 when useUnicode:
   import std/unicode
 

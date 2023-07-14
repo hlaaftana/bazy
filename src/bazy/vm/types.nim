@@ -378,7 +378,7 @@ proc checkType*(value: FullValueObj, t: Type): bool =
   of tyUint64: value.kind == vkUint64
   of tyFloat64: value.kind == vkFloat64
   of tyFunction:
-    # XXX (3) no information about signature
+    # XXX (4) no information about signature
     value.kind in {vkFunction, vkNativeFunction}
   of tyTuple:
     value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements)
