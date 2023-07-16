@@ -247,17 +247,18 @@ proc recordSingle*(parser: var Parser, info: Info): Expression =
        tkComma, tkSemicolon, tkCloseParen,
        tkCloseCurly, tkCloseBrack, tkColon:
       finish()
-    of tkString, tkNumber, tkWord:
+    of tkString, tkSingleQuoteString, tkNumber, tkWord, tkQuotedWord:
       if lastWhitespace and not lastDot:
         finish()
       let ex = case token.kind
-        of tkString:
-          Expression(kind: String,
-            str: if result.isNil or lastDot: unescape(token.content) else: token.content,
-            singleQuote: token.singleQuote,
-            info: token.info)
+        of tkString, tkSingleQuoteString:
+          let str = if result.isNil or lastDot: unescape(token.content) else: token.content
+          if token.kind == tkSingleQuoteString:
+            Expression(kind: SingleQuoteString, str: str, info: token.info)
+          else:
+            Expression(kind: String, str: str, info: token.info)
         of tkNumber: Expression(kind: Number, number: token.num, info: token.info)
-        of tkWord: Expression(kind: Name, identifier: token.raw, info: token.info)
+        of tkWord, tkQuotedWord: Expression(kind: Name, identifier: token.raw, info: token.info)
         else: nil
       if result.isNil:
         result = ex
@@ -540,7 +541,7 @@ proc recordLineLevelUnfinished*(parser: var Parser, info: Info, closed = false):
               else:
                 nil
             if postArgKind == call:
-              parser.currentToken = Token(kind: tkWord, raw: $tok.short, quoted: true, info: tok.info)
+              parser.currentToken = Token(kind: tkQuotedWord, raw: $tok.short, info: tok.info)
             else:
               parser.nextToken()
               for tok in parser.nextTokens:

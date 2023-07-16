@@ -4,7 +4,7 @@ export same
 type
   ExpressionKind* = enum
     None
-    Number, String
+    Number, String, SingleQuoteString
     Name, Symbol
     Wrapped
     OpenCall, Infix, Prefix, Postfix
@@ -20,9 +20,8 @@ type
     of None: discard
     of Number:
       number*: NumberRepr
-    of String:
+    of String, SingleQuoteString:
       str*: string
-      singleQuote*: bool # xxx move to kind enum
     of Name:
       identifier*: string
     of Symbol:
@@ -83,7 +82,7 @@ proc copy*(ex: Expression): Expression =
   case ex.kind
   of None: discard
   of Number: result.number = ex.number
-  of String: result.str = ex.str
+  of String, SingleQuoteString: result.str = ex.str
   of Name: result.identifier = ex.identifier
   of Symbol: result.symbol = ex.symbol
   of Wrapped: result.wrapped = copy ex.wrapped
@@ -136,6 +135,7 @@ proc `$`*(ex: Expression): string {.noSideEffect.}  =
   of None: "()"
   of Number: $ex.number
   of String: "\"" & ex.str & "\""
+  of SingleQuoteString: "'" & ex.str & "'"
   of Name: ex.identifier
   of Symbol: $ex.symbol
   of Wrapped: "(" & $ex.wrapped & ")"
@@ -179,6 +179,7 @@ proc repr*(ex: Expression): string {.noSideEffect.}  =
   of None: "None"
   of Number: "Number " & $ex.number
   of String: "String \"" & ex.str & "\""
+  of SingleQuoteString: "String \'" & ex.str & "\'"
   of Name: $ex.kind & " " & ex.identifier
   of Symbol: $ex.kind & " " & $ex.symbol
   of Wrapped: "Wrapped(" & ex.wrapped.repr & ")"
@@ -286,7 +287,7 @@ proc binary*(ex: Expression): string =
     let str = $ex.number
     result.add(str.len.char)
     result.add(str)
-  of String:
+  of String, SingleQuoteString:
     let s = ex.str
     result.add(char (s.len shr 24) and 0xFF)
     result.add(char (s.len shr 16) and 0xFF)

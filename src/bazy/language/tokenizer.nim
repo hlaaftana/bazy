@@ -457,10 +457,13 @@ proc nextToken*(tz: var Tokenizer): Token =
       of '}': closeDelim tkCloseCurly
       of '\'', '"', '`':
         let s = recordString(tz, ch)
-        if c == '`':
-          add Token(kind: tkWord, raw: s, quoted: true)
+        case c.asChar
+        of '`':
+          add Token(kind: tkQuotedWord, raw: s)
+        of '\'':
+          add Token(kind: tkSingleQuoteString, content: s)
         else:
-          add Token(kind: tkString, content: s, singleQuote: c == '\'')
+          add Token(kind: tkString, content: s)
       of '0'..'9':
         tz.resetPos()
         let n = recordNumber(tz)

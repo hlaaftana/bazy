@@ -8,24 +8,20 @@ type
     tkNone, tkWhitespace, tkIndent, tkIndentBack, tkNewLine
     tkBackslash, tkDot, tkComma, tkColon, tkSemicolon
     tkOpenParen, tkCloseParen, tkOpenBrack, tkCloseBrack, tkOpenCurly, tkCloseCurly
-    tkString, tkNumber, tkWord, tkSymbol
+    tkString, tkSingleQuoteString, tkNumber, tkWord, tkQuotedWord, tkSymbol
   
   CharacterTokenKind* = range[tkBackslash..tkCloseCurly]
-  
-  QuoteKind* = enum singleQuote, doubleQuote
 
   TokenObj* = object
     when doLineColumn:
       info*: Info
     case kind*: TokenKind
-    of tkString:
+    of tkString, tkSingleQuoteString:
       content*: string
-      singleQuote*: bool # xxx move to kind enum
     of tkNumber:
       num*: NumberRepr
-    of tkWord:
+    of tkWord, tkQuotedWord:
       raw*: string
-      quoted*: bool
     of tkSymbol:
       short*: ShortString
     else: discard
@@ -68,11 +64,11 @@ proc `$`*(token: Token): string =
   of tkNewLine: "\p"
   of tkBackslash..tkCloseCurly:
     $CharacterTokens[token.kind]
-  of tkString:
-    let c = [false: '"', true: '\''][token.singleQuote]
-    c & token.content & c
+  of tkString: '"' & token.content & '"'
+  of tkSingleQuoteString: '\'' & token.content & '\''
   of tkNumber: $token.num
   of tkWord: token.raw
+  of tkQuotedWord: '`' & token.raw & '`'
   of tkSymbol: $token.short
 
 proc `$`*(tokens: seq[Token]): string =
@@ -99,8 +95,8 @@ proc `==`*(tok1, tok2: Token): bool =
     if tok1.isNil xor tok2.isNil: return false
   if tok1.kind != tok2.kind: return false
   case tok1.kind
-  of tkString: tok1.content == tok2.content
+  of tkString, tkSingleQuoteString: tok1.content == tok2.content
   of tkNumber: tok1.num == tok2.num
-  of tkWord: tok1.raw == tok2.raw
+  of tkWord, tkQuotedWord: tok1.raw == tok2.raw
   of tkSymbol: tok1.short == tok2.short
   else: true

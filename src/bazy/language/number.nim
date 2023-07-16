@@ -15,6 +15,8 @@ when defined(js):
 else:
   type NumberRepr* = NumberReprObj
 
+when false: {.hint: $sizeof(NumberRepr).}
+
 proc `$`*(number: NumberRepr): string =
   var exponent: string
   let dotIndex =

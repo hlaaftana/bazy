@@ -609,7 +609,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   case ex.kind
   of None: result = Statement(kind: skNone, knownType: Ty(None))
   of Number: result = compileNumber(ex, bound)
-  of String: result = constant(ex.str)
+  of String, SingleQuoteString: result = constant(ex.str)
   of Wrapped: result = forward(ex.wrapped)
   of Name, Symbol:
     # XXX warn on ambiguity, thankfully recency is accounted for
