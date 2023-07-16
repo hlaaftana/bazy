@@ -27,7 +27,7 @@ proc getCachedFile*(filename: string): CachedFile =
   fileCacheVar[result] = (filename, hash)
 
 proc `$`*(a: CachedFile): string =
-  fileCacheVar[a].filename
+  fileCacheVar.getOrDefault(a, (filename: "<unknown file>", filenameHash: 0)).filename
 
 proc `$`*(info: Info): string =
-  result = $info.file & "(" & $info.line & ", " & $info.column
+  result = $info.file & "(" & $info.line & ", " & $info.column & ")"

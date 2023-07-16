@@ -18,6 +18,15 @@ test "simple code":
     "a + b - c": "((a + b) - c)",
     "a * b / c ^ d ^ e << f | g + h < i as j":
       "((((a * b) / (c ^ (d ^ e))) << ((f | g) + h)) < (i as j))",
+    "a\nb": """(
+  a;
+  b
+)""",
+    "a\nb\nc": """(
+  a;
+  b;
+  c
+)""",
     "a do\n  b": "a(b)",
     "a\n  b\n  c\nd\ne\n  f\n    g\nh": """(
   a((

@@ -3,7 +3,7 @@ export parser, tokenizer, expressions, tokens
 
 proc parse*(str: string): Expression =
   var tokenizer = newTokenizer(str)
-  result = parser.parse(tokenizer.tokenize())
+  result = parser.parse(tokenizer)
 
 when not defined(js) and not defined(nimscript):
   import bazy/vm/[compilation, primitives, library/prelude]

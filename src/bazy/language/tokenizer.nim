@@ -1,8 +1,5 @@
 import number, shortstring, tokens, ../defines, std/strutils, info
 
-# if possible to allow any stream of characters rather than full string object
-# without using proc pointers, do it
-
 when useUnicode:
   import std/unicode
 
@@ -47,6 +44,8 @@ type
   Tokenizer* = ref object
     options*: TokenizerOptions
     str*: string
+      # XXX (5) convert to abstraction of resetPos, nextRune, hasRune
+      # either proc pointers or generic type overloads
     lastKind*: TokenKind
     queue*: seq[Token]
     queuePos*: int
@@ -65,7 +64,9 @@ proc defaultOptions*(): TokenizerOptions =
     stringQuoteEscape: true,
     backslashBreakNewline: true,
     commaIgnoreIndent: true)
-  for it in @["do", "else", "and", "or", "is", "as", "not", "in",
+  for it in ["do", "else",
+    "is", "as", "in", 
+    "not", "and", "or",
     "div", "mod", "xor"]:
     result.symbolWords.add(it.toShortString)
 
@@ -111,7 +112,7 @@ proc nextRune*(tz: var Tokenizer) =
         tz.cl += 1
 
 iterator runes*(tz: var Tokenizer): Rune =
-  while tz.pos < len(tz.str):
+  while tz.pos < len(tz.str): # XXX (5) use hasRune
     tz.nextRune()
     yield tz.currentRune
 
@@ -126,6 +127,7 @@ proc recordString*(tz: var Tokenizer, quote: char): string =
     elif tz.options.stringBackslashEscape and c == '\\':
       escaped = true
     elif c == quote:
+      # XXX (5) single char lookahead
       if tz.options.stringQuoteEscape and tz.pos < tz.str.len and tz.str[tz.pos] == quote:
         tz.nextRune()
         result.add(c)
@@ -145,7 +147,7 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
     lastZeros = 0 # Natural
     recordedExp: int16 = 0
   
-  var prevPos2: int
+  var prevPos2: int # XXX (5) complex lookahead
   when doLineColumn:
     var prevCol2: int
   
@@ -464,6 +466,7 @@ proc nextToken*(tz: var Tokenizer): Token =
         let n = recordNumber(tz)
         add Token(kind: tkNumber, num: n)
       of '+', '-':
+        # XXX (5) single char lookahead
         if tz.pos < tz.str.len and tz.str[tz.pos] in {'0'..'9'}:
           add Token(kind: tkNumber, num: recordNumber(tz, ch == '-'))
         else:
