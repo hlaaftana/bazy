@@ -35,7 +35,7 @@ defineProperty Fields, Property(name: "Fields",
   argumentType: Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32)))
 
 # XXX (2) also Defaults purely for initialization/conversion
-# maybe on function type? hard to use when on tuple type
+# meaning only considered in function type relation
 
 proc newVariable*(name: string, knownType: Type = default(Type)): Variable =
   Variable(name: name, nameHash: name.hash, knownType: knownType)
@@ -480,6 +480,8 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
 proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement =
   # XXX (2) account for Fields and Defaults properties of function arguments tuple type
+  # maybe add Call property to let function types know they are being matched against
+  # synthetic types formed from call expressions
   if ex.address.isIdentifier(name):
     # XXX should meta calls take evaluation priority or somehow be considered equal in overloading with runtime calls
     result = compileMetaCall(scope, name, ex, bound, argumentStatements)

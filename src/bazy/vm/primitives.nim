@@ -154,7 +154,11 @@ type
     
   TypeMatch* = enum
     # in order of strength
-    tmUnknown, tmNone, tmFiniteFalse, tmFalse, tmTrue, tmFiniteTrue, tmGeneric, tmAlmostEqual, tmEqual
+    tmUnknown, tmNone,
+    tmFiniteFalse, tmFalse,
+    tmTrue, tmFiniteTrue,
+    tmSimilar, tmGeneric,
+    tmAlmostEqual, tmEqual
 
   Variance* = enum
     Covariant
@@ -194,11 +198,13 @@ type
     of tyFunction:
       # XXX (2) account for Fields and Defaults property of the `arguments` tuple type
       # only considered at callsite like nim, no semantic value
+      # meaning this is specific to function type relation
       arguments*: Box[Type] # tuple type, includes varargs
       returnType*: Box[Type]
     of tyTuple:
       elements*: seq[Type]
       varargs*: Box[Type] # for now only trailing
+        # XXX either move to property, or allow non-trailing
     of tyReference, tyList, tySet:
       elementType*: Box[Type]
     of tyTable:

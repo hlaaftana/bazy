@@ -1,6 +1,8 @@
 import "."/[primitives, compilation, arrays]
 
 # xxx do some kind of register last use analysis to merge some registers
+# xxx constant pool can be long string of serialized values,
+# then they are deserialized and cached into registers when loaded
 
 type
   Register* = distinct uint16 # 32 bit would be nice
@@ -216,14 +218,13 @@ proc add(fn: LinearFunction, instr: LinearInstruction) =
   fn.instructions.add(instr)
   fn.byteCount += instr.byteCount
 
-# xxx add way to read instruction
+# xxx add way to read instruction from bytes
 
 proc newRegister(fn: LinearFunction): Register =
   result = fn.registerCount.Register
   inc fn.registerCount
 
 # xxx maybe special registers for specific behaviors
-# i.e. a single register to load constants into (not this)
 
 proc linearize*(context: Context, fn: LinearFunction, result: var Result, s: Statement) =
   type Instr = LinearInstruction

@@ -164,7 +164,7 @@ proc `*`*(t: Type, variance: Variance): TypeBound {.inline.} = TypeBound(boundTy
 
 proc converse*(tm: TypeMatch): TypeMatch =
   case tm
-  of tmEqual, tmNone, tmAlmostEqual, tmUnknown: tm
+  of tmEqual, tmNone, tmSimilar, tmAlmostEqual, tmUnknown: tm
   of tmTrue: tmFalse
   of tmFalse: tmTrue
   of tmFiniteTrue, tmGeneric: tmFiniteFalse
