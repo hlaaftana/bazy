@@ -65,8 +65,8 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyUint64: 0,
   tyFloat64: 0,
   tyReference: 1,
-  tyFunction: 2,
   tyTuple: -1,
+  tyFunction: 2,
   tyList: 1,
   tyString: 0,
   tySet: 1,
@@ -92,7 +92,7 @@ proc len*(t: Type): int =
     case t.kind
     of tyTuple:
       if t.varargs.isNone:
-        result = t.elements.len
+        result = t.elements.len + t.unorderedFields.len
     of tyUnion, tyIntersection:
       result = t.operands.len
     else: discard
@@ -213,6 +213,9 @@ proc match*(matcher, t: Type): TypeMatch =
     of tyReference, tyList, tySet:
       match(+matcher.elementType.unbox, t.elementType.unbox)
     of tyTuple:
+      # XXX (2) unorderedFields
+      # (name: string, age: int) is named tuple vs (name: string anywhere, age: int anywhere) is typeclass but also type of function call arguments
+      # second is strict subtype, like (name: string: 1, age: int: 2) vs (name: string: {1, 2}, age: int: {1, 2})
       if matcher.elements.len != t.elements.len and matcher.varargs.isNone and t.varargs.isNone:
         return tmNone
       var max = t.elements.len
@@ -498,6 +501,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
       matchParameters(pattern.returnType.unbox, t.returnType.unbox, table, variance = Contravariant)
   of tyTuple:
     if t.kind == tyTuple:
+      # XXX (2) unorderedFields
       let
         pl = pattern.elements.len
         tl = t.elements.len
@@ -555,6 +559,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     fill(pattern.arguments)
     fill(pattern.returnType)
   of tyTuple:
+    # XXX (2) unorderedFields
     for e in pattern.elements.mitems:
       fill(e)
     fill(pattern.varargs)

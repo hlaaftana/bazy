@@ -31,8 +31,8 @@ defineProperty Meta, Property(name: "Meta",
   genericFiller: proc (pattern: var Type, arg: var Value, table: ParameterInstantiation) =
     fillParameters(arg.boxedValue.typeValue, table))
 
-defineProperty Fields, Property(name: "Fields",
-  argumentType: Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32)))
+#defineProperty Fields, Property(name: "Fields",
+#  argumentType: Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32)))
 
 # XXX (2) also Defaults purely for initialization/conversion
 # meaning only considered in function type relation
@@ -323,11 +323,8 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
 
 proc compileProperty*(scope: Scope, ex: Expression, lhs: Statement, name: string, bound: TypeBound): Statement =
   result = nil
-  if lhs.knownType.kind == tyTuple and lhs.knownType.properties.hasKey(Fields) and (
-    let tab = lhs.knownType.properties[Fields].boxedValue.tableValue;
-    let nam = toValue(name);
-    tab.contains(nam)):
-    let ind = tab[nam].int32Value
+  if lhs.knownType.kind == tyTuple and lhs.knownType.elementNames.contains(name):
+    let ind = lhs.knownType.elementNames[name]
     result = Statement(kind: skGetIndex,
       knownType: lhs.knownType.nth(ind),
       getIndexAddress: lhs,
@@ -441,6 +438,9 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
     if argumentStatements[i].isNil:
       argumentStatements[i] = map(ex.arguments[i])
     argumentTypes[i] = argumentStatements[i].knownType
+  # XXX (2) named arguments should go in the unorderedFields of the argument tuple type
+  # which will then match against ordered fields with the given names
+  # unsure about default arguments
   functionType = funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes)
   # lowest supertype function:
   try:
@@ -479,11 +479,9 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
 
 proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement =
-  # XXX (2) account for Fields and Defaults properties of function arguments tuple type
-  # maybe add Call property to let function types know they are being matched against
-  # synthetic types formed from call expressions
   if ex.address.isIdentifier(name):
     # XXX should meta calls take evaluation priority or somehow be considered equal in overloading with runtime calls
+    # leaning toward yes
     result = compileMetaCall(scope, name, ex, bound, argumentStatements)
   if result.isNil:
     var argumentTypes = newSeq[Type](ex.arguments.len)
@@ -517,12 +515,12 @@ proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): St
   if bound.boundType.kind == tyTuple:
     assert bound.boundType.elements.len == ex.elements.len, "tuple bound type lengths do not match"
   result = Statement(kind: skTuple, knownType: Type(kind: tyTuple, elements: newSeqOfCap[Type](ex.elements.len)))
-  var fields: Table[Value, Value]
   for i, e in ex.elements:
     var val: Expression
     if e.kind == Colon:
       assert e.left.kind == Name, "tuple field has non-name left hand side on colon expression"
-      fields[toValue(e.left.identifier)] = toValue(i.int32)
+      let name = e.left.identifier
+      result.knownType.elementNames[name] = i
       val = e.right
     else:
       val = e
@@ -532,8 +530,6 @@ proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): St
       map val
     result.elements.add(element)
     result.knownType.elements.add(element.knownType)
-  if fields.len != 0:
-    result.knownType.properties[Fields] = toValue(fields)
 
 proc compileArrayExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   result = Statement(kind: skList, knownType: Ty(List))

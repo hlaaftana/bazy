@@ -15,21 +15,18 @@ module syntax:
     name: string, returnBound: TypeBound, returnBoundSet: bool): Statement =
     let context = scope.context.childContext()
     let bodyScope = context.top
-    var argTypes = newSeq[Type](arguments.len)
-    var argNames = initTable[Value, Value](arguments.len)
+    var fnTypeArguments = Type(kind: tyTuple, elements: newSeq[Type](arguments.len))
     for i in 0 ..< arguments.len:
       var arg = arguments[i]
       if arg.kind == Colon:
-        argTypes[i] = scope.evaluateStatic(arg.right, +Type(kind: tyType, typeValue: box Ty(Any))).boxedValue.typeValue
+        fnTypeArguments.elements[i] = scope.evaluateStatic(arg.right, +Type(kind: tyType, typeValue: box Ty(Any))).boxedValue.typeValue
         arg = arg.left
       else:
-        argTypes[i] = Ty(Any)
+        fnTypeArguments.elements[i] = Ty(Any)
       let name = $arg
       if name.len != 0 and name[0] != '_':
-        argNames[toValue name] = toValue i.int32
-      discard bodyScope.define(name, argTypes[i])
-    let fnTypeArguments = tupleType(argTypes).withProperties(
-      property(Fields, toValue argNames))
+        fnTypeArguments.elementNames[name] = i
+      discard bodyScope.define(name, fnTypeArguments.elements[i])
     let fnType = Type(kind: tyFunction,
       returnType: returnBound.boundType.box,
       arguments: fnTypeArguments.box)

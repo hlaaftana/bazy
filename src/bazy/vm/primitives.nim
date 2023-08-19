@@ -41,13 +41,8 @@ type
 
 const boxedValueKinds* = {vkBoxed..high(ValueKind)}
 
-when disableUnlikelyCycles:
-  {.pragma: unlikelyCycles, acyclic.}
-else:
-  {.pragma: unlikelyCycles.}
-
 type
-  FullValueObj* {.unlikelyCycles.} = object
+  FullValueObj* = object
     `type`*: ref Type
       # XXX (4) actually use and account for this without losing performance
       # for now it's mostly seen, but nothing initializes values with it 
@@ -99,7 +94,7 @@ type
 
   #OpaqueValue* = ref object of RootObj 
 
-  ValueObj* {.unlikelyCycles.} = object # could be cyclic
+  ValueObj* = object
     # entire thing can be pointer tagged, but would need GC hooks
     # maybe interning for some pointer types
     case kind*: ValueKind
@@ -136,7 +131,8 @@ type
     tyInt32, tyUint32, tyFloat32, tyBool,
     tyInt64, tyUint64, tyFloat64,
     tyReference,
-    tyFunction, tyTuple,
+    tyTuple, # XXX (2) make into tyComposite, tuple, named tuple, array (i.e. int^20) all at once
+    tyFunction,
     tyList,
     tyString,
     tySet,
@@ -185,7 +181,7 @@ type
     name*: string
     bound*: TypeBound
   
-  Type* {.unlikelyCycles.} = object # could be cyclic
+  Type* = object
     # XXX (3) for easier generics etc maybe just have a base type, argument types, and properties
     properties*: Table[Property, Value]
     case kind*: TypeKind
@@ -195,16 +191,18 @@ type
       tyString, tyExpression, tyStatement, tyScope,
       tyAny, tyNone:
       discard
+    of tyTuple:
+      elements*: seq[Type]
+      varargs*: Box[Type] # for now only trailing
+        # XXX either move to property, or allow non-trailing
+      elementNames*: Table[string, int]
+      unorderedFields*: Table[string, Type]
     of tyFunction:
       # XXX (2) account for Fields and Defaults property of the `arguments` tuple type
       # only considered at callsite like nim, no semantic value
       # meaning this is specific to function type relation
       arguments*: Box[Type] # tuple type, includes varargs
       returnType*: Box[Type]
-    of tyTuple:
-      elements*: seq[Type]
-      varargs*: Box[Type] # for now only trailing
-        # XXX either move to property, or allow non-trailing
     of tyReference, tyList, tySet:
       elementType*: Box[Type]
     of tyTable:
@@ -234,7 +232,7 @@ type
     boundType*: Type
     variance*: Variance
 
-  Stack* {.unlikelyCycles.} = ref object
+  Stack* = ref object
     imports*: Array[Stack]
     stack*: Array[Value]
 
@@ -331,6 +329,10 @@ type
     of low(BinaryInstructionKind) .. high(BinaryInstructionKind):
       binary1*, binary2*: Instruction
   Instruction* = ref InstructionObj
+  
+  VariableAddress* = object
+    ## address of variable relative to context
+    indices*: seq[int]
   
   StatementKind* = enum
     skNone
@@ -449,6 +451,8 @@ type
         # maybe vkReference shouldn't exist and Value should always have value semantics
         # for serialization and initialization in bytecode etc
         # or just have a rule to allocate a new reference every time a vkReference constant is loaded
+    parent*: Context # XXX (1)
+    captures*: seq[VariableReference] # XXX (1)
     stack*: Stack
     stackSize*: int
     top*: Scope
@@ -460,10 +464,6 @@ type
     parent*: Scope
     context*: Context
     variables*: seq[Variable] ## should not shrink
-  
-  VariableAddress* = object
-    ## address of variable relative to context
-    indices*: seq[int]
 
   VariableReference* = object
     variable*: Variable
@@ -668,9 +668,9 @@ proc `$`*(t: Type): string =
   of tyScope: "Scope"
   of tyAny: "Any"
   of tyNone: "None"
+  of tyTuple: "Tuple(" & $t.elements & (if t.unorderedFields.len == 0: "" else: " " & $t.unorderedFields) & (if t.varargs.isNone: ")" else: ", " & $t.varargs & "...)")
   of tyFunction:
     "Function(" & $t.arguments & ") -> " & $t.returnType
-  of tyTuple: "Tuple(" & $t.elements & (if t.varargs.isNone: ")" else: ", " & $t.varargs & "...)")
   of tyReference: "Reference(" & $t.elementType & ")"
   of tyList: "List(" & $t.elementType & ")"
   of tySet: "Set(" & $t.elementType & ")"
