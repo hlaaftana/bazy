@@ -3,7 +3,7 @@ when (compiles do: import nimbleutils/bridge):
 else:
   import unittest
 
-import bazy, bazy/vm/[primitives, values, types, compilation, arrays]
+import abyzou, abyzou/vm/[primitives, values, types, compilation, arrays]
 
 test "type relation":
   check {Ty(Int32).match(Ty(Float32)), Ty(Float32).match(Ty(Int32))} == {tmNone}
@@ -249,7 +249,7 @@ c = foo()
         echo (ref NoOverloadFoundError)(getCurrentException()).scope.variables
       raise
 
-import bazy/vm/library/common
+import abyzou/vm/library/common
 
 module withVarargsFn:
   define "max", funcTypeWithVarargs(Ty(Int32), [], Ty(Int32)), (doFn do:

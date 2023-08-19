@@ -3,7 +3,7 @@ when (compiles do: import nimbleutils/bridge):
 else:
   import unittest
 
-import bazy
+import abyzou
 
 test "simple code":
   let tests = {
@@ -218,7 +218,7 @@ else
     checkpoint "expected: " & b
     check a == b
 
-import bazy/language/shortstring
+import abyzou/language/shortstring
 
 test "equivalent syntax":
   let equivalents = {

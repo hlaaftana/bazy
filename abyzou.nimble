@@ -6,7 +6,7 @@ description   = "bagy"
 license       = "MIT"
 srcDir        = "src"
 installExt    = @["nim"]
-skipDirs      = @["src/bazy/disabled"]
+skipDirs      = @["src/abyzou/disabled"]
 
 
 # Dependencies
@@ -18,7 +18,7 @@ when (compiles do: import nimbleutils):
 
 task docs, "build docs for all modules":
   when declared(buildDocs):
-    buildDocs(gitUrl = "https://github.com/metagn/bazy")
+    buildDocs(gitUrl = "https://github.com/metagn/abyzou")
   else:
     echo "docs task not implemented, need nimbleutils"
 
@@ -29,8 +29,8 @@ task tests, "run tests for multiple backends":
       "--gc:orc",
       #"--gc:orc -d:useMalloc",
       #"--gc:orc -d:danger",
-      #"-d:bazyUseUnicode=false",
-      #"-d:bazyDoLineColumn=false"
+      #"-d:abyzouUseUnicode=false",
+      #"-d:abyzouDoLineColumn=false"
     ])
     runTests(@["tests/test_parser.nim"], backends = {js, nims})
   else:
@@ -38,6 +38,6 @@ task tests, "run tests for multiple backends":
 
 task buildall, "builds library and exe":
   echo "building all"
-  exec "nim c -d:release --gc:orc --d:useMalloc --outdir:bin src/bazy"
-  exec "nim c --app:lib -d:release --gc:orc --d:useMalloc --outdir:bin src/bazy"
+  exec "nim c -d:release --gc:orc --d:useMalloc --outdir:bin src/abyzou"
+  exec "nim c --app:lib -d:release --gc:orc --d:useMalloc --outdir:bin src/abyzou"
   echo "done building"

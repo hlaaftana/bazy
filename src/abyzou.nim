@@ -1,4 +1,4 @@
-import bazy/language/[parser, tokenizer, expressions, tokens]
+import abyzou/language/[parser, tokenizer, expressions, tokens]
 export parser, tokenizer, expressions, tokens
 
 proc parse*(str: string): Expression =
@@ -6,7 +6,7 @@ proc parse*(str: string): Expression =
   result = parser.parse(tokenizer)
 
 when not defined(js) and not defined(nimscript):
-  import bazy/vm/[compilation, primitives, library/prelude]
+  import abyzou/vm/[compilation, primitives, library/prelude]
 
   let Prelude* = prelude()
 
