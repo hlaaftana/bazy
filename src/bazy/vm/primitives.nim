@@ -1,4 +1,4 @@
-import std/[tables, sets, hashes], "."/[arrays, pointertag, ids], ../language/expressions, ../util/box, ../defines
+import std/[tables, sets, hashes], "."/[arrays, pointertag, ids], ../language/expressions, ../util/box
 export box, unbox
 
 # type system should exist for both static and runtime dispatch

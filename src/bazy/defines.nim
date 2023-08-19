@@ -8,4 +8,3 @@ const
   refToken* = block: (const bazyRefToken {.booldefine.} = defined(js); bazyRefToken)
     ## make token type a reference rather than a value type
   useArrays* = block: (const bazyUseArrays {.booldefine.} = false; bazyUseArrays)
-  disableUnlikelyCycles* = block: (const bazyDisableUnlikelyCycles {.booldefine.} = false; bazyDisableUnlikelyCycles)
