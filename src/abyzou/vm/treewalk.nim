@@ -1,6 +1,6 @@
 import "."/[primitives, arrays, values, types], std/[sets, tables]
 
-# XXX (1) use linearizer for bytecode and evaluate that without recursion
+# XXX use linearizer for bytecode and evaluate that without recursion (but maybe keep this)
 
 type EffectHandler* = proc (effect: Value): bool
   ## returns true to continue execution
@@ -70,8 +70,13 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
   of VariableSet:
     result = run ins.variableSetValue
     stack.set(ins.variableSetIndex, result)
-  of FromImportedStack:
-    result = run(ins.importedStackInstruction, stack.imports[ins.importedStackIndex])
+  of GetAddress:
+    var s = stack
+    var i = ins.getAddress.len
+    while i > 1:
+      dec i
+      s = s.imports[ins.getAddress[i]]
+    result = s.get(ins.getAddress[0])
   of SetAddress:
     result = run ins.setAddressValue
     var s = stack

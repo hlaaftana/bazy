@@ -314,7 +314,7 @@ module withGenericMeta:
       elements: @[Statement(kind: skUnaryInstruction,
         knownType: Ty(Int32),
         unaryInstructionKind: NegInt,
-        unary: args[1].boxedValue.statementValue.toInstruction)])
+        unary: args[1].boxedValue.statementValue)])
 
 test "generic meta":
   let libraries = @[Prelude, withGenericMeta()]

@@ -62,8 +62,8 @@ module numbers:
     typedTempl name, [Ty(`k`), Ty(`k`)], Ty(`k`):
       toValue Statement(kind: skBinaryInstruction,
         binaryInstructionKind: instructionName,
-        binary1: args[0].toInstruction,
-        binary2: args[1].toInstruction,
+        binary1: args[0],
+        binary2: args[1],
         knownType: Ty(`k`))
   instr "+", AddInt, int32
   instr "+", AddFloat, float32

@@ -501,7 +501,6 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
       matchParameters(pattern.returnType.unbox, t.returnType.unbox, table, variance = Contravariant)
   of tyTuple:
     if t.kind == tyTuple:
-      # XXX (2) unorderedFields
       let
         pl = pattern.elements.len
         tl = t.elements.len
@@ -513,6 +512,17 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
             match(pattern.elements[i], t.varargs.unbox)
           if not pattern.varargs.isNone:
             match(pattern.varargs, t.varargs)
+      # XXX (2) is this enough?
+      for name, f in pattern.unorderedFields:
+        if name in t.elementNames:
+          match(f, t.elements[t.elementNames[name]])
+        elif name in t.unorderedFields:
+          match(f, t.unorderedFields[name])
+      for name, f in t.unorderedFields:
+        if name in pattern.elementNames:
+          match(pattern.elements[pattern.elementNames[name]], f)
+        elif name in pattern.unorderedFields:
+          match(pattern.unorderedFields[name], f)
   of tyReference, tyList, tySet:
     if t.kind == pattern.kind:
       match(pattern.elementType, t.elementType)
@@ -559,10 +569,11 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     fill(pattern.arguments)
     fill(pattern.returnType)
   of tyTuple:
-    # XXX (2) unorderedFields
     for e in pattern.elements.mitems:
       fill(e)
     fill(pattern.varargs)
+    for _, e in pattern.unorderedFields.mpairs:
+      fill(e)
   of tyReference, tyList, tySet:
     fill(pattern.elementType)
   of tyTable:

@@ -109,10 +109,9 @@ proc toInstruction*(st: Statement): Instruction =
   of skVariableSet:
     Instruction(kind: VariableSet, variableSetIndex: st.variableSetIndex,
       variableSetValue: map st.variableSetValue)
-  of skFromImportedStack:
-    Instruction(kind: FromImportedStack,
-      importedStackIndex: st.importedStackIndex,
-      importedStackInstruction: map st.importedStackStatement)
+  of skGetAddress:
+    Instruction(kind: GetAddress,
+      getAddress: map st.getAddress.indices)
   of skSetAddress:
     Instruction(kind: SetAddress,
       setAddress: map st.setAddress.indices,
@@ -227,14 +226,9 @@ proc overloads*(scope: Scope | Context, name: string, bound: TypeBound): seq[Var
 
 proc variableGet*(r: VariableReference): Statement =
   let t = r.type
-  result = Statement(kind: skVariableGet,
-    variableGetIndex: r.address.indices[0],
+  result = Statement(kind: skGetAddress,
+    getAddress: r.address,
     knownType: t)
-  for i in 1 ..< r.address.indices.len:
-    result = Statement(kind: skFromImportedStack,
-      importedStackIndex: r.address.indices[i],
-      importedStackStatement: result,
-      knownType: t)
 
 proc variableSet*(r: VariableReference, value: Statement): Statement =
   let t = r.type
@@ -480,8 +474,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
 proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement =
   if ex.address.isIdentifier(name):
-    # XXX should meta calls take evaluation priority or somehow be considered equal in overloading with runtime calls
-    # leaning toward yes
+    # meta calls take evaluation priority in overloading with runtime calls
     result = compileMetaCall(scope, name, ex, bound, argumentStatements)
   if result.isNil:
     var argumentTypes = newSeq[Type](ex.arguments.len)

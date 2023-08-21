@@ -251,7 +251,7 @@ type
     # stack
     VariableGet
     VariableSet
-    FromImportedStack
+    GetAddress
     SetAddress
     ArmStack
     # goto
@@ -295,9 +295,8 @@ type
     of VariableSet:
       variableSetIndex*: int
       variableSetValue*: Instruction
-    of FromImportedStack:
-      importedStackIndex*: int
-      importedStackInstruction*: Instruction
+    of GetAddress:
+      getAddress*: Array[int]
     of SetAddress:
       setAddress*: Array[int]
       setAddressValue*: Instruction
@@ -343,7 +342,7 @@ type
     # stack
     skVariableGet
     skVariableSet
-    skFromImportedStack
+    skGetAddress
       # XXX (1) should go, closure variables should be loaded to local stack with ArmStack
     skSetAddress # XXX (1) remove, only use skVariableSet
     skArmStack
@@ -386,9 +385,8 @@ type
     of skVariableSet:
       variableSetIndex*: int
       variableSetValue*: Statement
-    of skFromImportedStack:
-      importedStackIndex*: int
-      importedStackStatement*: Statement
+    of skGetAddress:
+      getAddress*: VariableAddress
     of skSetAddress:
       setAddress*: VariableAddress
       setAddressValue*: Statement
@@ -417,10 +415,10 @@ type
       setIndexValue*: Statement
     of skUnaryInstruction:
       unaryInstructionKind*: UnaryInstructionKind
-      unary*: Instruction
+      unary*: Statement
     of skBinaryInstruction:
       binaryInstructionKind*: BinaryInstructionKind
-      binary1*, binary2*: Instruction
+      binary1*, binary2*: Statement
   Statement* = ref StatementObj
   
   Variable* = ref object
