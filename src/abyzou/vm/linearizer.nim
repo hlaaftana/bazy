@@ -103,11 +103,16 @@ type
       binary*: tuple[res, arg1, arg2: Register]
     of NegInt32, NegFloat32:
       unary*: tuple[res, arg: Register]
+  
+  SpecialRegister = enum
+    Void
 
   LinearFunction* = ref object
     instructions*: seq[LinearInstruction]
     byteCount*: int
     registerCount*: int
+    usedSpecialRegisters: set[SpecialRegister]
+    specialRegisters: array[SpecialRegister, Register]
   
   ResultKind = enum
     Value
@@ -241,7 +246,13 @@ proc newRegister(fn: LinearFunction): Register =
   result = fn.registerCount.Register
   inc fn.registerCount
 
-# xxx maybe special registers for specific behaviors
+proc getRegister(fn: LinearFunction, sr: SpecialRegister): Register =
+  if sr in fn.usedSpecialRegisters:
+    result = fn.specialRegisters[sr]
+  else:
+    result = fn.newRegister()
+    fn.specialRegisters[sr] = result
+    fn.usedSpecialRegisters.incl(sr)
 
 proc linearize*(context: Context, fn: LinearFunction, result: var Result, s: Statement) =
   type Instr = LinearInstruction
@@ -279,7 +290,7 @@ proc linearize*(context: Context, fn: LinearFunction, result: var Result, s: Sta
       of Value:
         result.value = fn.newRegister()
         result.value
-      of Statement: fn.newRegister() # XXX should be void register
+      of Statement: fn.getRegister(Void)
     case s.arguments.len
     of 0:
       fn.add(Instr(kind: NullaryCall, ncall: (res: res, callee: f)))
@@ -361,7 +372,7 @@ proc linearize*(context: Context, fn: LinearFunction, result: var Result, s: Sta
       of Value:
         result.value = fn.newRegister()
         result.value
-      of Statement: fn.newRegister() # XXX should be void register
+      of Statement: fn.getRegister(Void)
     fn.add(Instr(kind: range[lowUnary..highUnary] instructionKindMap[s.unaryInstructionKind], unary: (res: res, arg: value(s.unary))))
   of skBinaryInstruction:
     let res =
@@ -370,7 +381,7 @@ proc linearize*(context: Context, fn: LinearFunction, result: var Result, s: Sta
       of Value:
         result.value = fn.newRegister()
         result.value
-      of Statement: fn.newRegister() # XXX should be void register
+      of Statement: fn.getRegister(Void)
     fn.add(Instr(kind: range[lowBinary..highBinary] instructionKindMap[s.binaryInstructionKind], binary: (res: res, arg1: value(s.binary1), arg2: value(s.binary2))))
 
 proc linear*(context: Context, body: Statement): LinearFunction =
