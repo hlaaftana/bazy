@@ -71,10 +71,13 @@ type
     of vkType:
       typeValue*: Type
     of vkArray:
+      # XXX pointer field location should be same as vkList, vkString
       tupleValue*: Array[Value]
     of vkString:
+      # XXX pointer field location should be same as vkArray, vkList
       stringValue*: string
     of vkList:
+      # XXX pointer field location should be same as vkArray, vkString
       listValue*: seq[Value]
     of vkSet:
       setValue*: HashSet[Value]

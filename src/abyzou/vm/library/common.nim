@@ -4,16 +4,18 @@ proc define*(scope: Scope, n: string, typ: Type): Variable =
   result = newVariable(n, typ)
   scope.define(result)
 
-proc define*(scope: Scope, n: string, typ: Type, x: Value) =
+proc define*(scope: Scope, n: string, typ: Type, x: sink Value) =
   let variable = define(scope, n, typ)
+  if x.kind in boxedValueKinds: x.boxedValue.type = toRef(typ)
   scope.context.refreshStack()
   scope.context.stack.set(variable.stackIndex, x)
 
 proc define*(context: Context, n: string, typ: Type): Variable {.inline.} =
   context.top.define(n, typ)
 
-proc define*(context: Context, n: string, typ: Type, x: Value) =
+proc define*(context: Context, n: string, typ: Type, x: sink Value) =
   let variable = define(context, n, typ)
+  if x.kind in boxedValueKinds: x.boxedValue.type = toRef(typ)
   context.refreshStack()
   context.stack.set(variable.stackIndex, x)
 

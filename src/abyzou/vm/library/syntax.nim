@@ -37,8 +37,9 @@ module syntax:
     if not v.isNil and not returnBoundSet:
       v.knownType.returnType = body.knownType.box
     bodyScope.context.refreshStack()
-    let fun = toValue(
+    var fun = toValue(
       TreeWalkFunction(stack: bodyScope.context.stack.shallowRefresh(), instruction: body.toInstruction))
+    fun.boxedValue.type = toRef(fnType)
     if not v.isNil:
       context.refreshStack()
       scope.context.stack.set(v.stackIndex, fun)
