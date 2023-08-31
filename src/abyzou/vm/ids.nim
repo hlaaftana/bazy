@@ -14,7 +14,7 @@ template id(kind) {.dirty.} =
     inc `counter kind`
     `kind Id`(`counter kind`)
 
-id(Property)
+id(TypeBase)
 id(TypeParameter)
 
 # XXX maybe intern identifiers or strings?

@@ -129,7 +129,7 @@ proc getType*(x: FullValueObj): Type =
     result = Ty(Table)
     for k, v in x.tableValue:
       result.keyType = k.getType.box
-      result.valueType = v.getType.box
+      result.tableValueType = v.getType.box
       break
   of vkEffect:
     # probably should never be here

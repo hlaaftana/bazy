@@ -3,36 +3,36 @@ import "."/[primitives, arrays, treewalk, types, values, ids], ../language/[expr
 when defined(gcDestructors):
   template defineProperty(name, value): untyped {.dirty.} =
     let `name`* = block: # !global
-      var propertySelf {.inject.}: Property
+      var propertySelf {.inject.}: TypeBase
       propertySelf = value
-      propertySelf.id = newPropertyId()
+      propertySelf.id = newTypeBaseId()
       propertySelf
 else:
   template defineProperty(name, value): untyped =
-    proc getProperty: Property {.gensym.} =
-      var propertySelf {.global, inject.}: Property
+    proc getProperty: TypeBase {.gensym.} =
+      var propertySelf {.global, inject.}: TypeBase
       if propertySelf.isNil:
         propertySelf = value
-        propertySelf.id = newPropertyId()
+        propertySelf.id = newTypeBaseId()
       result = propertySelf
-    template `name`*: Property {.inject.} = getProperty()
+    template `name`*: TypeBase {.inject.} = getProperty()
 
-defineProperty Meta, Property(name: "Meta",
-  argumentType: Type(kind: tyBaseType, baseKind: tyFunction),
-  typeMatcher: proc (t: Type, arg: Value): TypeMatch =
+defineProperty Meta, TypeBase(name: "Meta",
+  arguments: tupleType(Type(kind: tyBaseType, baseKind: tyFunction)),
+  typeMatcher: proc (t: Type, arg: Type): TypeMatch =
     if t.properties.hasKey(propertySelf):
-      match(arg.boxedValue.typeValue, t.properties[propertySelf].boxedValue.typeValue)
+      match(arg.baseArguments[0], t.properties[propertySelf].baseArguments[0])
     else:
       tmFalse,
-  genericMatcher: proc (pattern: Type, arg: Value, t: Type, table: var ParameterInstantiation, variance = Covariant) =
-    let tyVal = arg.boxedValue.typeValue
+  genericMatcher: proc (pattern: Type, arg: Type, t: Type, table: var ParameterInstantiation, variance = Covariant) =
+    let tyVal = arg.baseArguments[0]
     if t.kind == tyFunction and tyVal.kind == tyFunction:
       matchParameters(tyVal, t, table, variance),
-  genericFiller: proc (pattern: var Type, arg: var Value, table: ParameterInstantiation) =
-    fillParameters(arg.boxedValue.typeValue, table))
+  genericFiller: proc (pattern: var Type, arg: var Type, table: ParameterInstantiation) =
+    fillParameters(arg.baseArguments[0], table))
 
 #defineProperty Fields, Property(name: "Fields",
-#  argumentType: Type(kind: tyTable, keyType: box Ty(String), valueType: box Ty(Int32)))
+#  argumentType: Type(kind: tyTable, keyType: box Ty(String), tableValueType: box Ty(Int32)))
 
 # XXX (2) also Defaults purely for initialization/conversion
 # meaning only considered in function type relation
@@ -349,13 +349,13 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
   # get all metas first and type statements accordingly
   var allMetas = overloads(scope, name,
     *funcType(Ty(Statement), realArgumentTypes).withProperties(
-      property(Meta, toValue funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes))))
+      property(Meta, funcType(if bound.variance == Covariant: Ty(Any) else: bound.boundType, argumentTypes))))
   if allMetas.len != 0:
     var makeStatement = newSeq[bool](ex.arguments.len)
     var metaTypes = newSeq[Type](allMetas.len)
     for i, v in allMetas:
       let ty = v.type
-      let metaTy = v.type.properties[Meta].boxedValue.typeValue
+      let metaTy = v.type.properties[Meta].baseArguments[0]
       metaTypes[i] = metaTy
       for i in 0 ..< ex.arguments.len:
         if matchBound(+Ty(Statement), ty.param(i + 1)):
@@ -551,7 +551,7 @@ proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Stat
     var (bk, bv) =
       if boundSet:
         (bound.boundType.keyType.unbox * bound.variance,
-          bound.boundType.valueType.unbox * bound.variance)
+          bound.boundType.tableValueType.unbox * bound.variance)
       else:
         (defaultBound, defaultBound)
     for e in ex.elements:
@@ -562,8 +562,8 @@ proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Stat
       result.entries.add((key: k, value: v))
       if result.knownType.keyType.isNone or result.knownType.keyType.unbox < k.knownType:
         result.knownType.keyType = box k.knownType
-      if result.knownType.valueType.isNone or result.knownType.valueType.unbox < v.knownType:
-        result.knownType.valueType = box v.knownType
+      if result.knownType.tableValueType.isNone or result.knownType.tableValueType.unbox < v.knownType:
+        result.knownType.tableValueType = box v.knownType
       if not boundSet:
         bk = +k.knownType
         bv = +v.knownType

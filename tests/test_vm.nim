@@ -295,12 +295,12 @@ test "generic":
 module withGenericMeta:
   let T = Type(kind: tyParameter, parameter: newTypeParameter("T"))
   let f = define(result, "foo", funcType(Ty(Statement), [Ty(Scope), Ty(Expression)]).withProperties(
-    property(Meta, toValue funcType(Type(kind: tyList, elementType: box T), [T]))
+    property(Meta, funcType(Type(kind: tyList, elementType: box T), [T]))
   ))
   f.genericParams = @[T.parameter]
   result.top.define(f)
   let f2 = define(result, "foo", funcType(Ty(Statement), [Ty(Scope), Ty(Statement)]).withProperties(
-    property(Meta, toValue funcType(Type(kind: tyList, elementType: box Ty(Int32)), [Ty(Int32)]))
+    property(Meta, funcType(Type(kind: tyList, elementType: box Ty(Int32)), [Ty(Int32)]))
   ))
   result.top.define(f2)
   result.refreshStack()

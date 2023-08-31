@@ -1,27 +1,18 @@
 import "."/[primitives, values, ids], std/[tables, sets]
 
-type PropertyInstance* = object
-  tag*: Property
-  value*: Value
+proc property*(tag: TypeBase, args: varargs[Type]): Type {.inline.} =
+  Type(kind: tyCompound, base: tag, baseArguments: @args)
 
-proc `$`*(p: PropertyInstance): string =
-  result = $p.tag
-  if p.value.kind != vkNone:
-    result.add('(')
-    result.add($p.value)
-    result.add(')')
+proc property*(prop: Type): Type {.inline.} =
+  assert prop.kind == tyCompound
+  prop
 
-proc property*(tag: Property, arg: Value): PropertyInstance {.inline.} =
-  PropertyInstance(tag: tag, value: arg)
-
-proc property*(prop: PropertyInstance): PropertyInstance {.inline.} = prop
-
-proc properties*(ps: varargs[PropertyInstance, property]): Table[Property, Value] =
-  result = initTable[Property, Value](ps.len)
+proc properties*(ps: varargs[Type, property]): Table[TypeBase, Type] =
+  result = initTable[TypeBase, Type](ps.len)
   for p in ps:
-    result[p.tag] = p.value
+    result[p.base] = p
 
-proc withProperties*(ty: sink Type, ps: varargs[PropertyInstance, property]): Type {.inline.} =
+proc withProperties*(ty: sink Type, ps: varargs[Type, property]): Type {.inline.} =
   ty.properties = properties(ps)
   ty
 
@@ -29,7 +20,7 @@ type TypeError* = object of CatchableError
 
 const
   allTypeKinds* = {low(TypeKind)..high(TypeKind)}
-  concreteTypeKinds* = {tyNoneValue..tyType}
+  concreteTypeKinds* = {tyNoneValue..tyType, tyCompound}
   typeclassTypeKinds* = {tyAny..tyWithProperty}
   matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
   atomicTypes* = {tyNoneValue,
@@ -56,6 +47,7 @@ proc union*(s: varargs[Type]): Type =
 
 const definiteTypeLengths*: array[TypeKind, int] = [
   tyNone: 0,
+  tyCompound: -1,
   tyNoneValue: 0,
   tyInt32: 0,
   tyUint32: 0,
@@ -83,7 +75,8 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyWithProperty: -1,
   tyCustomMatcher: 0,
   tyParameter: -1,
-  #tyGeneric: -1
+  #tyGeneric: -1,
+  tyValue: -1
 ]
 
 proc len*(t: Type): int =
@@ -93,6 +86,8 @@ proc len*(t: Type): int =
     of tyTuple:
       if t.varargs.isNone:
         result = t.elements.len + t.unorderedFields.len
+    of tyCompound:
+      result = t.baseArguments.len
     of tyUnion, tyIntersection:
       result = t.operands.len
     else: discard
@@ -118,13 +113,15 @@ proc nth*(t: Type, i: int): Type =
       result = t.elements[i]
     else:
       result = t.varargs.unbox
+  of tyCompound:
+    result = t.baseArguments[i]
   of tyReference, tyList, tySet:
     result = t.elementType.unbox
   of tyTable:
     if i == 0:
       result = t.keyType.unbox
     else:
-      result = t.valueType.unbox
+      result = t.tableValueType.unbox
   of tyType:
     result = t.typeValue.unbox
   of tyUnion, tyIntersection:
@@ -138,7 +135,7 @@ proc nth*(t: Type, i: int): Type =
     discard # inapplicable
   of tyCustomMatcher:
     discard # inapplicable
-  of tyParameter:#, tyGeneric:
+  of tyParameter, tyValue:#, tyGeneric:
     discard # what
 
 proc param*(t: Type, i: int): Type {.inline.} =
@@ -208,6 +205,9 @@ proc match*(matcher, t: Type): TypeMatch =
       else:
         tmUnknown
     case matcher.kind
+    of tyCompound:
+      if matcher.base != t.base: return tmNone
+      match(+tupleType(matcher.baseArguments), tupleType(t.baseArguments))
     of atomicTypes * concreteTypeKinds:
       tmAlmostEqual
     of tyReference, tyList, tySet:
@@ -237,7 +237,7 @@ proc match*(matcher, t: Type): TypeMatch =
     of tyTable:
       min(
         match(+matcher.keyType.unbox, t.keyType.unbox),
-        match(+matcher.valueType.unbox, t.valueType.unbox))
+        match(+matcher.tableValueType.unbox, t.tableValueType.unbox))
     of tyType:
       match(+matcher.typeValue.unbox, t.typeValue.unbox)
     of allTypeKinds - concreteTypeKinds: tmUnknown # unreachable
@@ -278,6 +278,13 @@ proc match*(matcher, t: Type): TypeMatch =
     min(
       tmGeneric,
       match(matcher.parameter.bound, t))
+  of tyValue:
+    if t.kind != tyValue: tmNone
+    else:
+      let tm = match(matcher.valueType.unbox, t.valueType.unbox)
+      if not tm.matches or matcher.value != t.value:
+        tmNone
+      else: tm
   #of tyGeneric:
   #  min(
   #    tmGeneric,
@@ -372,6 +379,7 @@ proc checkType*(value: FullValueObj, t: Type): bool =
         yes = false; break
     yes
   result = case t.kind
+  of tyCompound: t.base.valueMatcher(value.toSmallValue, t)
   of tyNoneValue: value.kind == vkNone
   of tyInt32: value.kind == vkInt32
   of tyUint32: value.kind == vkUint32
@@ -393,7 +401,7 @@ proc checkType*(value: FullValueObj, t: Type): bool =
   of tySet:
     value.kind == vkSet and value.setValue.eachAre(t.elementType.unbox)
   of tyTable:
-    value.kind == vkTable and value.tableValue.eachAreTable(t.keyType.unbox, t.valueType.unbox)
+    value.kind == vkTable and value.tableValue.eachAreTable(t.keyType.unbox, t.tableValueType.unbox)
   of tyExpression: value.kind == vkExpression
   of tyStatement: value.kind == vkStatement
   of tyScope: value.kind == vkScope
@@ -416,7 +424,7 @@ proc checkType*(value: FullValueObj, t: Type): bool =
     res
   of tyNot: not value.checkType(t.notType.unbox)
   of tyBaseType:
-    # please remove this type eventually
+    # XXX (3) please remove this type eventually
     type Res = enum unknown, knownTrue, knownFalse
     var res = unknown
     var vkinds: set[ValueKind]
@@ -441,7 +449,7 @@ proc checkType*(value: FullValueObj, t: Type): bool =
     of tySet: vkind vkSet
     of tyTable: vkind vkTable
     of tyType: vkind vkType
-    of tyAny: res = knownTrue
+    of tyAny, tyValue, tyCompound: res = knownTrue
     of tyNone, tyUnion, tyIntersection, tyNot, tyBaseType, tyWithProperty,
       tyCustomMatcher, tyParameter: res = knownFalse
     case res
@@ -452,6 +460,7 @@ proc checkType*(value: FullValueObj, t: Type): bool =
     value.checkType(t.typeWithProperty.unbox) and value.getType.properties.hasKey(t.withProperty)
   of tyCustomMatcher: not t.valueMatcher.isNil and t.valueMatcher(value.toSmallValue)
   of tyParameter: value.checkType(t.parameter.bound.boundType)
+  of tyValue: value.checkType(t.valueType.unbox) and t.value.toFullValueObj == value
   if result:
     for p, args in t.properties:
       if not p.valueMatcher.isNil:
@@ -495,6 +504,9 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
     tyString, tyExpression, tyStatement, tyScope,
     tyAny, tyNone:
     discard # atoms
+  of tyCompound:
+    if t.kind == pattern.kind:
+      match(tupleType(pattern.baseArguments), tupleType(t.baseArguments))
   of tyFunction:
     if t.kind == tyFunction:
       match(pattern.arguments, t.arguments)
@@ -529,7 +541,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
   of tyTable:
     if t.kind == pattern.kind:
       match(pattern.keyType, t.keyType)
-      match(pattern.valueType, t.valueType)
+      match(pattern.tableValueType, t.tableValueType)
   of tyType:
     if t.kind == pattern.kind:
       match(pattern.typeValue, t.typeValue)
@@ -545,6 +557,9 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
       match(pattern.typeWithProperty.unbox, t)
   of tyBaseType, tyCustomMatcher:
     discard # no type to traverse
+  of tyValue:
+    if t.kind == pattern.kind:
+      match(pattern.valueType, t.valueType)
   for a, v in pattern.properties:
     if unlikely(not a.genericMatcher.isNil):
       a.genericMatcher(pattern, v, t, table, variance)
@@ -565,6 +580,9 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     tyString, tyExpression, tyStatement, tyScope,
     tyAny, tyNone, tyBaseType, tyCustomMatcher:
     discard
+  of tyCompound:
+    for t in pattern.baseArguments.mitems:
+      fill(t)
   of tyFunction:
     fill(pattern.arguments)
     fill(pattern.returnType)
@@ -578,7 +596,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     fill(pattern.elementType)
   of tyTable:
     fill(pattern.keyType)
-    fill(pattern.valueType)
+    fill(pattern.tableValueType)
   of tyType:
     fill(pattern.typeValue)
   of tyUnion, tyIntersection:
@@ -588,6 +606,8 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     fill(pattern.notType)
   of tyWithProperty:
     fill(pattern.typeWithProperty)
+  of tyValue:
+    fill(pattern.valueType)
   for a, v in pattern.properties.mpairs:
     if unlikely(not a.genericFiller.isNil):
       a.genericFiller(pattern, v, table)

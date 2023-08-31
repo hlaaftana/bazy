@@ -130,6 +130,7 @@ type
     # maybe add unknown type for values with unknown type at runtime
     tyNone,
     # concrete
+    tyCompound,
     tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
     tyInt64, tyUint64, tyFloat64,
@@ -149,7 +150,9 @@ type
     tyWithProperty,
     tyCustomMatcher,
     # generic parameter
-    tyParameter
+    tyParameter,
+    # value container
+    tyValue
     
   TypeMatch* = enum
     # in order of strength
@@ -167,17 +170,17 @@ type
   
   ParameterInstantiation* = Table[TypeParameter, Type]
 
-  Property* = ref object
-    id*: PropertyId
+  TypeBase* = ref object
+    id*: TypeBaseId
     name*: string
-    argumentType*: Type
+    arguments*: Type # tuple type
     # these are supposed to act on `prop.value`:
-    typeMatcher*: proc (t: Type, propVal: Value): TypeMatch
-    valueMatcher*: proc (v: Value, propVal: Value): bool
+    typeMatcher*: proc (t: Type, thisType: Type): TypeMatch
+    valueMatcher*: proc (v: Value, thisType: Type): bool
     # XXX (6) maybe add compare
     # not sure if these are temporary:
-    genericMatcher*: proc (pattern: Type, propVal: Value, t: Type, table: var ParameterInstantiation, variance = Covariant)
-    genericFiller*: proc (pattern: var Type, propVal: var Value, table: ParameterInstantiation)
+    genericMatcher*: proc (pattern: Type, thisType: Type, t: Type, table: var ParameterInstantiation, variance = Covariant)
+    genericFiller*: proc (pattern: var Type, thisType: var Type, table: ParameterInstantiation)
 
   TypeParameter* = ref object
     id*: TypeParameterId # this needs to be assigned
@@ -186,8 +189,11 @@ type
   
   Type* = object
     # XXX (3) for easier generics etc maybe just have a base type, argument types, and properties
-    properties*: Table[Property, Value]
+    properties*: Table[TypeBase, Type]
     case kind*: TypeKind
+    of tyCompound:
+      base*: TypeBase
+      baseArguments*: seq[Type]
     of tyNoneValue,
       tyInt32, tyUint32, tyFloat32, tyBool,
       tyInt64, tyUint64, tyFloat64,
@@ -209,7 +215,7 @@ type
     of tyReference, tyList, tySet:
       elementType*: Box[Type]
     of tyTable:
-      keyType*, valueType*: Box[Type]
+      keyType*, tableValueType*: Box[Type]
     of tyType:
       typeValue*: Box[Type]
     of tyUnion, tyIntersection:
@@ -220,13 +226,16 @@ type
       baseKind*: TypeKind
     of tyWithProperty:
       typeWithProperty*: Box[Type]
-      withProperty*: Property
+      withProperty*: TypeBase
     of tyCustomMatcher:
       typeMatcher*: proc (t: Type): TypeMatch
       valueMatcher*: proc (v: Value): bool
       # XXX (6) maybe add compare
     of tyParameter:
       parameter*: TypeParameter
+    of tyValue:
+      value*: Value
+      valueType*: Box[Type]
     #of tyGeneric:
     #  parameters*: Table[TypeParameter, TypeBound]
     #  genericPattern*: ref Type
@@ -517,7 +526,7 @@ template idObject[T: ref](t: type T) {.dirty.} =
 
   proc `==`*(a, b: t): bool = a.isNil and b.isNil or (not a.isNil and not b.isNil and a.id == b.id)
 
-idObject(Property)
+idObject(TypeBase)
 idObject(TypeParameter)
 
 proc hash*(v: FullValueObj): Hash {.noSideEffect.}
@@ -629,7 +638,7 @@ proc `$`*(value: Value): string =
   of vkEffect: "Effect(" & $value.effectValue.unref & ")"
   of boxedValueKinds: $value.boxedValue
 
-proc `$`*(p: Property): string {.inline.} = p.name
+proc `$`*(p: TypeBase): string {.inline.} = p.name
 
 proc `$`*(tb: TypeBound): string
 
@@ -640,6 +649,7 @@ proc `$`*(t: Type): string =
         result.add(", ")
       result.add($t)
   result = case t.kind
+  of tyCompound: t.base.name & "(" & $t.baseArguments & ")"
   of tyNoneValue: "NoneValue"
   of tyInt32: "Int32"
   of tyUint32: "Uint32"
@@ -660,7 +670,7 @@ proc `$`*(t: Type): string =
   of tyReference: "Reference(" & $t.elementType & ")"
   of tyList: "List(" & $t.elementType & ")"
   of tySet: "Set(" & $t.elementType & ")"
-  of tyTable: "Table(" & $t.keyType & ", " & $t.valueType & ")"
+  of tyTable: "Table(" & $t.keyType & ", " & $t.tableValueType & ")"
   of tyType: "Type " & $t.typeValue
   of tyUnion: "Union(" & $t.operands & ")"
   of tyIntersection: "Intersection(" & $t.operands & ")"
@@ -669,6 +679,7 @@ proc `$`*(t: Type): string =
   of tyWithProperty: "WithProperty(" & $t.typeWithProperty & ", " & $t.withProperty & ")"
   of tyCustomMatcher: "Custom"
   of tyParameter: "Parameter(" & $t.parameter.name & ")"
+  of tyValue: "Value(" & $t.value & ": " & $t.valueType & ")"
   #of tyGeneric:
   #  var s = "Generic["
   #  var i = 0
@@ -680,14 +691,17 @@ proc `$`*(t: Type): string =
   if t.properties.len != 0:
     result.add(" {") 
     var afterFirst = false
-    for tag, val in t.properties:
+    for tag, arg in t.properties:
       if afterFirst: result.add(", ")
       else: afterFirst = true
-      result.add($tag)
-      if val.kind != vkNone:
-        result.add('(')
-        result.add($val)
-        result.add(')')
+      result.add($arg)
+      when false:
+        if args.len != 0:
+          result.add('(')
+          for i, arg in args:
+            if i != 0: result.add(", ")
+            result.add($arg)
+          result.add(')')
     result.add('}')
 
 proc `$`*(tb: TypeBound): string =
