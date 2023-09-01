@@ -171,16 +171,16 @@ type
   ParameterInstantiation* = Table[TypeParameter, Type]
 
   TypeBase* = ref object
+    # XXX generics?
     id*: TypeBaseId
     name*: string
     arguments*: Type # tuple type
-    # these are supposed to act on `prop.value`:
-    typeMatcher*: proc (t: Type, thisType: Type): TypeMatch
+    typeMatcher*: proc (pattern, t: Type): TypeMatch
     valueMatcher*: proc (v: Value, thisType: Type): bool
     # XXX (6) maybe add compare
     # not sure if these are temporary:
-    genericMatcher*: proc (pattern: Type, thisType: Type, t: Type, table: var ParameterInstantiation, variance = Covariant)
-    genericFiller*: proc (pattern: var Type, thisType: var Type, table: ParameterInstantiation)
+    genericMatcher*: proc (pattern: Type, t: Type, table: var ParameterInstantiation, variance = Covariant)
+    genericFiller*: proc (pattern: var Type, table: ParameterInstantiation)
 
   TypeParameter* = ref object
     id*: TypeParameterId # this needs to be assigned
@@ -190,6 +190,7 @@ type
   Type* = object
     # XXX (3) for easier generics etc maybe just have a base type, argument types, and properties
     properties*: Table[TypeBase, Type]
+      # can be a multitable later on
     case kind*: TypeKind
     of tyCompound:
       base*: TypeBase

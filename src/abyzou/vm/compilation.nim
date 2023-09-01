@@ -1,35 +1,7 @@
 import "."/[primitives, arrays, treewalk, types, values, ids], ../language/[expressions, number, shortstring], std/[hashes, tables, sets, strutils]
 
-when defined(gcDestructors):
-  template defineProperty(name, value): untyped {.dirty.} =
-    let `name`* = block: # !global
-      var propertySelf {.inject.}: TypeBase
-      propertySelf = value
-      propertySelf.id = newTypeBaseId()
-      propertySelf
-else:
-  template defineProperty(name, value): untyped =
-    proc getProperty: TypeBase {.gensym.} =
-      var propertySelf {.global, inject.}: TypeBase
-      if propertySelf.isNil:
-        propertySelf = value
-        propertySelf.id = newTypeBaseId()
-      result = propertySelf
-    template `name`*: TypeBase {.inject.} = getProperty()
-
-defineProperty Meta, TypeBase(name: "Meta",
-  arguments: tupleType(Type(kind: tyBaseType, baseKind: tyFunction)),
-  typeMatcher: proc (t: Type, arg: Type): TypeMatch =
-    if t.properties.hasKey(propertySelf):
-      match(arg.baseArguments[0], t.properties[propertySelf].baseArguments[0])
-    else:
-      tmFalse,
-  genericMatcher: proc (pattern: Type, arg: Type, t: Type, table: var ParameterInstantiation, variance = Covariant) =
-    let tyVal = arg.baseArguments[0]
-    if t.kind == tyFunction and tyVal.kind == tyFunction:
-      matchParameters(tyVal, t, table, variance),
-  genericFiller: proc (pattern: var Type, arg: var Type, table: ParameterInstantiation) =
-    fillParameters(arg.baseArguments[0], table))
+defineTypeBase Meta, TypeBase(name: "Meta",
+  arguments: tupleType(Type(kind: tyBaseType, baseKind: tyFunction)))
 
 #defineProperty Fields, Property(name: "Fields",
 #  argumentType: Type(kind: tyTable, keyType: box Ty(String), tableValueType: box Ty(Int32)))
