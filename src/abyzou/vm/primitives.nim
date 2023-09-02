@@ -148,7 +148,8 @@ type
     tyUnion, tyIntersection, tyNot,
     tyBaseType,
     tyWithProperty,
-    tyCustomMatcher,
+    tyBase,
+    tySomeValue,
     # generic parameter
     tyParameter,
     # value container
@@ -170,11 +171,31 @@ type
   
   ParameterInstantiation* = Table[TypeParameter, Type]
 
+  NativeType* = enum
+    ntyNone,
+    # concrete
+    ntyNoneValue,
+    ntyInt32, ntyUint32, ntyFloat32, ntyBool,
+    ntyInt64, ntyUint64, ntyFloat64,
+    ntyReference,
+    ntyTuple, # XXX (2) make into tyComposite, tuple, named tuple, array (i.e. int^20) all at once
+    ntyFunction,
+    ntyList,
+    ntyString,
+    ntySet,
+    ntyTable,
+    ntyExpression, ntyStatement, ntyScope,
+    ntyType,
+    # typeclass
+    ntyContravariant
+
   TypeBase* = ref object
     # XXX generics?
     id*: TypeBaseId
     name*: string
+    nativeType*: NativeType
     arguments*: Type # tuple type
+    genericParams*: seq[TypeParameter]
     typeMatcher*: proc (pattern, t: Type): TypeMatch
     valueMatcher*: proc (v: Value, thisType: Type): bool
     # XXX (6) maybe add compare
@@ -228,10 +249,10 @@ type
     of tyWithProperty:
       typeWithProperty*: Box[Type]
       withProperty*: TypeBase
-    of tyCustomMatcher:
-      typeMatcher*: proc (t: Type): TypeMatch
-      valueMatcher*: proc (v: Value): bool
-      # XXX (6) maybe add compare
+    of tyBase:
+      typeBase*: TypeBase
+    of tySomeValue:
+      someValueType*: Box[Type]
     of tyParameter:
       parameter*: TypeParameter
     of tyValue:
@@ -678,7 +699,8 @@ proc `$`*(t: Type): string =
   of tyNot: "Not " & $t.notType
   of tyBaseType: "BaseType " & $t.baseKind
   of tyWithProperty: "WithProperty(" & $t.typeWithProperty & ", " & $t.withProperty & ")"
-  of tyCustomMatcher: "Custom"
+  of tyBase: "Base(" & $t.typeBase & ")"
+  of tySomeValue: "SomeValue(" & $t.someValueType & ")"
   of tyParameter: "Parameter(" & $t.parameter.name & ")"
   of tyValue: "Value(" & $t.value & ": " & $t.valueType & ")"
   #of tyGeneric:

@@ -38,8 +38,7 @@ when false: # can implement as compound types
     tyUnion, tyIntersection,
     # complex
     tyBaseType,
-    tyWithProperty,
-    tyCustomMatcher,}
+    tyWithProperty}
   result = case t.kind
   of tyFunction:
     # XXX (4) no information about signature
@@ -48,32 +47,32 @@ when false: # can implement as compound types
     value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements)
   of tyType: value.kind == vkType and t.typeValue.unbox.match(value.typeValue).matches
 
-template deftype(n: untyped, args: varargs[Type], value: untyped) =
+template nativeType(n: untyped, nt: NativeType, args: varargs[Type]) =
   defineTypeBase n, TypeBase(name: astToStr(n),
-    arguments: tupleType(args),
-    valueMatcher: proc (v {.inject.}: ValueObj, t {.inject.}: Type): bool =
-      value)
+    nativeType: nt,
+    arguments: tupleType(args))
 
-deftype NoneValue, []: v.kind == vkNone
-deftype Int32, []: v.kind == vkInt32
-deftype Uint32, []: v.kind == vkUint32
-deftype Float32, []: v.kind == vkFloat32
-deftype Bool, []: v.kind == vkBool
-deftype Int64, []: v.kind == vkInt64
-deftype Uint64, []: v.kind == vkUint64
-deftype Float64, []: v.kind == vkFloat64
-deftype String, []: v.kind == vkString
-deftype ExpressionTy, []: v.kind == vkExpression
-deftype StatementTy, []: v.kind == vkStatement
-deftype ScopeTy, []: v.kind == vkScope
-deftype Reference, [Type(kind: tyAny)]:
-  v.kind == vkReference # and reference value is t.baseArguments[0]
-deftype List, [Type(kind: tyAny)]:
-  v.kind == vkList # and each are t.baseArguments[0]
-deftype Set, [Type(kind: tyAny)]:
-  v.kind == vkSet # and each are t.baseArguments[0]
-deftype Table, [Type(kind: tyAny), Type(kind: tyAny)]:
-  v.kind == vkTable # and each are t.baseArguments[0] and t.baseArguments[1]
+template nativeType(n: untyped, args: varargs[Type]) =
+  nativeType(n, `nty n`, args)
+
+nativeType NoneValue, []
+nativeType Int32, []
+nativeType Uint32, []
+nativeType Float32, []
+nativeType Bool, []
+nativeType Int64, []
+nativeType Uint64, []
+nativeType Float64, []
+nativeType String, []
+nativeType ExpressionTy, ntyExpression, []
+nativeType StatementTy, ntyStatement
+nativeType ScopeTy, ntyScope, []
+nativeType Reference, [Type(kind: tyAny)]
+nativeType List, [Type(kind: tyAny)]
+nativeType Set, [Type(kind: tyAny)]
+nativeType Table, [Type(kind: tyAny), Type(kind: tyAny)]
+
+nativeType ContravariantTy, ntyContravariant, [Type(kind: tyAny)]
 
 proc property*(tag: TypeBase, args: varargs[Type]): Type {.inline.} =
   Type(kind: tyCompound, base: tag, baseArguments: @args)
@@ -102,12 +101,13 @@ type TypeError* = object of CatchableError
 const
   allTypeKinds* = {low(TypeKind)..high(TypeKind)}
   concreteTypeKinds* = {tyNoneValue..tyType}
-  typeclassTypeKinds* = {tyAny..tyWithProperty}
-  matcherTypeKinds* = typeclassTypeKinds + {tyCustomMatcher}
+  typeclassTypeKinds* = {tyAny..tySomeValue}
   atomicTypes* = {tyNoneValue,
     tyInt32, tyUint32, tyFloat32, tyBool,
     tyInt64, tyUint64, tyFloat64,
     tyString, tyExpression, tyStatement, tyScope}
+  allNativeTypes* = {low(NativeType)..high(NativeType)}
+  concreteNativeTypes* = {ntyNoneValue..ntyType}
   highestNonMatching* = tmFalse
   lowestMatching* = tmTrue
 
@@ -151,7 +151,8 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyNot: 1,
   tyBaseType: -1,
   tyWithProperty: -1,
-  tyCustomMatcher: 0,
+  tyBase: 0,
+  tySomeValue: 1,
   tyParameter: -1,
   #tyGeneric: -1,
   tyValue: -1
@@ -211,8 +212,10 @@ proc nth*(t: Type, i: int): Type =
     discard # inapplicable
   of tyWithProperty:
     discard # inapplicable
-  of tyCustomMatcher:
+  of tyBase:
     discard # inapplicable
+  of tySomeValue:
+    result = t.someValueType.unbox
   of tyParameter, tyValue:#, tyGeneric:
     discard # what
 
@@ -276,10 +279,24 @@ proc match*(matcher, t: Type): TypeMatch =
   if matcher == t: return tmEqual
   result = case matcher.kind
   of tyCompound:
-    if unlikely(not matcher.base.typeMatcher.isNil):
+    case matcher.base.nativeType
+    of ntyContravariant:
+      match(-matcher.baseArguments[0], t)
+    elif unlikely(not matcher.base.typeMatcher.isNil):
       matcher.base.typeMatcher(matcher, t)
     else:
-      if matcher.kind != t.kind or matcher.base != t.base: return tmNone
+      case t.kind
+      of tyCompound:
+        let mnt = matcher.base.nativeType
+        let tnt = t.base.nativeType
+        if mnt != tnt:
+          return if {mnt, tnt} <= concreteNativeTypes:
+            tmNone
+          else:
+            tmUnknown
+      # XXX handle native types in TypeKind
+      else: return tmUnknown
+      if matcher.base != t.base: return tmUnknown
       match(+tupleType(matcher.baseArguments), tupleType(t.baseArguments))
   of concreteTypeKinds:
     if matcher.kind != t.kind:
@@ -346,11 +363,26 @@ proc match*(matcher, t: Type): TypeMatch =
     boolMatch not match(matcher.notType.unbox, t).matches
   of tyBaseType:
     boolMatch t.kind == matcher.baseKind
-  of tyCustomMatcher:
-    if matcher.typeMatcher.isNil:
-      tmNone
-    else:
-      matcher.typeMatcher(t)
+  of tyBase:
+    # in nim a dummy compound type is created from the base and compared
+    case t.kind
+    of tyBase:
+      if matcher.typeBase == t.typeBase: tmAlmostEqual
+      else: tmNone
+    of tyCompound:
+      boolMatch matcher.typeBase == t.typeBase
+    else: tmNone
+  of tySomeValue:
+    case t.kind
+    of tySomeValue:
+      min(
+        tmAlmostEqual,
+        match(+matcher.someValueType.unbox, t.someValueType.unbox))
+    of tyValue:
+      min(
+        tmSimilar,
+        match(+matcher.someValueType.unbox, t.valueType.unbox))
+    else: tmNone
   of tyWithProperty:
     min(
       if not t.properties.hasKey(matcher.withProperty): tmFiniteFalse else: tmAlmostEqual,
@@ -360,12 +392,14 @@ proc match*(matcher, t: Type): TypeMatch =
       tmGeneric,
       match(matcher.parameter.bound, t))
   of tyValue:
-    if t.kind != tyValue: tmNone
-    else:
+    case t.kind
+    of tyValue:
       let tm = match(matcher.valueType.unbox, t.valueType.unbox)
       if not tm.matches or matcher.value != t.value:
         tmNone
       else: tm
+    of tySomeValue: tmUnknown
+    else: tmNone
   #of tyGeneric:
   #  min(
   #    tmGeneric,
@@ -460,9 +494,37 @@ proc checkType*(value: FullValueObj, t: Type): bool =
         yes = false; break
     yes
   result = case t.kind
-  of tyCompound:
-    not t.base.valueMatcher.isNil and
-      t.base.valueMatcher(value.toSmallValue, t)
+  of tyCompound, tyBase:
+    let b = if t.kind == tyCompound: t.base else: t.typeBase
+    case b.nativeType
+    of ntyNoneValue: value.kind == vkNone
+    of ntyInt32: value.kind == vkInt32
+    of ntyUint32: value.kind == vkUint32
+    of ntyFloat32: value.kind == vkFloat32
+    of ntyBool: value.kind == vkBool
+    of ntyInt64: value.kind == vkInt64
+    of ntyUint64: value.kind == vkUint64
+    of ntyFloat64: value.kind == vkFloat64
+    of ntyFunction:
+      # XXX (4) no information about signature
+      value.kind in {vkFunction, vkNativeFunction}
+    of ntyTuple:
+      value.kind == vkArray and (t.kind == tyBase or value.tupleValue.unref.eachAre(t.baseArguments))
+    of ntyReference:
+      value.kind == vkReference and (t.kind == tyBase or value.referenceValue.unref.checkType(t.baseArguments[0]))
+    of ntyList:
+      value.kind == vkList and (t.kind == tyBase or value.listValue.unref.eachAre(t.baseArguments[0]))
+    of ntyString: value.kind == vkString
+    of ntySet:
+      value.kind == vkSet and (t.kind == tyBase or value.setValue.eachAre(t.baseArguments[0]))
+    of ntyTable:
+      value.kind == vkTable and (t.kind == tyBase or value.tableValue.eachAreTable(t.baseArguments[0], t.baseArguments[1]))
+    of ntyExpression: value.kind == vkExpression
+    of ntyStatement: value.kind == vkStatement
+    of ntyScope: value.kind == vkScope
+    else:
+      not b.valueMatcher.isNil and
+        b.valueMatcher(value.toSmallValue, t)
   of tyNoneValue: value.kind == vkNone
   of tyInt32: value.kind == vkInt32
   of tyUint32: value.kind == vkUint32
@@ -532,16 +594,16 @@ proc checkType*(value: FullValueObj, t: Type): bool =
     of tySet: vkind vkSet
     of tyTable: vkind vkTable
     of tyType: vkind vkType
-    of tyAny, tyValue, tyCompound: res = knownTrue
+    of tyAny, tyValue, tyCompound, tyBase: res = knownTrue
     of tyNone, tyUnion, tyIntersection, tyNot, tyBaseType, tyWithProperty,
-      tyCustomMatcher, tyParameter: res = knownFalse
+      tySomeValue, tyParameter: res = knownFalse
     case res
     of knownTrue: true
     of knownFalse: false
     of unknown: value.kind in vkinds
   of tyWithProperty:
     value.checkType(t.typeWithProperty.unbox) and value.getType.properties.hasKey(t.withProperty)
-  of tyCustomMatcher: not t.valueMatcher.isNil and t.valueMatcher(value.toSmallValue)
+  of tySomeValue: false
   of tyParameter: value.checkType(t.parameter.bound.boundType)
   of tyValue: value.checkType(t.valueType.unbox) and t.value.toFullValueObj == value
   if result:
@@ -641,11 +703,14 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
       match(pattern.typeWithProperty, t.typeWithProperty)
     else:
       match(pattern.typeWithProperty.unbox, t)
-  of tyBaseType, tyCustomMatcher:
+  of tyBaseType, tyBase:
     discard # no type to traverse
   of tyValue:
     if t.kind == pattern.kind:
       match(pattern.valueType, t.valueType)
+  of tySomeValue:
+    if t.kind == pattern.kind:
+      match(pattern.someValueType, t.someValueType)
   for a, v in pattern.properties:
     if t.hasProperty(a):
       match(v, t.properties[a])
@@ -664,7 +729,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     tyInt32, tyUint32, tyFloat32, tyBool,
     tyInt64, tyUint64, tyFloat64,
     tyString, tyExpression, tyStatement, tyScope,
-    tyAny, tyNone, tyBaseType, tyCustomMatcher:
+    tyAny, tyNone, tyBaseType, tyBase:
     discard
   of tyCompound:
     if unlikely(not pattern.base.genericFiller.isNil):
@@ -697,5 +762,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     fill(pattern.typeWithProperty)
   of tyValue:
     fill(pattern.valueType)
+  of tySomeValue:
+    fill(pattern.someValueType)
   for a, v in pattern.properties.mpairs:
     fill(v)
