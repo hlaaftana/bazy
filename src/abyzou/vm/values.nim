@@ -94,42 +94,42 @@ proc getType*(x: Value): Type
 proc getType*(x: FullValueObj): Type =
   if not x.type.isNil: return x.type[]
   case x.kind
-  of vkNone: result = Ty(NoneValue)
-  of vkInt32: result = Ty(Int32)
-  of vkUint32: result = Ty(Uint32)
-  of vkFloat32: result = Ty(Float32)
-  of vkInt64: result = Ty(Int64)
-  of vkUint64: result = Ty(Uint64)
-  of vkFloat64: result = Ty(Float64)
-  of vkBool: result = Ty(Bool)
-  of vkReference: result = Type(kind: tyReference, elementType: box x.referenceValue[].getType)
+  of vkNone: result = NoneValueTy
+  of vkInt32: result = Int32Ty
+  of vkUint32: result = Uint32Ty
+  of vkFloat32: result = Float32Ty
+  of vkInt64: result = Int64Ty
+  of vkUint64: result = Uint64Ty
+  of vkFloat64: result = Float64Ty
+  of vkBool: result = BoolTy
+  of vkReference: result = ReferenceTy[x.referenceValue[].getType]
   of vkBoxed: result = getType(x.boxedValue[])
-  of vkList: result = Type(kind: tyList, elementType: x.listValue.unref[0].getType.box)
-  of vkString: result = Ty(String)
-  of vkExpression: result = Ty(Expression)
-  of vkStatement: result = Ty(Statement)
-  of vkScope: result = Ty(Scope)
+  of vkList: result = ListTy[x.listValue.unref[0].getType]
+  of vkString: result = StringTy
+  of vkExpression: result = ExpressionTy
+  of vkStatement: result = StatementTy
+  of vkScope: result = ScopeTy
   of vkArray:
     let val = x.tupleValue.unref
     result = Type(kind: tyTuple, elements: newSeq[Type](val.len))
     for i in 0 ..< x.tupleValue.unref.len:
       result.elements[i] = val[i].getType
   of vkType:
-    result = Type(kind: tyType, typeValue: box x.typeValue)
+    result = TypeTy[x.typeValue]
   of vkFunction, vkNativeFunction:
-    result = Ty(Function)
+    result = Type(kind: tyBase, typeBase: FunctionTy)
     # could save signature into Function object
     # but we can still use the type field
   of vkSet:
-    result = Ty(Set)
+    result = SetTy[AnyTy]
     for v in x.setValue:
-      result.elementType = v.getType.box
+      result.baseArguments[0] = v.getType
       break
   of vkTable:
-    result = Ty(Table)
+    result = TableTy[AnyTy, AnyTy]
     for k, v in x.tableValue:
-      result.keyType = k.getType.box
-      result.valueType = v.getType.box
+      result.baseArguments[0] = k.getType
+      result.baseArguments[1] = v.getType
       break
   of vkEffect:
     # probably should never be here
@@ -137,15 +137,15 @@ proc getType*(x: FullValueObj): Type =
 
 proc getType*(x: Value): Type =
   case x.kind
-  of vkNone: result = Ty(NoneValue)
-  of vkInt32: result = Ty(Int32)
-  of vkUint32: result = Ty(Uint32)
-  of vkFloat32: result = Ty(Float32)
-  of vkInt64: result = Ty(Int64)
-  of vkUint64: result = Ty(Uint64)
-  of vkFloat64: result = Ty(Float64)
-  of vkBool: result = Ty(Bool)
-  of vkReference: result = Type(kind: tyReference, elementType: box x.referenceValue[].getType)
+  of vkNone: result = NoneValueTy
+  of vkInt32: result = Int32Ty
+  of vkUint32: result = Uint32Ty
+  of vkFloat32: result = Float32Ty
+  of vkInt64: result = Int64Ty
+  of vkUint64: result = Uint64Ty
+  of vkFloat64: result = Float64Ty
+  of vkBool: result = BoolTy
+  of vkReference: result = ReferenceTy[x.referenceValue[].getType]
   of boxedValueKinds - {vkInt64, vkUint64, vkFloat64}:
     result = x.boxedValue[].getType
   of vkEffect:

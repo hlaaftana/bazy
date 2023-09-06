@@ -3,20 +3,20 @@ import ".."/[primitives, compilation, values]
 import common
 
 module types:
-  define "Any", Ty(Any)
-  define "None", Ty(None)
-  typedTempl "type_of", [Ty(Any)], Type(kind: tyType, typeValue: Ty(Any).box):
+  define "Any", AnyTy
+  define "None", NoneTy
+  typedTempl "type_of", [AnyTy], TypeTy[AnyTy]:
     let t = args[0].knownType
-    result = toValue constant(t, Type(kind: tyType, typeValue: t.box))
+    result = toValue constant(t, TypeTy[t])
   {.push hints: off.}
-  typedTempl "cast", [Ty(Any), Type(kind: tyType, typeValue: Ty(Any).box)], Ty(Any):
+  typedTempl "cast", [AnyTy, TypeTy[AnyTy]], AnyTy:
     let newStmt = new(Statement)
     newStmt[] = args[0][]
     newStmt.knownType = scope.context.evaluateStatic(args[1].toInstruction).boxedValue.typeValue
     result = toValue newStmt
   {.pop.}
   when false:
-    let anyType = Type(kind: tyType, typeValue: Ty(Any))
+    let anyType = Type(kind: tyType, typeValue: AnyTy)
     fn "functionType", [anyType], anyType:
       result = toValue Type(kind: tyFunction, arguments: seq[Type] @[], returnType: args[0].typeValue)
     fn "functionType", [anyType, anyType], anyType:

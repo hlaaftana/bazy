@@ -5,9 +5,9 @@ import common
 module syntax:
   templ "block", 1:
     let sc = scope.childScope()
-    result = toValue sc.compile(args[0], +Ty(Any))
+    result = toValue sc.compile(args[0], +AnyTy)
   templ "static", 1:
-    let st = scope.compile(args[0], +Ty(Any))
+    let st = scope.compile(args[0], +AnyTy)
     result = toValue constant(scope.context.evaluateStatic(st.toInstruction), st.knownType)
   
   # XXX (3) generic assignments or functions
@@ -19,23 +19,21 @@ module syntax:
     for i in 0 ..< arguments.len:
       var arg = arguments[i]
       if arg.kind == Colon:
-        fnTypeArguments.elements[i] = scope.evaluateStatic(arg.right, +Type(kind: tyType, typeValue: box Ty(Any))).boxedValue.typeValue
+        fnTypeArguments.elements[i] = scope.evaluateStatic(arg.right, +TypeTy[AnyTy]).boxedValue.typeValue
         arg = arg.left
       else:
-        fnTypeArguments.elements[i] = Ty(Any)
+        fnTypeArguments.elements[i] = AnyTy
       let name = $arg
       if name.len != 0 and name[0] != '_':
         fnTypeArguments.elementNames[name] = i
       discard bodyScope.define(name, fnTypeArguments.elements[i])
-    let fnType = Type(kind: tyFunction,
-      returnType: returnBound.boundType.box,
-      arguments: fnTypeArguments.box)
+    let fnType = FunctionTy[fnTypeArguments, returnBound.boundType]
     var v: Variable
     if name.len != 0:
       v = scope.define(name, fnType)
     let body = bodyScope.compile(body, returnBound)
     if not v.isNil and not returnBoundSet:
-      v.knownType.returnType = body.knownType.box
+      v.knownType.baseArguments[1] = body.knownType
     bodyScope.context.refreshStack()
     var fun = toValue(
       TreeWalkFunction(stack: bodyScope.context.stack.shallowRefresh(), instruction: body.toInstruction))
@@ -52,11 +50,11 @@ module syntax:
     var body = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).boxedValue.typeValue
+        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.typeValue
         lhs = lhs.left
         (+t, true)
       else:
-        (+Ty(Any), false)
+        (+AnyTy, false)
     let (name, arguments) =
       if lhs.kind in CallKinds:
         ($lhs.address, lhs.arguments)
@@ -71,11 +69,11 @@ module syntax:
     let rhs = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).boxedValue.typeValue
+        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.typeValue
         lhs = lhs.left
         (+t, true)
       else:
-        (+Ty(Any), false)
+        (+AnyTy, false)
     case lhs.kind
     of Name, Symbol:
       let name = $lhs
@@ -90,11 +88,11 @@ module syntax:
     let rhs = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +Type(kind: tyType, typeValue: Ty(Any).box)).boxedValue.typeValue
+        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.typeValue
         lhs = lhs.left
         (+t, true)
       else:
-        (+Ty(Any), false)
+        (+AnyTy, false)
     case lhs.kind
     of Name, Symbol:
       let name = $lhs

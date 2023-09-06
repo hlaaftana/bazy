@@ -6,12 +6,12 @@ else:
 import abyzou, abyzou/vm/[primitives, values, types, compilation, arrays]
 
 test "type relation":
-  check {Ty(Int32).match(Ty(Float32)), Ty(Float32).match(Ty(Int32))} == {tmNone}
-  let a1 = Type(kind: tyTuple, elements: @[Ty(Scope)], varargs: box Ty(Expression))
-  let a2 = Type(kind: tyTuple, elements: @[Ty(Scope), Ty(Expression), Ty(Expression)])
+  check {(Int32Ty).match(Float32Ty), (Float32Ty).match(Int32Ty)} == {tmNone}
+  let a1 = Type(kind: tyTuple, elements: @[ScopeTy], varargs: box ExpressionTy)
+  let a2 = Type(kind: tyTuple, elements: @[ScopeTy, ExpressionTy, ExpressionTy])
   check {a1.match(a2), a2.match(a1)} == {tmAlmostEqual}
-  let a3 = Type(kind: tyTuple, elements: @[Ty(Scope)], varargs: box Ty(Any))
-  let a4 = Type(kind: tyTuple, elements: @[Ty(Scope)])
+  let a3 = Type(kind: tyTuple, elements: @[ScopeTy], varargs: box AnyTy)
+  let a4 = Type(kind: tyTuple, elements: @[ScopeTy])
   check a1.match(a3) == tmFalse
   check a3.match(a1) == tmTrue
   check {a1.match(a4), a4.match(a1), a3.match(a4), a4.match(a3)} == {tmAlmostEqual}
@@ -252,7 +252,7 @@ c = foo()
 import abyzou/vm/library/common
 
 module withVarargsFn:
-  define "max", funcTypeWithVarargs(Ty(Int32), [], Ty(Int32)), (doFn do:
+  define "max", funcTypeWithVarargs(Int32Ty, [], Int32Ty), (doFn do:
     var res = args[0].int32Value
     for i in 1 ..< args.len:
       let el = args[i].int32Value
@@ -274,10 +274,10 @@ max(3, 7, 4, 5)
 
 module withGeneric:
   let T = Type(kind: tyParameter, parameter: newTypeParameter("T"))
-  let f = define(result, "foo", funcType(Type(kind: tyList, elementType: box T), [T]))
+  let f = define(result, "foo", funcType(ListTy[T], [T]))
   f.genericParams = @[T.parameter]
   result.top.define(f)
-  let f2 = define(result, "foo", funcType(Type(kind: tyList, elementType: box Ty(Int32)), [Ty(Int32)]))
+  let f2 = define(result, "foo", funcType(ListTy[Int32Ty], [Int32Ty]))
   result.top.define(f2)
   result.refreshStack()
   result.stack.set f.stackIndex, toValue proc (args: openarray[Value]): Value =
@@ -294,25 +294,25 @@ test "generic":
 
 module withGenericMeta:
   let T = Type(kind: tyParameter, parameter: newTypeParameter("T"))
-  let f = define(result, "foo", funcType(Ty(Statement), [Ty(Scope), Ty(Expression)]).withProperties(
-    property(Meta, toValue funcType(Type(kind: tyList, elementType: box T), [T]))
+  let f = define(result, "foo", funcType(StatementTy, [ScopeTy, ExpressionTy]).withProperties(
+    property(Meta, funcType(ListTy[T], [T]))
   ))
   f.genericParams = @[T.parameter]
   result.top.define(f)
-  let f2 = define(result, "foo", funcType(Ty(Statement), [Ty(Scope), Ty(Statement)]).withProperties(
-    property(Meta, toValue funcType(Type(kind: tyList, elementType: box Ty(Int32)), [Ty(Int32)]))
+  let f2 = define(result, "foo", funcType(StatementTy, [ScopeTy, StatementTy]).withProperties(
+    property(Meta, funcType(ListTy[Int32Ty], [Int32Ty]))
   ))
   result.top.define(f2)
   result.refreshStack()
   result.stack.set f.stackIndex, toValue proc (args: openarray[Value]): Value =
     let scope = args[0].boxedValue.scopeValue
     result = toValue compile(scope, Expression(kind: Array,
-      elements: @[args[1].boxedValue.expressionValue]), +Ty(Any))
+      elements: @[args[1].boxedValue.expressionValue]), +AnyTy)
   result.stack.set f2.stackIndex, toValue proc (args: openarray[Value]): Value =
     result = toValue Statement(kind: skList,
-      knownType: Type(kind: tyList, elementType: box Ty(Int32)),
+      knownType: ListTy[Int32Ty],
       elements: @[Statement(kind: skUnaryInstruction,
-        knownType: Ty(Int32),
+        knownType: Int32Ty,
         unaryInstructionKind: NegInt,
         unary: args[1].boxedValue.statementValue)])
 
