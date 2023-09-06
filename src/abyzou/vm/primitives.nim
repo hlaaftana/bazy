@@ -173,12 +173,13 @@ type
 
   NativeType* = enum
     ntyNone,
+    # weird concrete
+    ntyTuple,
     # concrete
     ntyNoneValue,
     ntyInt32, ntyUint32, ntyFloat32, ntyBool,
     ntyInt64, ntyUint64, ntyFloat64,
     ntyReference,
-    ntyTuple, # XXX (2) make into tyComposite, tuple, named tuple, array (i.e. int^20) all at once
     ntyFunction,
     ntyList,
     ntyString,
@@ -194,8 +195,7 @@ type
     id*: TypeBaseId
     name*: string
     nativeType*: NativeType
-    arguments*: Type # tuple type
-    genericParams*: seq[TypeParameter]
+    arguments*: seq[TypeParameter]
     typeMatcher*: proc (pattern, t: Type): TypeMatch
     valueMatcher*: proc (v: Value, thisType: Type): bool
     # XXX (6) maybe add compare

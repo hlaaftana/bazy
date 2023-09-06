@@ -1,7 +1,13 @@
 import "."/[primitives, values, ids], std/[tables, sets]
 
-proc tupleType*(s: varargs[Type]): Type =
-  Type(kind: tyTuple, elements: @s)
+proc `+`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Covariant)
+proc `-`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Contravariant)
+proc `~`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Invariant)
+proc `*`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Ultravariant)
+proc `*`*(t: Type, variance: Variance): TypeBound {.inline.} = TypeBound(boundType: t, variance: variance)
+
+proc newTypeParameter*(name: string, bound: TypeBound = +Ty(Any)): TypeParameter =
+  TypeParameter(id: newTypeParameterId(), name: name, bound: bound)
 
 when defined(gcDestructors):
   template defineTypeBase*(name, value): untyped {.dirty.} =
@@ -39,21 +45,21 @@ when false: # can implement as compound types
     # complex
     tyBaseType,
     tyWithProperty}
-  result = case t.kind
-  of tyFunction:
-    # XXX (4) no information about signature
-    value.kind in {vkFunction, vkNativeFunction}
-  of tyTuple:
-    value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements)
-  of tyType: value.kind == vkType and t.typeValue.unbox.match(value.typeValue).matches
 
-template nativeType(n: untyped, nt: NativeType, args: varargs[Type]) =
+proc toTypeParams(args: varargs[TypeBound]): seq[TypeParameter] =
+  result.newSeq(args.len)
+  for i in 0 ..< args.len:
+    result[i] = newTypeParameter("", args[i])
+
+template nativeType(n: untyped, nt: NativeType, args: varargs[TypeBound]) =
   defineTypeBase n, TypeBase(name: astToStr(n),
     nativeType: nt,
-    arguments: tupleType(args))
+    arguments: toTypeParams(args))
 
-template nativeType(n: untyped, args: varargs[Type]) =
+template nativeType(n: untyped, args: varargs[TypeBound]) =
   nativeType(n, `nty n`, args)
+
+nativeType Tuple, [] # not used for tuple type construction
 
 nativeType NoneValue, []
 nativeType Int32, []
@@ -67,12 +73,15 @@ nativeType String, []
 nativeType ExpressionTy, ntyExpression, []
 nativeType StatementTy, ntyStatement
 nativeType ScopeTy, ntyScope, []
-nativeType Reference, [Type(kind: tyAny)]
-nativeType List, [Type(kind: tyAny)]
-nativeType Set, [Type(kind: tyAny)]
-nativeType Table, [Type(kind: tyAny), Type(kind: tyAny)]
+nativeType Reference, [+Type(kind: tyAny)]
+nativeType List, [+Type(kind: tyAny)]
+nativeType Set, [+Type(kind: tyAny)]
+nativeType Table, [+Type(kind: tyAny), +Type(kind: tyAny)]
+nativeType Function, [+Type(kind: tyBase, typeBase: Tuple), -Type(kind: tyAny)]
+nativeType TypeTy, ntyType
+TypeTy.arguments = toTypeParams [+Type(kind: tyBase, typeBase: TypeTy)]
 
-nativeType ContravariantTy, ntyContravariant, [Type(kind: tyAny)]
+nativeType ContravariantTy, ntyContravariant, [+Type(kind: tyAny)]
 
 proc property*(tag: TypeBase, args: varargs[Type]): Type {.inline.} =
   Type(kind: tyCompound, base: tag, baseArguments: @args)
@@ -110,6 +119,9 @@ const
   concreteNativeTypes* = {ntyNoneValue..ntyType}
   highestNonMatching* = tmFalse
   lowestMatching* = tmTrue
+
+proc tupleType*(s: varargs[Type]): Type =
+  Type(kind: tyTuple, elements: @s)
 
 proc funcType*(returnType: Type, arguments: varargs[Type]): Type {.inline.} =
   Type(kind: tyFunction, returnType: returnType.box, arguments: tupleType(arguments).box)
@@ -234,12 +246,6 @@ template min*(a, b: TypeMatch): TypeMatch =
   (if am == tmNone: am
   else: system.min(am, b))
 
-proc `+`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Covariant)
-proc `-`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Contravariant)
-proc `~`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Invariant)
-proc `*`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Ultravariant)
-proc `*`*(t: Type, variance: Variance): TypeBound {.inline.} = TypeBound(boundType: t, variance: variance)
-
 proc converse*(tm: TypeMatch): TypeMatch =
   case tm
   of tmEqual, tmNone, tmSimilar, tmAlmostEqual, tmUnknown: tm
@@ -297,7 +303,13 @@ proc match*(matcher, t: Type): TypeMatch =
       # XXX handle native types in TypeKind
       else: return tmUnknown
       if matcher.base != t.base: return tmUnknown
-      match(+tupleType(matcher.baseArguments), tupleType(t.baseArguments))
+      var res = tmAlmostEqual
+      for i in 0 ..< matcher.base.arguments.len:
+        let v = matcher.base.arguments[i].bound.variance
+        let m = match(matcher.baseArguments[i] * v, t.baseArguments[i])
+        if m < res: res = m
+        if res <= tmNone: return res
+      res
   of concreteTypeKinds:
     if matcher.kind != t.kind:
       return case t.kind
@@ -364,6 +376,8 @@ proc match*(matcher, t: Type): TypeMatch =
   of tyBaseType:
     boolMatch t.kind == matcher.baseKind
   of tyBase:
+    if matcher.typeBase.nativeType == ntyTuple and t.kind == tyTuple:
+      return tmTrue
     # in nim a dummy compound type is created from the base and compared
     case t.kind
     of tyBase:
@@ -621,9 +635,6 @@ type
     parameter*: TypeParameter
     presumed*: Type
     conflicting*: Type
-
-proc newTypeParameter*(name: string, bound: TypeBound = +Ty(Any)): TypeParameter =
-  TypeParameter(id: newTypeParameterId(), name: name, bound: bound)
 
 proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, variance = Covariant) =
   template match(a, b: Type) = matchParameters(a, b, table)

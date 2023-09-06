@@ -1,7 +1,7 @@
 import "."/[primitives, arrays, treewalk, types, values, ids], ../language/[expressions, number, shortstring], std/[hashes, tables, sets, strutils]
 
 defineTypeBase Meta, TypeBase(name: "Meta",
-  arguments: tupleType(Type(kind: tyBaseType, baseKind: tyFunction)))
+  arguments: @[newTypeParameter("", +Ty(Function))])
 
 #defineProperty Fields, Property(name: "Fields",
 #  argumentType: Type(kind: tyTable, keyType: box Ty(String), tableValueType: box Ty(Int32)))
