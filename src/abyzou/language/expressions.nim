@@ -1,5 +1,4 @@
-import shortstring, number, operators, ../util/objects, ../defines, info
-export same
+import shortstring, number, operators, skinsuit/equals, ../defines, info
 
 type
   ExpressionKind* = enum
@@ -42,8 +41,8 @@ type
     of Block, SemicolonBlock:
       statements*: seq[Expression]
 
-defineEquality Expression
-defineEquality typeof(Expression()[])
+equals *Expression
+equals *typeof(Expression()[])
 
 proc len*(ex: Expression): int =
   case ex.kind

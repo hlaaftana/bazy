@@ -9,9 +9,9 @@ type
     bits*: uint8
 
 when defined(js):
-  import ../util/objects
+  import skinsuit/equals
   type NumberRepr* = ref NumberReprObj
-  defineRefEquality NumberRepr
+  equals *NumberRepr
 else:
   type NumberRepr* = NumberReprObj
 

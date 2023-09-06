@@ -12,6 +12,7 @@ skipDirs      = @["src/abyzou/disabled"]
 # Dependencies
 
 requires "nim >= 1.4.0"
+requires "skinsuit >= 0.2.3"
 
 when (compiles do: import nimbleutils):
   import nimbleutils

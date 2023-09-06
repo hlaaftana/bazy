@@ -315,6 +315,8 @@ proc resolve*(scope: Scope, ex: Expression, name: string, bound: TypeBound): Var
 proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement
 
+template same(a, b: Expression): bool = system.`==`(a, b)
+
 proc compileProperty*(scope: Scope, ex: Expression, lhs: Statement, name: string, bound: TypeBound): Statement =
   result = nil
   if lhs.knownType.kind == tyTuple and lhs.knownType.elementNames.contains(name):

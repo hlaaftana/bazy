@@ -501,7 +501,7 @@ template unref*[T](x: T): untyped = x
 proc isNone*(t: Type): bool = t.kind == tyNone
 proc isNone*(vt: Box[Type]): bool = vt.isNil or vt.unbox.isNone
 
-import ../util/objects
+import skinsuit/equals
 
 template mix(x) =
   mixin hash
@@ -564,32 +564,17 @@ proc `==`*(a, b: Type): bool {.noSideEffect.}
 proc `==`*(a, b: InstructionObj): bool {.noSideEffect.}
 proc `==`*(a, b: StatementObj): bool {.noSideEffect.}
 
-defineRefEquality Value
-defineRefEquality FullValueObj
-defineRefEquality Type
-defineRefEquality InstructionObj
-defineRefEquality StatementObj
+equals *(ref Value)
+equals *(ref FullValueObj)
+equals *(ref Type)
+equals *(ref InstructionObj)
+equals *(ref StatementObj)
 
-template eqObj(T; forceElseVal = false): untyped {.dirty.} =
-  proc `==`*(a, b: T): bool {.noSideEffect.} =
-    zipFields(forceElse = forceElseVal, a, b, aField, bField):
-      when aField is ref:
-        if not aField.isNil and not bField.isNil:
-          if aField[] != bField[]:
-            return false
-        else:
-          if aField != bField:
-            return false
-      else:
-        if aField != bField:
-          return false
-    return true
-
-eqObj Value, true
-eqObj FullValueObj
-eqObj Type
-eqObj InstructionObj, true
-eqObj StatementObj
+equals *Value
+equals *FullValueObj
+equals *Type
+equals *InstructionObj
+equals *StatementObj
 
 import strutils
 
