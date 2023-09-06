@@ -9,13 +9,17 @@ macro callOp(op: static string, args: varargs[untyped]): untyped =
 
 import std/math
 
+template Ty(t: type uint32): Type = Uint32Ty
+template Ty(t: type int32): Type = Int32Ty
+template Ty(t: type float32): Type = Float32Ty
+
 module numbers:
-  define "Int", Ty(Int32)
-  define "Float", Ty(Float32)
-  define "Uint", Ty(Uint32)
-  define "Int64", Ty(Int64)
-  define "Float64", Ty(Float64)
-  define "Uint64", Ty(Uint64)
+  define "Int", Int32Ty
+  define "Float", Float32Ty
+  define "Uint", Uint32Ty
+  define "Int64", Int64Ty
+  define "Float64", Float64Ty
+  define "Uint64", Uint64Ty
   template unarySingle(op: static string, k) =
     fn op, [Ty(`k`)], Ty(`k`):
       toValue callOp(`op`, args[0].`k Value`)
@@ -37,7 +41,7 @@ module numbers:
     binarySingle op, uint32
     binarySingle op, float32
   template binarySingleBool(op: static string, k) =
-    fn op, [Ty(`k`), Ty(`k`)], Ty(Bool):
+    fn op, [Ty(`k`), Ty(`k`)], BoolTy:
       toValue callOp(`op`, args[0].`k Value`, args[1].`k Value`)
   template binaryBool(op: static string) =
     binarySingleBool op, int32
@@ -54,7 +58,7 @@ module numbers:
   binarySingle "div", int32
   binarySingle "div", uint32
   template floatDivide(k) =
-    fn "/", [Ty(`k`), Ty(`k`)], Ty(Float32):
+    fn "/", [Ty(`k`), Ty(`k`)], Float32Ty:
       toValue args[0].`k Value` / args[1].`k Value`
   floatDivide int32
   floatDivide float32

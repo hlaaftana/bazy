@@ -131,18 +131,7 @@ type
     tyNone,
     # concrete
     tyCompound,
-    tyNoneValue,
-    tyInt32, tyUint32, tyFloat32, tyBool,
-    tyInt64, tyUint64, tyFloat64,
-    tyReference,
     tyTuple, # XXX (2) make into tyComposite, tuple, named tuple, array (i.e. int^20) all at once
-    tyFunction,
-    tyList,
-    tyString,
-    tySet,
-    tyTable,
-    tyExpression, tyStatement, tyScope,
-    tyType,
     # typeclass
     tyAny,
     tyUnion, tyIntersection, tyNot,
@@ -213,33 +202,16 @@ type
     properties*: Table[TypeBase, Type]
       # can be a multitable later on
     case kind*: TypeKind
+    of tyNone, tyAny: discard
     of tyCompound:
       base*: TypeBase
       baseArguments*: seq[Type]
-    of tyNoneValue,
-      tyInt32, tyUint32, tyFloat32, tyBool,
-      tyInt64, tyUint64, tyFloat64,
-      tyString, tyExpression, tyStatement, tyScope,
-      tyAny, tyNone:
-      discard
     of tyTuple:
       elements*: seq[Type]
       varargs*: Box[Type] # for now only trailing
         # XXX either move to property, or allow non-trailing
       elementNames*: Table[string, int]
       unorderedFields*: Table[string, Type]
-    of tyFunction:
-      # XXX (2) account for Fields and Defaults property of the `arguments` tuple type
-      # only considered at callsite like nim, no semantic value
-      # meaning this is specific to function type relation
-      arguments*: Box[Type] # tuple type, includes varargs
-      returnType*: Box[Type]
-    of tyReference, tyList, tySet:
-      elementType*: Box[Type]
-    of tyTable:
-      keyType*, tableValueType*: Box[Type]
-    of tyType:
-      typeValue*: Box[Type]
     of tyUnion, tyIntersection:
       operands*: seq[Type]
     of tyNot:
@@ -510,7 +482,7 @@ proc get*(stack: Stack, index: int): lent Value {.inline.} =
 proc set*(stack: Stack, index: int, value: sink Value) {.inline.} =
   stack.stack[index] = value
 
-template Ty*(name): Type = Type(kind: `ty name`)
+#template Ty*(name): Type = Type(kind: `ty name`)
 
 proc shallowRefresh*(stack: Stack): Stack =
   result = Stack(imports: stack.imports)
@@ -672,28 +644,9 @@ proc `$`*(t: Type): string =
       result.add($t)
   result = case t.kind
   of tyCompound: t.base.name & "(" & $t.baseArguments & ")"
-  of tyNoneValue: "NoneValue"
-  of tyInt32: "Int32"
-  of tyUint32: "Uint32"
-  of tyFloat32: "Float32"
-  of tyBool: "Bool"
-  of tyInt64: "Int64"
-  of tyUint64: "Uint64"
-  of tyFloat64: "Float64"
-  of tyString: "String"
-  of tyExpression: "Expression"
-  of tyStatement: "Statement"
-  of tyScope: "Scope"
   of tyAny: "Any"
   of tyNone: "None"
   of tyTuple: "Tuple(" & $t.elements & (if t.unorderedFields.len == 0: "" else: " " & $t.unorderedFields) & (if t.varargs.isNone: ")" else: ", " & $t.varargs & "...)")
-  of tyFunction:
-    "Function(" & $t.arguments & ") -> " & $t.returnType
-  of tyReference: "Reference(" & $t.elementType & ")"
-  of tyList: "List(" & $t.elementType & ")"
-  of tySet: "Set(" & $t.elementType & ")"
-  of tyTable: "Table(" & $t.keyType & ", " & $t.tableValueType & ")"
-  of tyType: "Type " & $t.typeValue
   of tyUnion: "Union(" & $t.operands & ")"
   of tyIntersection: "Intersection(" & $t.operands & ")"
   of tyNot: "Not " & $t.notType
@@ -759,3 +712,82 @@ proc `$`*(scope: Scope): string =
     result.add("parent ")
     for line in splitLines($scope.parent):
       result.add("  " & line & "\n")
+
+template AnyTy*: untyped = Type(kind: tyAny)
+template NoneTy*: untyped = Type(kind: tyNone)
+
+proc `+`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Covariant)
+proc `-`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Contravariant)
+proc `~`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Invariant)
+proc `*`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Ultravariant)
+proc `*`*(t: Type, variance: Variance): TypeBound {.inline.} = TypeBound(boundType: t, variance: variance)
+
+proc newTypeParameter*(name: string, bound: TypeBound = +AnyTy): TypeParameter =
+  TypeParameter(id: newTypeParameterId(), name: name, bound: bound)
+
+when defined(gcDestructors):
+  template defineTypeBase*(name, value): untyped {.dirty.} =
+    let `name`* = block: # !global
+      var `name` {.inject.}: TypeBase
+      `name` = value
+      `name`.id = newTypeBaseId()
+      `name`
+else:
+  template defineTypeBase*(name, value): untyped =
+    proc getTypeBase: TypeBase {.gensym.} =
+      var `name` {.global, inject.}: TypeBase
+      if `name`.isNil:
+        `name` = value
+        `name`.id = newTypeBaseId()
+      result = `name`
+    template `name`*: TypeBase {.inject.} = getTypeBase()
+
+proc toTypeParams(args: varargs[TypeBound]): seq[TypeParameter] =
+  result.newSeq(args.len)
+  for i in 0 ..< args.len:
+    result[i] = newTypeParameter("", args[i])
+
+template nativeType(n: untyped, nt: NativeType, args: varargs[TypeBound]) =
+  defineTypeBase n, TypeBase(name: astToStr(n),
+    nativeType: nt,
+    arguments: toTypeParams(args))
+
+template nativeType(n: untyped, args: varargs[TypeBound]) =
+  nativeType(n, `nty n`, args)
+
+template nativeAtomicType(n: untyped) =
+  nativeType(`n TyBase`, `nty n`)
+  template `n Ty`*: untyped = Type(kind: tyCompound, base: `n TyBase`)
+
+nativeType TupleTy, ntyTuple, [] # not used for tuple type construction
+
+nativeAtomicType NoneValue
+nativeAtomicType Int32
+nativeAtomicType Uint32
+nativeAtomicType Float32
+nativeAtomicType Bool
+nativeAtomicType Int64
+nativeAtomicType Uint64
+nativeAtomicType Float64
+nativeAtomicType String
+nativeAtomicType Expression
+nativeAtomicType Statement
+nativeAtomicType Scope
+nativeType ReferenceTy, [+AnyTy]
+nativeType ListTy, ntyList, [+AnyTy]
+nativeType SetTy, ntySet, [+AnyTy]
+nativeType TableTy, ntyTable, [+AnyTy, +AnyTy]
+nativeType FunctionTy, ntyFunction, [+Type(kind: tyBase, typeBase: TupleTy), -Type(kind: tyUnion, operands: @[])]
+  # XXX (2) account for Fields and Defaults property of the `arguments` tuple type
+  # only considered at callsite like nim, no semantic value
+  # meaning this is specific to function type relation
+nativeType TypeTy, ntyType
+TypeTy.arguments = toTypeParams [+Type(kind: tyBase, typeBase: TypeTy)]
+
+nativeType ContravariantTy, ntyContravariant, [+AnyTy]
+
+proc `!`*(tag: TypeBase): Type {.inline.} =
+  Type(kind: tyCompound, base: tag, baseArguments: @[])
+
+proc `[]`*(tag: TypeBase, args: varargs[Type]): Type {.inline.} =
+  Type(kind: tyCompound, base: tag, baseArguments: @args)

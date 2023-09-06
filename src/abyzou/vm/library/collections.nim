@@ -6,13 +6,13 @@ module collections:
   block reference:
     # todo: better names (maybe just copy nim)
     let T = Type(kind: tyParameter, parameter: newTypeParameter("T"))
-    let rf = define(result, "ref", funcType(Type(kind: tyReference, elementType: box T), [T]))
+    let rf = define(result, "ref", funcType(ReferenceTy[T], [T]))
     rf.genericParams = @[T.parameter]
     result.top.define(rf)
-    let urf = define(result, "unref", funcType(T, [Type(kind: tyReference, elementType: box T)]))
+    let urf = define(result, "unref", funcType(T, [ReferenceTy[T]]))
     urf.genericParams = @[T.parameter]
     result.top.define(urf)
-    let upd = define(result, "update", funcType(Ty(None), [Type(kind: tyReference, elementType: box T), T]))
+    let upd = define(result, "update", funcType(NoneTy, [ReferenceTy[T], T]))
     upd.genericParams = @[T.parameter]
     result.top.define(upd)
     result.refreshStack()
@@ -24,8 +24,8 @@ module collections:
       args[0].referenceValue[].toSmallValue
     result.stack.set upd.stackIndex, toValue proc (args: openarray[Value]): Value =
       args[0].referenceValue[] = args[1].toFullValueObj
-  define ".[]", funcType(Ty(Statement), [Ty(Scope), Ty(Statement), Ty(Statement)]).withProperties(
-    property(Meta, funcType(Ty(Any), [Type(kind: tyBaseType, baseKind: tyTuple), Ty(Int32)]))
+  define ".[]", funcType(StatementTy, [ScopeTy, StatementTy, StatementTy]).withProperties(
+    property(Meta, funcType(AnyTy, [Type(kind: tyBaseType, baseKind: tyTuple), Int32Ty]))
   ), toValue proc (valueArgs: openarray[Value]): Value =
     let scope = valueArgs[0].boxedValue.scopeValue
     let index = scope.context.evaluateStatic(valueArgs[2].boxedValue.statementValue.toInstruction)

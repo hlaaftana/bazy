@@ -22,12 +22,12 @@ proc define*(context: Context, n: string, typ: Type, x: sink Value) =
 proc templType*(arity: int): Type {.inline.} =
   var args = newSeq[Type](arity + 1)
   var bArgs = newSeq[Type](arity)
-  args[0] = Ty(Scope)
+  args[0] = ScopeTy
   for i in 0 ..< arity:
-    args[i + 1] = Ty(Expression)
-    bArgs[i] = Ty(Any)
-  result = funcType(Ty(Statement), args)
-  result.properties = properties(property(Meta, funcType(Ty(Any), bArgs)))
+    args[i + 1] = ExpressionTy
+    bArgs[i] = AnyTy
+  result = funcType(StatementTy, args)
+  result.properties = properties(property(Meta, funcType(AnyTy, bArgs)))
 
 template doTempl*(body): untyped =
   (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
@@ -40,19 +40,19 @@ template doTempl*(body): untyped =
 proc typedTemplType*(arity: int): Type {.inline.} =
   var args = newSeq[Type](arity + 1)
   var bArgs = newSeq[Type](arity)
-  args[0] = Ty(Scope)
+  args[0] = ScopeTy
   for i in 0 ..< arity:
-    args[i + 1] = Ty(Statement)
-    bArgs[i] = Ty(Any)
-  result = funcType(Ty(Statement), args)
-  result.properties = properties(property(Meta, funcType(Ty(Any), bArgs)))
+    args[i + 1] = StatementTy
+    bArgs[i] = AnyTy
+  result = funcType(StatementTy, args)
+  result.properties = properties(property(Meta, funcType(AnyTy, bArgs)))
 
 proc typedTemplType*(realArgs: openarray[Type], returnType: Type): Type {.inline.} =
   var args = newSeq[Type](realArgs.len + 1)
-  args[0] = Ty(Scope)
+  args[0] = ScopeTy
   for i in 0 ..< realArgs.len:
-    args[i + 1] = Ty(Statement)
-  result = funcType(Ty(Statement), args)
+    args[i + 1] = StatementTy
+  result = funcType(StatementTy, args)
   result.properties = properties(property(Meta, funcType(returnType, realArgs)))
 
 template doTypedTempl*(body): untyped =
