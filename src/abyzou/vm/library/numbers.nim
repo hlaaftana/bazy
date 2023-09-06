@@ -1,4 +1,4 @@
-import ".."/[compilation, primitives, values]
+import ../[compilation, primitives, valueconstr, typebasics]
 
 import common
 
@@ -26,10 +26,6 @@ module numbers:
   template unarySingleAlias(name, op: static string, k) =
     fn op, [Ty(`k`)], Ty(`k`):
       toValue callOp(`op`, args[0].`k Value`)
-  template unary(op: static string) {.used.} =
-    unarySingle op, int32
-    unarySingle op, uint32
-    unarySingle op, float32
   template binarySingle(op: static string, k) =
     fn op, [Ty(`k`), Ty(`k`)], Ty(`k`):
       toValue callOp(`op`, args[0].`k Value`, args[1].`k Value`)

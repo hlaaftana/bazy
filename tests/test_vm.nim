@@ -3,10 +3,10 @@ when (compiles do: import nimbleutils/bridge):
 else:
   import unittest
 
-import abyzou, abyzou/vm/[primitives, values, types, compilation, arrays]
+import abyzou, abyzou/vm/[primitives, valueconstr, typebasics, typematch, compilation, arrays]
 
 test "type relation":
-  check {(Int32Ty).match(Float32Ty), (Float32Ty).match(Int32Ty)} == {tmNone}
+  check {Int32Ty.match(Float32Ty), Float32Ty.match(Int32Ty)} == {tmNone}
   let a1 = Type(kind: tyTuple, elements: @[ScopeTy], varargs: box ExpressionTy)
   let a2 = Type(kind: tyTuple, elements: @[ScopeTy, ExpressionTy, ExpressionTy])
   check {a1.match(a2), a2.match(a1)} == {tmAlmostEqual}
@@ -249,7 +249,7 @@ c = foo()
         echo (ref NoOverloadFoundError)(getCurrentException()).scope.variables
       raise
 
-import abyzou/vm/library/common
+import abyzou/vm/[library/common, treewalk]
 
 module withVarargsFn:
   define "max", funcTypeWithVarargs(Int32Ty, [], Int32Ty), (doFn do:

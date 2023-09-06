@@ -1,6 +1,20 @@
-import "."/[primitives, arrays, values, types], std/[sets, tables]
+import
+  std/[sets, tables],
+  ./[primitives, arrays, valueconstr, checktype]
 
 # XXX use linearizer for bytecode and evaluate that without recursion (but maybe keep this)
+
+proc get*(stack: Stack, index: int): lent Value {.inline.} =
+  stack.stack[index]
+proc set*(stack: Stack, index: int, value: sink Value) {.inline.} =
+  stack.stack[index] = value
+
+proc shallowRefresh*(stack: Stack): Stack =
+  result = Stack(imports: stack.imports)
+  var newStack = newArray[Value](stack.stack.len)
+  for i in 0 ..< stack.stack.len:
+    newStack[i] = stack.stack[i]
+  result.stack = newStack
 
 type EffectHandler* = proc (effect: Value): bool
   ## returns true to continue execution

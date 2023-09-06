@@ -1,4 +1,10 @@
-import "."/[primitives, arrays, treewalk, types, values, ids], ../language/[expressions, number, shortstring], std/[hashes, tables, sets, strutils]
+import
+  std/[hashes, tables, sets, strutils],
+  ../language/[expressions, number, shortstring],
+  ./[primitives, arrays,
+    typebasics, typematch, generictypes,
+    valueconstr, checktype, guesstype,
+    treewalk]
 
 defineTypeBase Meta, TypeBase(name: "Meta",
   arguments: @[newTypeParameter("", +Type(kind: tyBase, typeBase: FunctionTy))])
@@ -331,7 +337,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
       let metaTy = v.type.properties[Meta].baseArguments[0]
       metaTypes[i] = metaTy
       for i in 0 ..< ex.arguments.len:
-        if matchBound(+ StatementTy, ty.param(i + 1)):
+        if matchBound(+StatementTy, ty.param(i + 1)):
           makeStatement[i] = true
           # this should be correct but it was commonSubType before
           argumentTypes[i] = commonSuperType(argumentTypes[i], metaTy.param(i))
@@ -372,7 +378,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
       var arguments = newSeq[Statement](ex.arguments.len + 1)
       arguments[0] = constant(scope, ScopeTy)
       for i in 0 ..< ex.arguments.len:
-        if matchBound(+ StatementTy, ty.param(i + 1)):
+        if matchBound(+StatementTy, ty.param(i + 1)):
           arguments[i + 1] = constant(argumentStatements[i], StatementTy)
         else:
           arguments[i + 1] = constant(copy ex.arguments[i], ExpressionTy)
@@ -385,7 +391,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
         var arguments = newArray[Value](ex.arguments.len + 1)
         arguments[0] = toValue scope
         for i in 0 ..< ex.arguments.len:
-          if matchBound(+ StatementTy, d.type.param(i + 1)):
+          if matchBound(+StatementTy, d.type.param(i + 1)):
             arguments[i + 1] = toValue argumentStatements[i]
           else:
             arguments[i + 1] = toValue copy ex.arguments[i]

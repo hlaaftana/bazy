@@ -1,4 +1,7 @@
-import ".."/[primitives, compilation, types, values], ../../language/[expressions, shortstring], std/tables
+import
+  std/tables,
+  ../../language/[expressions, shortstring],
+  ../[primitives, compilation, typebasics, valueconstr, treewalk]
 
 import common
 

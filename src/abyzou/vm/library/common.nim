@@ -1,4 +1,7 @@
-import ".."/[primitives, compilation, types], ../../language/expressions, std/[tables]
+import
+  std/tables,
+  ../../language/expressions,
+  ../[primitives, compilation, typebasics, treewalk, guesstype]
 
 proc define*(scope: Scope, n: string, typ: Type): Variable =
   result = newVariable(n, typ)
@@ -73,6 +76,7 @@ template module*(moduleName, definitions): untyped {.dirty.} =
     template define(n: string, typ: Type, x: Value) {.used.} =
       define(result, n, typ, x)
     template define(n: string, x: Value) {.used.} =
+      bind getType
       let value = x
       define(n, getType(value), value)
     template define(n: string, typ: Type, x) {.used.} =

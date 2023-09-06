@@ -1,4 +1,4 @@
-import "."/[primitives, arrays]
+import ./[primitives, arrays]
 
 # XXX make runner
 

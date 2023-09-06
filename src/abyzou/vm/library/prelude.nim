@@ -1,6 +1,6 @@
-import ".."/[compilation, primitives]
+import ../[compilation, primitives]
 
-import "."/[syntax, numbers, logic, types, collections]
+import ./[syntax, numbers, logic, types, collections]
 
 proc prelude*: Context =
   result = newContext(@[syntax(), numbers(), logic(), types(), collections()])

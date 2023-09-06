@@ -1,4 +1,4 @@
-import hashes
+import std/hashes
 
 type
   IdImpl = uint64

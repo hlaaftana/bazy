@@ -1,8 +1,9 @@
 import ../defines
 
 when useArrays:
-  import arrayimpl
-  export arrayimpl
+  # XXX (7) maybe optimize and use ref array[3, T] for small sizes and seq for bigger sizes
+  import ../disabled/arrayimpl
+  export ../disabled/arrayimpl
   type ArrayRef*[T] = ref Array[T]
   template toArrayRef*(foo): ArrayRef =
     var r: ref typeof(toArray(foo))

@@ -1,4 +1,6 @@
-import ".."/[primitives, compilation, values, types], ../../language/[expressions, shortstring]
+import
+  ../../language/[expressions, shortstring],
+  ../[primitives, compilation, valueconstr, typebasics, typematch]
 
 import common
 
