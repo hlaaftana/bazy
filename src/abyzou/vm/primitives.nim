@@ -135,7 +135,6 @@ type
     # typeclass
     tyAny,
     tyUnion, tyIntersection, tyNot,
-    tyBaseType,
     tyWithProperty,
     tyBase,
     tySomeValue,
@@ -216,8 +215,6 @@ type
       operands*: seq[Type]
     of tyNot:
       notType*: Box[Type]
-    of tyBaseType:
-      baseKind*: TypeKind
     of tyWithProperty:
       typeWithProperty*: Box[Type]
       withProperty*: TypeBase
@@ -650,7 +647,6 @@ proc `$`*(t: Type): string =
   of tyUnion: "Union(" & $t.operands & ")"
   of tyIntersection: "Intersection(" & $t.operands & ")"
   of tyNot: "Not " & $t.notType
-  of tyBaseType: "BaseType " & $t.baseKind
   of tyWithProperty: "WithProperty(" & $t.typeWithProperty & ", " & $t.withProperty & ")"
   of tyBase: "Base(" & $t.typeBase & ")"
   of tySomeValue: "SomeValue(" & $t.someValueType & ")"
@@ -753,7 +749,7 @@ template nativeType(n: untyped, nt: NativeType, args: varargs[TypeBound]) =
     arguments: toTypeParams(args))
 
 template nativeType(n: untyped, args: varargs[TypeBound]) =
-  nativeType(n, `nty n`, args)
+  nativeType(`n Ty`, `nty n`, args)
 
 template nativeAtomicType(n: untyped) =
   nativeType(`n TyBase`, `nty n`)
@@ -773,15 +769,15 @@ nativeAtomicType String
 nativeAtomicType Expression
 nativeAtomicType Statement
 nativeAtomicType Scope
-nativeType ReferenceTy, [+AnyTy]
-nativeType ListTy, ntyList, [+AnyTy]
-nativeType SetTy, ntySet, [+AnyTy]
-nativeType TableTy, ntyTable, [+AnyTy, +AnyTy]
-nativeType FunctionTy, ntyFunction, [+Type(kind: tyBase, typeBase: TupleTy), -Type(kind: tyUnion, operands: @[])]
+nativeType Reference, [+AnyTy]
+nativeType List, [+AnyTy]
+nativeType Set, [+AnyTy]
+nativeType Table, [+AnyTy, +AnyTy]
+nativeType Function, [+Type(kind: tyBase, typeBase: TupleTy), -Type(kind: tyUnion, operands: @[])]
   # XXX (2) account for Fields and Defaults property of the `arguments` tuple type
   # only considered at callsite like nim, no semantic value
   # meaning this is specific to function type relation
-nativeType TypeTy, ntyType
+nativeType Type
 TypeTy.arguments = toTypeParams [+Type(kind: tyBase, typeBase: TypeTy)]
 
 nativeType ContravariantTy, ntyContravariant, [+AnyTy]

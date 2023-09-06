@@ -25,7 +25,7 @@ module collections:
     result.stack.set upd.stackIndex, toValue proc (args: openarray[Value]): Value =
       args[0].referenceValue[] = args[1].toFullValueObj
   define ".[]", funcType(StatementTy, [ScopeTy, StatementTy, StatementTy]).withProperties(
-    property(Meta, funcType(AnyTy, [Type(kind: tyBaseType, baseKind: tyTuple), Int32Ty]))
+    property(Meta, funcType(AnyTy, [Type(kind: tyBase, typeBase: TupleTy), Int32Ty]))
   ), toValue proc (valueArgs: openarray[Value]): Value =
     let scope = valueArgs[0].boxedValue.scopeValue
     let index = scope.context.evaluateStatic(valueArgs[2].boxedValue.statementValue.toInstruction)

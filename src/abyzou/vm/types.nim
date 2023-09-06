@@ -56,7 +56,6 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyUnion: -1,
   tyIntersection: -1,
   tyNot: 1,
-  tyBaseType: -1,
   tyWithProperty: -1,
   tyBase: 0,
   tySomeValue: 1,
@@ -97,8 +96,6 @@ proc nth*(t: Type, i: int): Type =
     result = t.operands[i]
   of tyNot:
     result = t.notType.unbox
-  of tyBaseType:
-    discard # inapplicable
   of tyWithProperty:
     discard # inapplicable
   of tyBase:
@@ -229,8 +226,6 @@ proc match*(matcher, t: Type): TypeMatch =
     min
   of tyNot:
     boolMatch not match(matcher.notType.unbox, t).matches
-  of tyBaseType:
-    boolMatch t.kind == matcher.baseKind
   of tyBase:
     if matcher.typeBase.nativeType == ntyTuple and t.kind == tyTuple:
       return tmTrue
@@ -414,21 +409,6 @@ proc checkType*(value: FullValueObj, t: Type): bool =
         break
     res
   of tyNot: not value.checkType(t.notType.unbox)
-  of tyBaseType:
-    # XXX (3) please remove this type eventually
-    type Res = enum unknown, knownTrue, knownFalse
-    var res = unknown
-    var vkinds: set[ValueKind]
-    template vkind(vk: ValueKind) = vkinds = {vk}
-    case t.baseKind
-    of tyTuple: vkind vkArray
-    of tyAny, tyValue, tyCompound, tyBase: res = knownTrue
-    of tyNone, tyUnion, tyIntersection, tyNot, tyBaseType, tyWithProperty,
-      tySomeValue, tyParameter: res = knownFalse
-    case res
-    of knownTrue: true
-    of knownFalse: false
-    of unknown: value.kind in vkinds
   of tyWithProperty:
     value.checkType(t.typeWithProperty.unbox) and value.getType.properties.hasKey(t.withProperty)
   of tySomeValue: false
@@ -508,7 +488,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
       match(pattern.typeWithProperty, t.typeWithProperty)
     else:
       match(pattern.typeWithProperty.unbox, t)
-  of tyBaseType, tyBase:
+  of tyBase:
     discard # no type to traverse
   of tyValue:
     if t.kind == pattern.kind:
@@ -530,7 +510,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
   case pattern.kind
   of tyParameter:
     pattern = table[pattern.parameter]
-  of tyAny, tyNone, tyBaseType, tyBase:
+  of tyAny, tyNone, tyBase:
     discard
   of tyCompound:
     if unlikely(not pattern.base.genericFiller.isNil):
