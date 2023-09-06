@@ -1,7 +1,7 @@
 import "."/[primitives, values, ids], std/[tables, sets]
 
 proc property*(tag: TypeBase, args: varargs[Type]): Type {.inline.} =
-  Type(kind: tyCompound, base: tag, baseArguments: @args)
+  compound(tag, args)
 
 proc property*(prop: Type): Type {.inline.} =
   assert prop.kind == tyCompound

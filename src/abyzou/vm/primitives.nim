@@ -179,7 +179,7 @@ type
     ntyContravariant
 
   TypeBase* = ref object
-    # XXX generics?
+    # XXX (3) check arguments at generic fill time
     id*: TypeBaseId
     name*: string
     nativeType*: NativeType
@@ -203,6 +203,8 @@ type
     case kind*: TypeKind
     of tyNone, tyAny: discard
     of tyCompound:
+      # XXX seq might cause performance drop, add tySingleCompound, tyDoubleCompound etc
+      # or optimize Array like that and use it
       base*: TypeBase
       baseArguments*: seq[Type]
     of tyTuple:
@@ -782,8 +784,8 @@ TypeTy.arguments = toTypeParams [+Type(kind: tyBase, typeBase: TypeTy)]
 
 nativeType ContravariantTy, ntyContravariant, [+AnyTy]
 
-proc `!`*(tag: TypeBase): Type {.inline.} =
-  Type(kind: tyCompound, base: tag, baseArguments: @[])
-
-proc `[]`*(tag: TypeBase, args: varargs[Type]): Type {.inline.} =
+proc compound*(tag: TypeBase, args: varargs[Type]): Type {.inline.} =
   Type(kind: tyCompound, base: tag, baseArguments: @args)
+
+template `!`*(tag: TypeBase): Type = compound(tag)
+template `[]`*(tag: TypeBase, args: varargs[Type]): Type = compound(tag, args)
