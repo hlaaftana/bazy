@@ -73,6 +73,7 @@ equals *(ref StatementObj)
 equals *Value
 equals *FullValueObj
 equals *Type
+equals *TypeMatch
 equals *InstructionObj
 equals *StatementObj
 

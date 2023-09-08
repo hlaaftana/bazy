@@ -6,15 +6,15 @@ else:
 import abyzou, abyzou/vm/[primitives, valueconstr, typebasics, typematch, compilation, arrays]
 
 test "type relation":
-  check {Int32Ty.match(Float32Ty), Float32Ty.match(Int32Ty)} == {tmNone}
+  check {Int32Ty.match(Float32Ty).level, Float32Ty.match(Int32Ty).level} == {tmNone}
   let a1 = Type(kind: tyTuple, elements: @[ScopeTy], varargs: box ExpressionTy)
   let a2 = Type(kind: tyTuple, elements: @[ScopeTy, ExpressionTy, ExpressionTy])
-  check {a1.match(a2), a2.match(a1)} == {tmAlmostEqual}
+  check {a1.match(a2).level, a2.match(a1).level} == {tmAlmostEqual}
   let a3 = Type(kind: tyTuple, elements: @[ScopeTy], varargs: box AnyTy)
   let a4 = Type(kind: tyTuple, elements: @[ScopeTy])
-  check a1.match(a3) == tmUniversalFalse
-  check a3.match(a1) == tmUniversalTrue
-  check {a1.match(a4), a4.match(a1), a3.match(a4), a4.match(a3)} == {tmAlmostEqual}
+  check a1.match(a3).level == tmUniversalFalse
+  check a3.match(a1).level == tmUniversalTrue
+  check {a1.match(a4).level, a4.match(a1).level, a3.match(a4).level, a4.match(a3).level} == {tmAlmostEqual}
   check a1 < a3
 
 test "compile success":

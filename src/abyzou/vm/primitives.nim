@@ -154,7 +154,7 @@ type
     # value container
     tyValue
     
-  TypeMatch* = enum
+  MatchLevel* = enum
     # in order of strength
     tmUnknown, tmNone,
     tmFiniteFalse, tmFalse,
@@ -162,6 +162,13 @@ type
     tmTrue, tmFiniteTrue,
     tmSimilar, tmGeneric,
     tmAlmostEqual, tmEqual
+  
+  TypeMatch* = object
+    level*: MatchLevel
+    case deep*: bool
+    of false: discard
+    of true:
+      children*: seq[TypeMatch]
 
   Variance* = enum
     Covariant
@@ -198,7 +205,6 @@ type
     arguments*: seq[TypeParameter]
     typeMatcher*: proc (pattern, t: Type): TypeMatch
     valueMatcher*: proc (v: Value, thisType: Type): bool
-    # XXX (6) maybe add compare
     # not sure if these are temporary:
     genericMatcher*: proc (pattern: Type, t: Type, table: var ParameterInstantiation, variance = Covariant)
     genericFiller*: proc (pattern: var Type, table: ParameterInstantiation)

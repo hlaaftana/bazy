@@ -13,18 +13,46 @@ const
   highestNonMatching* = tmUniversalFalse
   lowestMatching* = tmUniversalTrue
 
-proc matches*(tm: TypeMatch): bool {.inline.} =
+proc matches*(tm: MatchLevel): bool {.inline.} =
   tm >= lowestMatching
 
+proc matches*(tm: TypeMatch): bool {.inline.} =
+  matches(tm.level)
+
+proc atomicMatch*(tm: MatchLevel): TypeMatch {.inline.} =
+  TypeMatch(level: tm, deep: false)
+
 proc boolMatch*(b: bool): TypeMatch {.inline.} =
-  if b: tmTrue else: tmFalse
+  atomicMatch(if b: tmTrue else: tmFalse)
 
-template min*(a, b: TypeMatch): TypeMatch =
-  let am = a
-  (if am == tmNone: am
-  else: system.min(am, b))
+proc compare*(m1, m2: MatchLevel): int {.inline.} =
+  ord(m1) - ord(m2)
 
-proc converse*(tm: TypeMatch): TypeMatch =
+proc compare*(a, b: TypeMatch): int =
+  template propagate(x, y, comparer): untyped =
+    let c = comparer(x, y)
+    if c != 0: return c
+  propagate a.level, b.level, compare
+  # weird:
+  propagate a.deep, b.deep, cmp
+  if a.deep:
+    propagate a.children.len, b.children.len, cmp
+    for i in 0 ..< a.children.len:
+      propagate a.children[i], b.children[i], compare
+  0 # equal
+
+proc `<`*(a, b: TypeMatch): bool = compare(a, b) < 0
+proc `<=`*(a, b: TypeMatch): bool = compare(a, b) <= 0
+
+proc min*(a, b: MatchLevel): MatchLevel {.inline.} =
+  if a == tmNone: a
+  else: system.min(a, b)
+
+proc min*(a, b: TypeMatch): TypeMatch {.inline.} =
+  if a.level == tmNone: a
+  else: system.min(a, b)
+
+proc converse*(tm: MatchLevel): MatchLevel =
   case tm
   of tmEqual, tmNone, tmSimilar, tmAlmostEqual, tmUnknown: tm
   of tmTrue: tmFalse
@@ -34,23 +62,30 @@ proc converse*(tm: TypeMatch): TypeMatch =
   of tmUniversalFalse: tmUniversalTrue
   of tmUniversalTrue: tmUniversalFalse
 
+proc converse*(tm: TypeMatch): TypeMatch =
+  result = tm
+  result.level = converse(result.level)
+  if result.deep:
+    for c in result.children.mitems:
+      c = converse(c)
+
 proc match*(matcher, t: Type): TypeMatch
 
 proc match*(b: TypeBound, t: Type): TypeMatch =
   case b.variance
   of Covariant:
     result = b.boundType.match(t)
-    if result == tmUnknown:
+    if result.level == tmUnknown:
       result = converse t.match(b.boundType)
   of Contravariant:
     result = t.match(b.boundType)
-    if result == tmUnknown:
+    if result.level == tmUnknown:
       result = converse b.boundType.match(t)
   of Invariant:
     result = min(b.boundType.match(t), converse t.match(b.boundType))
   of Ultravariant:
     result = b.boundType.match(t)
-    if result != tmNone:
+    if result.level != tmNone:
       result = max(result, converse t.match(b.boundType))
 
 proc matchBound*(b: TypeBound, t: Type): bool {.inline.} =
@@ -62,9 +97,9 @@ proc match*(matcher, t: Type): TypeMatch =
   # otherwise either order can give none, in which the non-none result matters
   # otherwise generally should be anticommutative, but this is not necessary
   # properties do not have effect on default types besides dropping equal to almost equal
-  if matcher == t: return tmEqual
+  if matcher == t: return atomicMatch(tmEqual)
   result = case matcher.kind
-  of tyNoType: tmUnknown
+  of tyNoType: atomicMatch(tmUnknown)
   of tyCompound:
     case matcher.base.nativeType
     of ntyContravariant:
@@ -78,121 +113,133 @@ proc match*(matcher, t: Type): TypeMatch =
         let tnt = t.base.nativeType
         if mnt != tnt:
           return if {mnt, tnt} <= concreteNativeTypes:
-            tmNone
+            atomicMatch(tmNone)
           else:
-            tmUnknown
+            atomicMatch(tmUnknown)
       # XXX handle native types in TypeKind
-      else: return tmUnknown
-      if matcher.base != t.base: return tmUnknown
-      var res = tmAlmostEqual
-      for i in 0 ..< matcher.base.arguments.len:
-        let v = matcher.base.arguments[i].bound.variance
-        let m = match(matcher.baseArguments[i] * v, t.baseArguments[i])
-        if m < res: res = m
-        if res <= tmNone: return res
+      else: return atomicMatch(tmUnknown)
+      if matcher.base != t.base: return atomicMatch(tmUnknown)
+      var res = atomicMatch(tmAlmostEqual)
+      let len = matcher.base.arguments.len
+      if len > 0:
+        res = TypeMatch(level: tmAlmostEqual, deep: true)
+        res.children.newSeq(len)
+        for i in 0 ..< len:
+          let v = matcher.base.arguments[i].bound.variance
+          let m = match(matcher.baseArguments[i] * v, t.baseArguments[i])
+          res.children[i] = m
+          if m.level < res.level: res.level = m.level
+          if res.level <= tmNone: return res
       res
   of tyTuple:
     # XXX (2) unorderedFields
     # (name: string, age: int) is named tuple vs (name: string anywhere, age: int anywhere) is typeclass but also type of function call arguments
     # second is strict subtype, like (name: string: 1, age: int: 2) vs (name: string: {1, 2}, age: int: {1, 2})
     if matcher.kind != t.kind:
-      return tmUnknown
+      return atomicMatch(tmUnknown)
     if matcher.elements.len != t.elements.len and matcher.varargs.isNoType and t.varargs.isNoType:
-      return tmNone
+      return atomicMatch(tmNone)
     var max = t.elements.len
     if matcher.elements.len > t.elements.len and (max = matcher.elements.len; t.varargs.isNoType):
-      return tmNone
-    var res = tmAlmostEqual
-    for i in 0 ..< max:
-      let m = match(+matcher.nth(i), t.nth(i))
-      if m < res: res = m
-      if res <= tmNone: return res
+      return atomicMatch(tmNone)
+    var res = atomicMatch(tmAlmostEqual)
+    if max > 0:
+      res = TypeMatch(level: tmAlmostEqual, deep: true)
+      res.children.newSeq(max)
+      for i in 0 ..< max:
+        let m = match(+matcher.nth(i), t.nth(i))
+        res.children[i] = m
+        if m.level < res.level: res.level = m.level
+        if res.level <= tmNone: return res
+    # this is probably wrong:
     if not matcher.varargs.isNoType and not t.varargs.isNoType:
       let vm = match(+matcher.varargs.unbox, t.varargs.unbox)
-      if vm < res: res = vm
+      if vm.level < res.level: res.level = vm.level
     res
-  of tyAny: tmUniversalTrue
-  of tyNone: tmUniversalFalse
+  of tyAny: atomicMatch(tmUniversalTrue)
+  of tyNone: atomicMatch(tmUniversalFalse)
   of tyUnion:
-    var max = tmFiniteFalse
+    var max = TypeMatch(level: tmFiniteFalse, deep: true, children: @[atomicMatch(tmUnknown)])
     for a in matcher.operands:
       let m = match(+a, t)
-      if m > max: max = m
-      if max >= tmFiniteTrue:
-        max = tmFiniteTrue
-        break
+      if m > max.children[0]:
+        max.children[0] = m
+        if m.level >= tmFiniteTrue:
+          max.level = tmFiniteTrue
+          break
     max
   of tyIntersection:
-    var min = tmFiniteTrue
+    var min = TypeMatch(level: tmFiniteTrue, deep: true, children: @[atomicMatch(tmAlmostEqual)])
     for a in matcher.operands:
       let m = match(+a, t)
-      if m < min: min = m
-      if min <= tmFiniteFalse:
-        min = tmFiniteFalse
-        break
+      if m < min.children[0]:
+        min.children[0] = m
+        if m.level <= tmFiniteFalse:
+          min.level = tmFiniteFalse
+          break
     min
   of tyNot:
     boolMatch not match(matcher.notType.unbox, t).matches
   of tyBase:
     if matcher.typeBase.nativeType == ntyTuple and t.kind == tyTuple:
-      return tmTrue
+      return atomicMatch(tmTrue)
     # in nim a dummy compound type is created from the base and compared
     case t.kind
     of tyBase:
-      if matcher.typeBase == t.typeBase: tmAlmostEqual
-      else: tmNone
+      if matcher.typeBase == t.typeBase: atomicMatch(tmAlmostEqual)
+      else: atomicMatch(tmNone)
     of tyCompound:
       boolMatch matcher.typeBase == t.typeBase
-    else: tmNone
+    else: atomicMatch(tmNone)
   of tySomeValue:
     case t.kind
     of tySomeValue:
       min(
-        tmAlmostEqual,
+        atomicMatch(tmAlmostEqual),
         match(+matcher.someValueType.unbox, t.someValueType.unbox))
     of tyValue:
       min(
-        tmSimilar,
+        atomicMatch(tmSimilar),
         match(+matcher.someValueType.unbox, t.valueType.unbox))
-    else: tmNone
+    else: atomicMatch(tmNone)
   of tyWithProperty:
     min(
-      if not t.properties.hasKey(matcher.withProperty): tmFiniteFalse else: tmAlmostEqual,
+      if not t.properties.hasKey(matcher.withProperty):
+        atomicMatch(tmFiniteFalse)
+      else:
+        atomicMatch(tmAlmostEqual),
       match(+matcher.typeWithProperty.unbox, t))
   of tyParameter:
     min(
-      tmGeneric,
+      atomicMatch(tmGeneric),
       match(matcher.parameter.bound, t))
   of tyValue:
     case t.kind
     of tyValue:
       let tm = match(matcher.valueType.unbox, t.valueType.unbox)
       if not tm.matches or matcher.value != t.value:
-        tmNone
+        atomicMatch(tmNone)
       else: tm
-    of tySomeValue: tmUnknown
-    else: tmNone
+    of tySomeValue: atomicMatch(tmUnknown)
+    else: atomicMatch(tmNone)
   #of tyGeneric:
   #  min(
   #    tmGeneric,
   #    match(matcher.genericPattern[], t))
-  result = min(result, tmAlmostEqual)
+  if result.level > tmAlmostEqual:
+    result.level = tmAlmostEqual
   if result.matches:
     for p, args in matcher.properties:
       if not p.typeMatcher.isNil:
         result = min(result, p.typeMatcher(t, args))
-        if result <= tmNone: return result
-
-proc compare*(m1, m2: TypeMatch): int {.inline.} =
-  ord(m1) - ord(m2)
+        if result.level <= tmNone: return result
 
 proc compare*(t1, t2: Type): int =
   ## t1 < t2 mirrors being a subtype
-  # XXX (6) maybe add more logic to this? the current system might be too ambiguous
   let
     m1 = t1.match(t2)
     m2 = t2.match(t1)
-  assert not (m1 == tmEqual and m1 != m2), "equal match must be commutative"
+  assert not (m1.level == tmEqual and m1 != m2), "equal match must be commutative"
   compare(m1, m2)
 
 proc `<`*(a, b: Type): bool {.inline.} = compare(a, b) < 0
@@ -213,7 +260,7 @@ proc commonSubType*(a, b: Type, doUnion = true, variance = Covariant): Type =
     b
   elif cmp < 0:
     a
-  elif m1 in {tmEqual, tmAlmostEqual}:
+  elif m1.level in {tmEqual, tmAlmostEqual}:
     a
   elif doUnion: # union here meaning either
     union(a, b)
@@ -233,7 +280,7 @@ proc commonSuperType*(a, b: Type, doUnion = true, variance = Covariant): Type =
     a
   elif cmp < 0:
     b
-  elif m1 in {tmEqual, tmAlmostEqual}:
+  elif m1.level in {tmEqual, tmAlmostEqual}:
     a
   elif doUnion:
     union(a, b)
