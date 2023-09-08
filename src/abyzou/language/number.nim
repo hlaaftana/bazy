@@ -30,10 +30,11 @@ proc `$`*(number: NumberRepr): string =
         -1
     else:
       -2
-  result = newStringOfCap(number.negative.ord +
+  let exactLen = number.negative.ord +
     number.digits.len +
     (dotIndex >= 0).ord +
-    (if exponent.len != 0: exponent.len + 1 else: 0)) # exact length
+    (if exponent.len != 0: exponent.len + 1 else: 0)
+  result = newStringOfCap(exactLen)
   if number.negative:
     result.add('-')
   for i, d in number.digits:
@@ -42,3 +43,4 @@ proc `$`*(number: NumberRepr): string =
   if exponent.len != 0:
     result.add('e')
     result.add(exponent)
+  assert exactLen == result.len

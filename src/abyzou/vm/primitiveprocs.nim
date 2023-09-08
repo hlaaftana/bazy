@@ -154,14 +154,6 @@ proc `$`*(t: Type): string =
   of tySomeValue: "SomeValue(" & $t.someValueType & ")"
   of tyParameter: "Parameter(" & $t.parameter.name & ")"
   of tyValue: "Value(" & $t.value & ": " & $t.valueType & ")"
-  #of tyGeneric:
-  #  var s = "Generic["
-  #  var i = 0
-  #  for p, b in t.parameters:
-  #    if i != 0: s.add(", ")
-  #    else: inc i
-  #    s.add(p.name & ": " & $b)
-  #  s & "](" & $t.genericPattern[] & ")"
   if t.properties.len != 0:
     result.add(" {") 
     var afterFirst = false

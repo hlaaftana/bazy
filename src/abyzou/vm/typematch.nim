@@ -1,6 +1,6 @@
 import
-  std/[tables, sets],
-  ./[primitives, ids, typebasics]
+  std/tables,
+  ./[primitives, typebasics]
 
 type TypeMatchError* = object of CatchableError
 
@@ -222,10 +222,6 @@ proc match*(matcher, t: Type): TypeMatch =
       else: tm
     of tySomeValue: atomicMatch(tmUnknown)
     else: atomicMatch(tmNone)
-  #of tyGeneric:
-  #  min(
-  #    tmGeneric,
-  #    match(matcher.genericPattern[], t))
   if result.level > tmAlmostEqual:
     result.level = tmAlmostEqual
   if result.matches:

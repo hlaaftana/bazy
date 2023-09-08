@@ -89,6 +89,7 @@ proc unboxStripType*(x: FullValueObj | FullValue): Value =
     result.boxedValue = toRef x
 
 when false:
+  # XXX (1) this is probably important
   proc copy*(value: Value): Value =
     case value.kind
     of vkNone, vkInt64, vkBool, vkUint64, vkFloat64,
@@ -105,7 +106,7 @@ when false:
       for i in 0 ..< newArray.len:
         newArray[i] = copy value.tupleValue.unref[i]
       toValue(newArray)
-    of vkEffect,
+    of vkEffect, vkReference, vkBoxed,
       vkSet, vkTable, vkExpression, vkStatement, vkScope:
       # unimplemented
       value

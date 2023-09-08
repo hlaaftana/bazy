@@ -14,13 +14,13 @@ template unref*[T](x: ref T): untyped = x[]
 template unref*[T](x: Box[T]): untyped = x.unbox
 template unref*[T](x: T): untyped = x
 
-# type system should exist for both static and runtime dispatch
+# type system exists for both static and runtime dispatch
 # runtime-only types should only be subtypes of static-only types
 
 type
   ValueKind* = enum
     vkNone
-      ## some kind of null value
+      ## singleton null value
     vkInt32, vkUint32, vkFloat32, vkBool
       ## unboxed numbers
     vkEffect
@@ -247,9 +247,6 @@ type
     of tyValue:
       value*: Value
       valueType*: Box[Type]
-    #of tyGeneric:
-    #  parameters*: Table[TypeParameter, TypeBound]
-    #  genericPattern*: ref Type
 
   TypeBound* = object
     boundType*: Type
@@ -357,7 +354,7 @@ type
     skGetAddress, skSetAddress
       # XXX (1) remove, only use above
     skArmStack
-      # XXX (1) should load closure variables too
+      # XXX (1) should load closure captures
     # goto
     skIf, skWhile, skDoUntil
     # effect, can emulate goto
@@ -370,6 +367,8 @@ type
 
   StatementObj* {.acyclic.} = object
     ## typed/compiled expression
+    # XXX differentiate between validated and unvalidated,
+    # maybe allow things like skFromExpression for metas
     knownType*: Type
     case kind*: StatementKind
     of skNone: discard
@@ -439,8 +438,9 @@ type
     ## current module or function
     imports*: seq[Context]
       # XXX (1) imports should not work like this/exist
-      # modules should probably be like JS or lua where
-      # the module creates a module object which is what gets imported
+      # modules should create a module object with all exported variables
+      # the imported variables are like closure captures from the other module
+      # before a module is run, imported variables should be loaded into its stack by the module graph
       # stacks should never persist, persistent memory should be vkReference
       # static code should still run exactly like normal code, static memory
       # can still use vkReference which will be re-allocated at runtime with
@@ -449,10 +449,8 @@ type
       # comments might be outdated:
         # for now keep this but use it less
         # register memory can still exist as well as constant memory that gets inlined
-        # maybe vkReference shouldn't exist and Value should always have value semantics
-        # for serialization and initialization in bytecode etc
-        # or just have a rule to allocate a new reference every time a vkReference constant is loaded
-    parent*: Context # XXX (1)
+    parent*: Context
+      # XXX (1) context closure is defined in
     captures*: seq[VariableReference] # XXX (1)
     stack*: Stack
     stackSize*: int

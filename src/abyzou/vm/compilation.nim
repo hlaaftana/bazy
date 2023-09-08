@@ -441,15 +441,17 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
           d[0].newSeq(argumentStatements.len)
           for i in 0 ..< argumentStatements.len:
             let pt = t.param(i)
-            if matchBound(-argumentTypes[i], pt):
+            let m = match(-argumentTypes[i], pt)
+            if m.matches:
               # optimize checking types we know match
-              # XXX (4?) do this recursively?
+              # XXX do this recursively using deep matches for some types
               d[0][i] = AnyTy
             else:
               d[0][i] = pt
           d[1] = variableGet(subs[i])
         result = Statement(kind: skDispatch,
-          knownType: functionType.baseArguments[1], # we could calculate a union here but it's not worth dealing with a typeclass
+          knownType: functionType.baseArguments[1],
+            # we could calculate a union here but it could become too complex
           dispatchees: dispatchees,
           dispatchArguments: argumentStatements)
 
@@ -487,6 +489,7 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
             " found for argument types " & $argumentTypes)
 
 proc compileTupleExpression*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
+  # XXX tuple type sugar?
   if bound.boundType.kind == tyTuple:
     assert bound.boundType.elements.len == ex.elements.len, "tuple bound type lengths do not match"
   result = Statement(kind: skTuple, knownType: Type(kind: tyTuple, elements: newSeqOfCap[Type](ex.elements.len)))
@@ -600,7 +603,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           arguments: @[ex.left, ex.right]))
   of CallKinds: result = compileCall(scope, ex, bound)
   of Subscript:
-    # what specialization can go here
+    # XXX specialize for overloaded variables
     result = forward(Expression(kind: PathCall,
       address: newSymbolExpression(short".[]"),
       arguments: @[ex.address] & ex.arguments))

@@ -18,7 +18,7 @@ type
     # (a, b) => c = (d, e) => f
     # should be (a, b) => ((c = (d, e) => f))
     # not (a, b) => ((c = (d, e)) => f)
-    Statement # postfix if/for
+    Statement # postfix if/for, nonexistent
     None
   
   Associativity* = enum Left, Right, Unary

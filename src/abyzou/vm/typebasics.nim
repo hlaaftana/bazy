@@ -131,7 +131,6 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyBase: 0,
   tySomeValue: 1,
   tyParameter: -1,
-  #tyGeneric: -1,
   tyValue: -1
 ]
 
@@ -173,7 +172,7 @@ proc nth*(t: Type, i: int): Type =
     discard # inapplicable
   of tySomeValue:
     result = t.someValueType.unbox
-  of tyParameter, tyValue:#, tyGeneric:
+  of tyParameter, tyValue:
     discard # what
 
 proc param*(t: Type, i: int): Type {.inline.} =

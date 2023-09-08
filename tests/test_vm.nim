@@ -35,7 +35,6 @@ test "compile success":
 test "eval values":
   let tests = {
     "a = \"abcd\"; a": toValue("abcd"), # breaks arc
-    # gc bugs:
     "a = (b = do c = 1); [a, 2, b,  3, c]":
       toValue(@[toValue(1), toValue(2), toValue(1), toValue(3), toValue(1)]),
     "a = (b = do c = 1); (a, 2, b,  3, c, \"ab\")":
@@ -65,7 +64,7 @@ gcd(12, 42)
           toValue(toArray([toValue 3,
             toValue(toArray([toValue 2,
               toValue(toArray([toValue 1,
-                #[Value(kind: vkNone)]#toValue(toArray[Value]([]))]))]))]))]))])),
+                toValue(toArray[Value]([]))]))]))]))]))])),
     """
 foo(i: Int) =
   if i == 1
@@ -174,7 +173,7 @@ a = 0
 
     # closures with references (mutable):
     "a = ref 1; foo() = unref a; [foo(), (update(a, 2); foo()), foo()]": toValue(@[toValue(1), toValue(2), toValue(2)]),
-    #"a = 1; foo() = (b = 2; bar() = (c = 3; (a, b, c)); bar()); foo()": toValue(toArray([toValue(1), toValue(2), toValue(3)])),
+    "a = 1; foo() = (b = 2; bar() = (c = 3; (a, b, c)); bar()); foo()": toValue(toArray([toValue(1), toValue(2), toValue(3)])),
     """
 foo() =
   x = ref 1
@@ -202,7 +201,7 @@ static
   a = foo()
   _ = a.setter.(3)
 a.getter.()""": toValue(3),
-    # XXX (1) not working yet (a gives 1):
+    # XXX (1) not working yet (a gives 1), stack refreshing probably needs to copy references properly:
     "1": when true: toValue(1) else: {
     """
 foo() =
@@ -240,6 +239,7 @@ c = foo()
   }
   
   for inp, outp in tests.items:
+    {.push warning[BareExcept]: off.}
     try:
       check evaluate(inp) == outp
     except:
@@ -248,6 +248,7 @@ c = foo()
       if getCurrentException() of ref NoOverloadFoundError:
         echo (ref NoOverloadFoundError)(getCurrentException()).scope.variables
       raise
+    {.pop.}
 
 import abyzou/vm/[library/common, treewalk]
 

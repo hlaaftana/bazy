@@ -18,31 +18,22 @@ type
     NoOp
     SetRegisterConstant # push
     SetRegisterRegister # mov
-    NullaryCall
-    UnaryCall
-    BinaryCall
-    TernaryCall
+    NullaryCall, UnaryCall, BinaryCall, TernaryCall
     TupleCall
     TryDispatch
-    VariableGet # go
-    VariableSet # go
-    GetAddress # go
-    SetAddress # go
-    ArmStack # stay but arm constants
+    VariableGet, VariableSet # go
+    GetAddress, SetAddress # go
+    ArmStack # stay but arm captures
     JumpPoint
-    IfTrueJump
-    IfFalseJump
+    IfTrueJump, IfFalseJump
     Jump
     # effect, can emulate goto
     EmitEffect
-    PushEffectHandler
-    PopEffectHandler
+    PushEffectHandler, PopEffectHandler
     # collection
     InitTuple, InitList, InitSet, InitTable
-    GetIndex
-    SetIndex
-    GetConstIndex
-    SetConstIndex
+    GetIndex, SetIndex
+    GetConstIndex, SetConstIndex
     # binary
     AddInt32, SubInt32, MulInt32, DivInt32
     AddFloat32, SubFloat32, MulFloat32, DivFloat32
