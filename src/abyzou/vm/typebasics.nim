@@ -1,5 +1,6 @@
 import std/tables, ./[primitives, ids]
 
+template NoType*: untyped = Type(kind: tyNoType)
 template AnyTy*: untyped = Type(kind: tyAny)
 template NoneTy*: untyped = Type(kind: tyNone)
 
@@ -66,12 +67,11 @@ nativeType Reference, [+AnyTy]
 nativeType List, [+AnyTy]
 nativeType Set, [+AnyTy]
 nativeType Table, [+AnyTy, +AnyTy]
-nativeType Function, [+Type(kind: tyBase, typeBase: TupleTy), -Type(kind: tyUnion, operands: @[])]
+nativeType Function, [+Type(kind: tyBase, typeBase: TupleTy), -NoneTy]
   # XXX (2) account for Fields and Defaults property of the `arguments` tuple type
   # only considered at callsite like nim, no semantic value
   # meaning this is specific to function type relation
-nativeType Type
-TypeTy.arguments = toTypeParams [+Type(kind: tyBase, typeBase: TypeTy)]
+nativeType Type, [+AnyTy]
 
 nativeType ContravariantTy, ntyContravariant, [+AnyTy]
 
@@ -119,10 +119,11 @@ proc union*(s: varargs[Type]): Type =
   Type(kind: tyUnion, operands: @s)
 
 const definiteTypeLengths*: array[TypeKind, int] = [
-  tyNone: 0,
+  tyNoType: 0,
   tyCompound: -1,
   tyTuple: -1,
   tyAny: 0,
+  tyNone: 0,
   tyUnion: -1,
   tyIntersection: -1,
   tyNot: 1,
@@ -139,7 +140,7 @@ proc len*(t: Type): int =
   if result < 0:
     case t.kind
     of tyTuple:
-      if t.varargs.isNone:
+      if t.varargs.isNoType:
         result = t.elements.len + t.unorderedFields.len
     of tyCompound:
       result = t.baseArguments.len
@@ -148,14 +149,14 @@ proc len*(t: Type): int =
     else: discard
 
 proc hasNth*(t: Type, i: int): bool {.inline.} =
-  i < t.len or (t.kind == tyTuple and not t.varargs.isNone)
+  i < t.len or (t.kind == tyTuple and not t.varargs.isNoType)
 
 proc nth*(t: Type, i: int): Type =
   case t.kind
-  of tyAny, tyNone:
+  of tyNoType, tyAny, tyNone:
     discard # inapplicable
   of tyTuple:
-    if i < t.elements.len or t.varargs.isNone:
+    if i < t.elements.len or t.varargs.isNoType:
       result = t.elements[i]
     else:
       result = t.varargs.unbox

@@ -59,7 +59,7 @@ proc checkType*(value: FullValueObj, t: Type): bool =
   of tyTuple:
     value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements)
   of tyAny: true
-  of tyNone: false
+  of tyNone, tyNoType: false
   of tyUnion:
     var res = false
     for ty in t.operands:

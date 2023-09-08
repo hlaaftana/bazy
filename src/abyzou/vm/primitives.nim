@@ -139,14 +139,14 @@ type
 
   TypeKind* = enum
     # maybe add unknown type for values with unknown type at runtime
-    tyNone,
+    tyNoType,
     # concrete
     tyCompound,
     tyTuple, # XXX (2) make into tyComposite, tuple, named tuple, array (i.e. int^20) all at once
     # typeclass
-    tyAny,
+    tyAny, tyNone, ## none is bottom type
     tyUnion, tyIntersection, tyNot,
-    tyWithProperty,
+    tyWithProperty, # XXX unused
     tyBase,
     tySomeValue,
     # generic parameter
@@ -158,6 +158,7 @@ type
     # in order of strength
     tmUnknown, tmNone,
     tmFiniteFalse, tmFalse,
+    tmUniversalFalse, tmUniversalTrue
     tmTrue, tmFiniteTrue,
     tmSimilar, tmGeneric,
     tmAlmostEqual, tmEqual
@@ -212,7 +213,7 @@ type
     properties*: Table[TypeBase, Type]
       # can be a multitable later on
     case kind*: TypeKind
-    of tyNone, tyAny: discard
+    of tyNoType, tyAny, tyNone: discard
     of tyCompound:
       # XXX (7) seq might cause performance drop, add tySingleCompound, tyDoubleCompound etc
       # or optimize Array like that and use it
@@ -261,29 +262,19 @@ type
   InstructionKind* = enum
     NoOp
     Constant
-    FunctionCall
-    Dispatch
+    FunctionCall, Dispatch
     Sequence
     # stack
-    VariableGet
-    VariableSet
-    GetAddress
-    SetAddress
+    VariableGet, VariableSet
+    GetAddress, SetAddress
     ArmStack
     # goto
-    If
-    While
-    DoUntil
+    If, While, DoUntil
     # effect, can emulate goto
-    EmitEffect
-    HandleEffect
+    EmitEffect, HandleEffect
     # collection
-    BuildTuple
-    BuildList
-    BuildSet
-    BuildTable
-    GetIndex
-    SetIndex
+    BuildTuple, BuildList, BuildSet, BuildTable
+    GetIndex, SetIndex
     # binary
     AddInt, SubInt, MulInt, DivInt
     AddFloat, SubFloat, MulFloat, DivFloat
@@ -352,34 +343,24 @@ type
   StatementKind* = enum
     skNone
     skConstant
-    skFunctionCall
-    skDispatch
+    skFunctionCall, skDispatch
     skSequence
     # stack
-    skVariableGet
-    skVariableSet
-    skGetAddress
+    skVariableGet, skVariableSet
       # XXX (1) should go, closure variables should be loaded to local stack with ArmStack
-    skSetAddress # XXX (1) remove, only use skVariableSet
+    skGetAddress, skSetAddress
+      # XXX (1) remove, only use above
     skArmStack
       # XXX (1) should load closure variables too
     # goto
-    skIf
-    skWhile
-    skDoUntil
+    skIf, skWhile, skDoUntil
     # effect, can emulate goto
-    skEmitEffect
-    skHandleEffect
+    skEmitEffect, skHandleEffect
     # collections
-    skTuple
-    skList
-    skSet
-    skTable
-    skGetIndex
-    skSetIndex
+    skTuple, skList, skSet, skTable
+    skGetIndex, skSetIndex
     # custom instructions
-    skUnaryInstruction
-    skBinaryInstruction
+    skUnaryInstruction, skBinaryInstruction
 
   StatementObj* {.acyclic.} = object
     ## typed/compiled expression
@@ -487,8 +468,8 @@ type
 static:
   doAssert sizeof(Value) <= 2 * sizeof(int)
 
-proc isNone*(t: Type): bool = t.kind == tyNone
-proc isNone*(vt: Box[Type]): bool = vt.isNil or vt.unbox.isNone
+proc isNoType*(t: Type): bool = t.kind == tyNone
+proc isNoType*(vt: Box[Type]): bool = vt.isNil or vt.unbox.isNoType
 
 import ./primitiveprocs
 export primitiveprocs

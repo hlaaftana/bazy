@@ -63,9 +63,9 @@ module logic:
     res.knownType = commonSuperType(res.ifTrue.knownType, res.ifFalse.knownType)
     result = toValue(res)
   define "while", funcType(StatementTy, [ScopeTy, StatementTy, ExpressionTy]).withProperties(
-    property(Meta, funcType(union(), [BoolTy, union()]))
+    property(Meta, funcType(NoneTy, [BoolTy, NoneTy]))
   ), toValue proc (valueArgs: openarray[Value]): Value = 
     let sc = valueArgs[0].boxedValue.scopeValue.childScope()
     result = toValue Statement(kind: skWhile,
       whileCond: valueArgs[1].boxedValue.statementValue,
-      whileBody: sc.compile(valueArgs[2].boxedValue.expressionValue, -union()))
+      whileBody: sc.compile(valueArgs[2].boxedValue.expressionValue, -NoneTy))

@@ -10,8 +10,8 @@ const
   typeclassTypeKinds* = {tyAny..tySomeValue}
   allNativeTypes* = {low(NativeType)..high(NativeType)}
   concreteNativeTypes* = {ntyNoneValue..ntyType}
-  highestNonMatching* = tmFalse
-  lowestMatching* = tmTrue
+  highestNonMatching* = tmUniversalFalse
+  lowestMatching* = tmUniversalTrue
 
 proc matches*(tm: TypeMatch): bool {.inline.} =
   tm >= lowestMatching
@@ -31,6 +31,8 @@ proc converse*(tm: TypeMatch): TypeMatch =
   of tmFalse: tmTrue
   of tmFiniteTrue, tmGeneric: tmFiniteFalse
   of tmFiniteFalse: tmFiniteTrue
+  of tmUniversalFalse: tmUniversalTrue
+  of tmUniversalTrue: tmUniversalFalse
 
 proc match*(matcher, t: Type): TypeMatch
 
@@ -62,6 +64,7 @@ proc match*(matcher, t: Type): TypeMatch =
   # properties do not have effect on default types besides dropping equal to almost equal
   if matcher == t: return tmEqual
   result = case matcher.kind
+  of tyNoType: tmUnknown
   of tyCompound:
     case matcher.base.nativeType
     of ntyContravariant:
@@ -94,22 +97,22 @@ proc match*(matcher, t: Type): TypeMatch =
     # second is strict subtype, like (name: string: 1, age: int: 2) vs (name: string: {1, 2}, age: int: {1, 2})
     if matcher.kind != t.kind:
       return tmUnknown
-    if matcher.elements.len != t.elements.len and matcher.varargs.isNone and t.varargs.isNone:
+    if matcher.elements.len != t.elements.len and matcher.varargs.isNoType and t.varargs.isNoType:
       return tmNone
     var max = t.elements.len
-    if matcher.elements.len > t.elements.len and (max = matcher.elements.len; t.varargs.isNone):
+    if matcher.elements.len > t.elements.len and (max = matcher.elements.len; t.varargs.isNoType):
       return tmNone
     var res = tmAlmostEqual
     for i in 0 ..< max:
       let m = match(+matcher.nth(i), t.nth(i))
       if m < res: res = m
       if res <= tmNone: return res
-    if not matcher.varargs.isNone and not t.varargs.isNone:
+    if not matcher.varargs.isNoType and not t.varargs.isNoType:
       let vm = match(+matcher.varargs.unbox, t.varargs.unbox)
       if vm < res: res = vm
     res
-  of tyAny: tmTrue
-  of tyNone: tmUnknown
+  of tyAny: tmUniversalTrue
+  of tyNone: tmUniversalFalse
   of tyUnion:
     var max = tmFiniteFalse
     for a in matcher.operands:
@@ -215,7 +218,7 @@ proc commonSubType*(a, b: Type, doUnion = true, variance = Covariant): Type =
   elif doUnion: # union here meaning either
     union(a, b)
   else:
-    Type(kind: tyNone)
+    NoType
 
 proc commonSuperType*(a, b: Type, doUnion = true, variance = Covariant): Type =
   var m1, m2: TypeMatch
@@ -235,4 +238,4 @@ proc commonSuperType*(a, b: Type, doUnion = true, variance = Covariant): Type =
   elif doUnion:
     union(a, b)
   else:
-    Type(kind: tyNone)
+    NoType

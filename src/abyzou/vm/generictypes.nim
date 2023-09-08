@@ -17,7 +17,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
     if param in table:
       let oldType = table[param]
       let newType = commonSuperType(oldType, t, doUnion = false, variance = variance)
-      if newType.isNone:
+      if newType.isNoType:
         raise (ref GenericMatchError)(
           msg: "param " & $param & " had type " & $newType & " but got " & $t,
           parameter: param,
@@ -26,7 +26,7 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
       table[param] = newType
     else:
       table[param] = t
-  of tyAny, tyNone:
+  of tyNoType, tyAny, tyNone:
     discard # atoms
   of tyCompound:
     if unlikely(not pattern.base.genericMatcher.isNil):
@@ -40,13 +40,13 @@ proc matchParameters*(pattern, t: Type, table: var ParameterInstantiation, varia
       let
         pl = pattern.elements.len
         tl = t.elements.len
-      if pl == tl or not (t.varargs.isNone and pattern.varargs.isNone):
+      if pl == tl or not (t.varargs.isNoType and pattern.varargs.isNoType):
         for i in 0 ..< min(pl, tl):
           match(pattern.nth(i), t.elements[i])
-        if pl > tl and not t.varargs.isNone:
+        if pl > tl and not t.varargs.isNoType:
           for i in tl ..< pl:
             match(pattern.elements[i], t.varargs.unbox)
-          if not pattern.varargs.isNone:
+          if not pattern.varargs.isNoType:
             match(pattern.varargs, t.varargs)
       # XXX (2) is this enough?
       for name, f in pattern.unorderedFields:
@@ -88,7 +88,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
   case pattern.kind
   of tyParameter:
     pattern = table[pattern.parameter]
-  of tyAny, tyNone, tyBase:
+  of tyNoType, tyAny, tyNone, tyBase:
     discard
   of tyCompound:
     # XXX (3) check argument bounds

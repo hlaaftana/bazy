@@ -12,8 +12,8 @@ test "type relation":
   check {a1.match(a2), a2.match(a1)} == {tmAlmostEqual}
   let a3 = Type(kind: tyTuple, elements: @[ScopeTy], varargs: box AnyTy)
   let a4 = Type(kind: tyTuple, elements: @[ScopeTy])
-  check a1.match(a3) == tmFalse
-  check a3.match(a1) == tmTrue
+  check a1.match(a3) == tmUniversalFalse
+  check a3.match(a1) == tmUniversalTrue
   check {a1.match(a4), a4.match(a1), a3.match(a4), a4.match(a3)} == {tmAlmostEqual}
   check a1 < a3
 

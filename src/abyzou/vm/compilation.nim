@@ -159,7 +159,7 @@ proc setStatic*(variable: Variable, expression: Expression) =
   variable.evaluated = true
 
 proc getType*(variable: Variable): Type =
-  if variable.knownType.isNone and not variable.lazyExpression.isNil and not variable.evaluated:
+  if variable.knownType.isNoType and not variable.lazyExpression.isNil and not variable.evaluated:
     variable.setStatic(variable.lazyExpression)
   variable.knownType
 
@@ -321,6 +321,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
   for t in argumentTypes.mitems: t = AnyTy
   # XXX pass type bound as well as scope, to pass both to a compile proc
   # maybe by passing a meta call context object
+  # XXX validate output statement
   var realArgumentTypes = newSeq[Type](ex.arguments.len + 1)
   realArgumentTypes[0] = ScopeTy
   for i in 1 ..< realArgumentTypes.len:
@@ -361,7 +362,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
         funcType(if bound.variance == Covariant: AnyTy else: bound.boundType, argumentTypes)):
         superMetas.add(m)
       if matchBound(
-        +funcType(if bound.variance == Covariant: union() else: bound.boundType, argumentTypes),
+        +funcType(if bound.variance == Covariant: NoneTy else: bound.boundType, argumentTypes),
         mt):
         subMetas.add(m)
     superMetas.sort(
@@ -429,7 +430,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
     if same(e.expression, ex.address) and ex.address.isIdentifier(name):
       functionType.baseArguments[1] =
         if bound.variance == Covariant:
-          union()
+          NoneTy
         else:
           bound.boundType
       let subs = overloads(scope, name, +functionType)
@@ -461,7 +462,7 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
     var argumentTypes = newSeq[Type](ex.arguments.len)
     var functionType: Type
     result = compileRuntimeCall(scope, ex, bound, argumentStatements, argumentTypes, functionType)
-    assert functionType.kind != tyNone
+    assert not functionType.isNoType
     # .call, should recurse but compiled arguments should be reused:
     if result.isNil:
       let callee = map ex.address
@@ -516,7 +517,7 @@ proc compileArrayExpression*(scope: Scope, ex: Expression, bound: TypeBound): St
   for e in ex.elements:
     let element = map(e, b)
     result.elements.add(element)
-    if result.knownType.baseArguments[0].isNone or result.knownType.baseArguments[0] < element.knownType:
+    if result.knownType.baseArguments[0].isNoType or result.knownType.baseArguments[0] < element.knownType:
       result.knownType.baseArguments[0] = element.knownType
     if not boundSet:
       b = +element.knownType
@@ -539,9 +540,9 @@ proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Stat
       let k = map(e.left, bk)
       let v = map(e.right, bv)
       result.entries.add((key: k, value: v))
-      if result.knownType.baseArguments[0].isNone or result.knownType.baseArguments[0] < k.knownType:
+      if result.knownType.baseArguments[0].isNoType or result.knownType.baseArguments[0] < k.knownType:
         result.knownType.baseArguments[0] = k.knownType
-      if result.knownType.baseArguments[1].isNone or result.knownType.baseArguments[1] < v.knownType:
+      if result.knownType.baseArguments[1].isNoType or result.knownType.baseArguments[1] < v.knownType:
         result.knownType.baseArguments[1] = v.knownType
       if not boundSet:
         bk = +k.knownType
@@ -558,7 +559,7 @@ proc compileSetExpression*(scope: Scope, ex: Expression, bound: TypeBound): Stat
     for e in ex.elements:
       let element = map(e, b)
       result.elements.add(element)
-      if result.knownType.baseArguments[0].isNone or result.knownType.baseArguments[0] < element.knownType:
+      if result.knownType.baseArguments[0].isNoType or result.knownType.baseArguments[0] < element.knownType:
         result.knownType.baseArguments[0] = element.knownType
       if not boundSet:
         b = +element.knownType
@@ -571,7 +572,7 @@ proc compileBlock*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       if i == ex.statements.high:
         bound
       else:
-        -union() # like void
+        -NoneTy # like void
     let element = map(e, bound = b)
     result.sequence.add(element)
     if i == ex.statements.high:
@@ -579,7 +580,7 @@ proc compileBlock*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
 
 proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   case ex.kind
-  of None: result = Statement(kind: skNone, knownType: NoneTy)
+  of None: result = Statement(kind: skNone, knownType: NoType)
   of Number: result = compileNumber(ex, bound)
   of String, SingleQuoteString: result = constant(ex.str)
   of Wrapped: result = forward(ex.wrapped)
