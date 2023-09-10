@@ -69,6 +69,41 @@ proc converse*(tm: TypeMatch): TypeMatch =
     for c in result.children.mitems:
       c = converse(c)
 
+proc reorderTupleConstructor*(ct: var Type, t: Type, argumentStatements: var seq[Statement]) =
+  assert ct.kind == tyTuple
+  assert t.kind == tyTuple
+  var newElems = newSeq[Type](ct.elements.len)
+  var oldStmts, newStmts: seq[Statement]
+  let doStmts = argumentStatements.len != 0
+  if doStmts:
+    assert ct.elements.len == argumentStatements.len
+    oldStmts = argumentStatements
+    newStmts = newSeq[Statement](oldStmts.len)
+  for f, newI in t.elementNames:
+    if f in ct.elementNames:
+      let oldI = ct.elementNames[f]
+      swap ct.elements[oldI], newElems[newI]
+      if doStmts:
+        swap oldStmts[oldI], newStmts[newI]
+  var oldI = 0
+  for i, newE in newElems.mpairs:
+    if newE.isNoType:
+      var
+        oldE: Type
+        oldStmt: Statement
+      while oldE.isNoType and oldI < ct.elements.len:
+        oldE = ct.elements[oldI]
+        if doStmts: oldStmt = oldStmts[oldI]
+        inc oldI
+      newE = oldE
+      if doStmts:
+        assert not oldStmt.isNil
+        newStmts[i] = oldStmt
+    elif doStmts:
+      assert not newStmts[i].isNil
+  if doStmts:
+    argumentStatements = newStmts
+
 proc match*(matcher, t: Type): TypeMatch
 
 proc match*(b: TypeBound, t: Type): TypeMatch =
@@ -97,13 +132,24 @@ proc match*(matcher, t: Type): TypeMatch =
   # otherwise either order can give none, in which the non-none result matters
   # otherwise generally should be anticommutative, but this is not necessary
   # properties do not have effect on default types besides dropping equal to almost equal
+  # XXX (3) match generic params here
   if matcher == t: return atomicMatch(tmEqual)
   result = case matcher.kind
   of tyNoType: atomicMatch(tmUnknown)
   of tyCompound:
     case matcher.base.nativeType
-    of ntyContravariant:
-      match(-matcher.baseArguments[0], t)
+    of ntyTupleConstructor:
+      case t.kind
+      of tyCompound:
+        if matcher.base == t.base:
+          match(matcher.baseArguments[0], t.baseArguments[0])
+        else: atomicMatch(tmUnknown)
+      of tyTuple:
+        var mr = matcher.baseArguments[0]
+        var dummy: seq[Statement]
+        reorderTupleConstructor(mr, t, dummy)
+        match(mr, t)
+      else: atomicMatch(tmUnknown)
     elif unlikely(not matcher.base.typeMatcher.isNil):
       matcher.base.typeMatcher(matcher, t)
     else:
@@ -132,9 +178,6 @@ proc match*(matcher, t: Type): TypeMatch =
           if res.level <= tmNone: return res
       res
   of tyTuple:
-    # XXX (2) unorderedFields
-    # (name: string, age: int) is named tuple vs (name: string anywhere, age: int anywhere) is typeclass but also type of function call arguments
-    # second is strict subtype, like (name: string: 1, age: int: 2) vs (name: string: {1, 2}, age: int: {1, 2})
     if matcher.kind != t.kind:
       return atomicMatch(tmUnknown)
     if matcher.elements.len != t.elements.len and matcher.varargs.isNoType and t.varargs.isNoType:

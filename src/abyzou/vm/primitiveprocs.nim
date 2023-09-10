@@ -145,7 +145,7 @@ proc `$`*(t: Type): string =
   of tyCompound: t.base.name & "(" & $t.baseArguments & ")"
   of tyAny: "Any"
   of tyNone: "None"
-  of tyTuple: "Tuple(" & $t.elements & (if t.unorderedFields.len == 0: "" else: " " & $t.unorderedFields) & (if t.varargs.isNoType: ")" else: ", " & $t.varargs & "...)")
+  of tyTuple: "Tuple(" & $t.elements & (if t.varargs.isNoType: ")" else: ", " & $t.varargs & "...)")
   of tyUnion: "Union(" & $t.operands & ")"
   of tyIntersection: "Intersection(" & $t.operands & ")"
   of tyNot: "Not " & $t.notType

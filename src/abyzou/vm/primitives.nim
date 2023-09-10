@@ -195,7 +195,7 @@ type
     ntyExpression, ntyStatement, ntyScope,
     ntyType,
     # typeclass
-    ntyContravariant
+    ntyTupleConstructor
 
   TypeBase* = ref object
     # XXX (3) check arguments at generic fill time
@@ -230,7 +230,8 @@ type
       varargs*: Box[Type] # for now only trailing
         # XXX either move to property, or allow non-trailing
       elementNames*: Table[string, int]
-      unorderedFields*: Table[string, Type]
+      # XXX (2) also Defaults purely for initialization/conversion?
+      # meaning only considered in function type relation
     of tyUnion, tyIntersection:
       operands*: seq[Type]
     of tyNot:
@@ -472,7 +473,7 @@ type
 static:
   doAssert sizeof(Value) <= 2 * sizeof(int)
 
-proc isNoType*(t: Type): bool = t.kind == tyNone
+proc isNoType*(t: Type): bool = t.kind == tyNoType
 proc isNoType*(vt: Box[Type]): bool = vt.isNil or vt.unbox.isNoType
 
 import ./primitiveprocs

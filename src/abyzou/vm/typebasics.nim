@@ -37,19 +37,19 @@ proc toTypeParams(args: varargs[TypeBound]): seq[TypeParameter] =
   for i in 0 ..< args.len:
     result[i] = newTypeParameter("", args[i])
 
-template nativeType(n: untyped, nt: NativeType, args: varargs[TypeBound]) =
-  defineTypeBase n, TypeBase(name: astToStr(n),
+template nativeType(n: untyped, typename: static string, nt: NativeType, args: varargs[TypeBound]) =
+  defineTypeBase n, TypeBase(name: typename,
     nativeType: nt,
     arguments: toTypeParams(args))
 
 template nativeType(n: untyped, args: varargs[TypeBound]) =
-  nativeType(`n Ty`, `nty n`, args)
+  nativeType(`n Ty`, astToStr(n), `nty n`, args)
 
 template nativeAtomicType(n: untyped) =
-  nativeType(`n TyBase`, `nty n`)
+  nativeType(`n TyBase`, astToStr(n), `nty n`)
   template `n Ty`*: untyped = Type(kind: tyCompound, base: `n TyBase`)
 
-nativeType TupleTy, ntyTuple, [] # not used for tuple type construction
+nativeType TupleTy, "Tuple", ntyTuple, [] # not used for tuple type construction
 
 nativeAtomicType NoneValue
 nativeAtomicType Int32
@@ -68,12 +68,9 @@ nativeType List, [+AnyTy]
 nativeType Set, [+AnyTy]
 nativeType Table, [+AnyTy, +AnyTy]
 nativeType Function, [+Type(kind: tyBase, typeBase: TupleTy), -NoneTy]
-  # XXX (2) account for Fields and Defaults property of the `arguments` tuple type
-  # only considered at callsite like nim, no semantic value
-  # meaning this is specific to function type relation
 nativeType Type, [+AnyTy]
 
-nativeType ContravariantTy, ntyContravariant, [+AnyTy]
+nativeType TupleConstructor, [+Type(kind: tyBase, typeBase: TupleTy)]
 
 proc compound*(tag: TypeBase, args: varargs[Type]): Type {.inline.} =
   Type(kind: tyCompound, base: tag, baseArguments: @args)
@@ -140,7 +137,7 @@ proc len*(t: Type): int =
     case t.kind
     of tyTuple:
       if t.varargs.isNoType:
-        result = t.elements.len + t.unorderedFields.len
+        result = t.elements.len
     of tyCompound:
       result = t.baseArguments.len
     of tyUnion, tyIntersection:

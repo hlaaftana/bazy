@@ -9,12 +9,6 @@ import
 defineTypeBase Meta, TypeBase(name: "Meta",
   arguments: @[newTypeParameter("", +Type(kind: tyBase, typeBase: FunctionTy))])
 
-#defineProperty Fields, Property(name: "Fields",
-#  argumentType: Type(kind: tyTable, keyType: box Ty(String), tableValueType: box Int32Ty))
-
-# XXX (2) also Defaults purely for initialization/conversion
-# meaning only considered in function type relation
-
 proc newVariable*(name: string, knownType: Type = default(Type)): Variable =
   Variable(name: name, nameHash: name.hash, knownType: knownType)
 
@@ -414,13 +408,16 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
     if argumentStatements[i].isNil:
       argumentStatements[i] = map(ex.arguments[i])
     argumentTypes[i] = argumentStatements[i].knownType
-  # XXX (2) named arguments should go in the unorderedFields of the argument tuple type
-  # which will then match against ordered fields with the given names
-  # unsure about default arguments
   functionType = funcType(if bound.variance == Covariant: AnyTy else: bound.boundType, argumentTypes)
   # lowest supertype function:
   try:
-    let callee = map(ex.address, -functionType)
+    # XXX (2) named arguments
+    var withConstructor = functionType
+    withConstructor.baseArguments[0] = TupleConstructorTy[withConstructor.baseArguments[0]]
+    let callee = map(ex.address, -withConstructor)
+    reorderTupleConstructor(withConstructor.baseArguments[0].baseArguments[0],
+      callee.knownType.baseArguments[0],
+      argumentStatements)
     result = Statement(kind: skFunctionCall,
       knownType: callee.knownType.baseArguments[1],
       callee: callee,
