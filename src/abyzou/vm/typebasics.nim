@@ -175,3 +175,40 @@ proc nth*(t: Type, i: int): Type =
 proc param*(t: Type, i: int): Type {.inline.} =
   assert t.kind == tyCompound and t.base.nativeType == ntyFunction
   t.baseArguments[0].nth(i)
+
+proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
+  template fill(a: var Type) = fillParameters(a, table)
+  template fill(a: var Box[Type]) =
+    if not a.isNil:
+      var newType: Type = a.unbox
+      fillParameters(newType, table)
+      a = newType.box
+  case pattern.kind
+  of tyParameter:
+    pattern = table.table[pattern.parameter]
+  of tyNoType, tyAny, tyNone, tyBase:
+    discard
+  of tyCompound:
+    # XXX (3) check argument bounds
+    if unlikely(not pattern.base.paramFiller.isNil):
+      pattern.base.paramFiller(pattern, table)
+    else:
+      for t in pattern.baseArguments.mitems:
+        fill(t)
+  of tyTuple:
+    for e in pattern.elements.mitems:
+      fill(e)
+    fill(pattern.varargs)
+  of tyUnion, tyIntersection:
+    for o in pattern.operands.mitems:
+      fill(o)
+  of tyNot:
+    fill(pattern.notType)
+  of tyWithProperty:
+    fill(pattern.typeWithProperty)
+  of tyValue:
+    fill(pattern.valueType)
+  of tySomeValue:
+    fill(pattern.someValueType)
+  for a, v in pattern.properties.mpairs:
+    fill(v)

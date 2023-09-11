@@ -2,7 +2,12 @@ import
   std/tables,
   ./[primitives, typebasics]
 
-type TypeMatchError* = object of CatchableError
+type
+  TypeMatchError* = object of CatchableError
+  ParameterMatchError* = object of TypeMatchError
+    parameter*: TypeParameter
+    presumed*: Type
+    conflicting*: Type
 
 const
   allTypeKinds* = {low(TypeKind)..high(TypeKind)}
@@ -51,6 +56,10 @@ proc min*(a, b: MatchLevel): MatchLevel {.inline.} =
 proc min*(a, b: TypeMatch): TypeMatch {.inline.} =
   if a.level == tmNone: a
   else: system.min(a, b)
+
+proc minLevel*(lv: MatchLevel, m: TypeMatch): TypeMatch {.inline.} =
+  result = m
+  if result.level > lv: result.level = lv
 
 proc converse*(tm: MatchLevel): MatchLevel =
   case tm
@@ -104,7 +113,11 @@ proc reorderTupleConstructor*(ct: var Type, t: Type, argumentStatements: var seq
   if doStmts:
     argumentStatements = newStmts
 
-proc match*(matcher, t: Type): TypeMatch
+proc match*(matcher, t: Type, inst: var ParameterInstantiation): TypeMatch
+
+proc match*(matcher, t: Type): TypeMatch {.inline.} =
+  var dummy = ParameterInstantiation(strict: false)
+  result = match(matcher, t, dummy)
 
 proc match*(b: TypeBound, t: Type): TypeMatch =
   case b.variance
@@ -126,13 +139,52 @@ proc match*(b: TypeBound, t: Type): TypeMatch =
 proc matchBound*(b: TypeBound, t: Type): bool {.inline.} =
   b.match(t).matches
 
-proc match*(matcher, t: Type): TypeMatch =
+proc commonSubType*(a, b: Type, doUnion = true, variance = Covariant): Type =
+  var m1, m2: TypeMatch
+  if variance == Covariant:
+    m1 = a.match(b)
+    m2 = b.match(a)
+  else:
+    m1 = (a * variance).match(b)
+    m2 = (b * variance).match(a)
+  let cmp = compare(m1, m2)
+  if cmp > 0:
+    b
+  elif cmp < 0:
+    a
+  elif m1.level in {tmEqual, tmAlmostEqual}:
+    a
+  elif doUnion: # union here meaning either
+    union(a, b)
+  else:
+    NoType
+
+proc commonSuperType*(a, b: Type, doUnion = true, variance = Covariant): Type =
+  var m1, m2: TypeMatch
+  if variance == Covariant:
+    m1 = a.match(b)
+    m2 = b.match(a)
+  else:
+    m1 = (a * variance).match(b)
+    m2 = (b * variance).match(a)
+  let cmp = compare(m1, m2)
+  if cmp > 0:
+    a
+  elif cmp < 0:
+    b
+  elif m1.level in {tmEqual, tmAlmostEqual}:
+    a
+  elif doUnion:
+    union(a, b)
+  else:
+    NoType
+
+proc match*(matcher, t: Type, inst: var ParameterInstantiation): TypeMatch =
   # commutativity rules:
   # must be commutative when equal
   # otherwise either order can give none, in which the non-none result matters
   # otherwise generally should be anticommutative, but this is not necessary
   # properties do not have effect on default types besides dropping equal to almost equal
-  # XXX (3) match generic params here
   if matcher == t: return atomicMatch(tmEqual)
   result = case matcher.kind
   of tyNoType: atomicMatch(tmUnknown)
@@ -151,7 +203,7 @@ proc match*(matcher, t: Type): TypeMatch =
         match(mr, t)
       else: atomicMatch(tmUnknown)
     elif unlikely(not matcher.base.typeMatcher.isNil):
-      matcher.base.typeMatcher(matcher, t)
+      matcher.base.typeMatcher(matcher, t, inst)
     else:
       case t.kind
       of tyCompound:
@@ -237,24 +289,37 @@ proc match*(matcher, t: Type): TypeMatch =
   of tySomeValue:
     case t.kind
     of tySomeValue:
-      min(
-        atomicMatch(tmAlmostEqual),
+      minLevel(
+        tmAlmostEqual,
         match(+matcher.someValueType.unbox, t.someValueType.unbox))
     of tyValue:
-      min(
-        atomicMatch(tmSimilar),
+      minLevel(
+        tmSimilar,
         match(+matcher.someValueType.unbox, t.valueType.unbox))
     else: atomicMatch(tmNone)
   of tyWithProperty:
-    min(
+    minLevel(
       if not t.properties.hasKey(matcher.withProperty):
-        atomicMatch(tmFiniteFalse)
+        tmFiniteFalse
       else:
-        atomicMatch(tmAlmostEqual),
+        tmAlmostEqual,
       match(+matcher.typeWithProperty.unbox, t))
   of tyParameter:
-    min(
-      atomicMatch(tmGeneric),
+    let param = matcher.parameter
+    if param in inst.table:
+      let oldType = inst.table[param]
+      let newType = commonSuperType(oldType, t, doUnion = false, variance = param.bound.variance)
+      if newType.isNoType and inst.strict:
+        raise (ref ParameterMatchError)(
+          msg: "param " & $param & " had type " & $newType & " but got " & $t,
+          parameter: param,
+          presumed: oldType,
+          conflicting: t)
+      inst.table[param] = newType
+    else:
+      inst.table[param] = t
+    minLevel(
+      tmGeneric,
       match(matcher.parameter.bound, t))
   of tyValue:
     case t.kind
@@ -270,7 +335,7 @@ proc match*(matcher, t: Type): TypeMatch =
   if result.matches:
     for p, args in matcher.properties:
       if not p.typeMatcher.isNil:
-        result = min(result, p.typeMatcher(t, args))
+        result = min(result, p.typeMatcher(t, args, inst))
         if result.level <= tmNone: return result
 
 proc compare*(t1, t2: Type): int =
@@ -285,43 +350,3 @@ proc `<`*(a, b: Type): bool {.inline.} = compare(a, b) < 0
 proc `<=`*(a, b: Type): bool {.inline.} = compare(a, b) <= 0
 proc `>`*(a, b: Type): bool {.inline.} = compare(a, b) > 0
 proc `>=`*(a, b: Type): bool {.inline.} = compare(a, b) >= 0
-
-proc commonSubType*(a, b: Type, doUnion = true, variance = Covariant): Type =
-  var m1, m2: TypeMatch
-  if variance == Covariant:
-    m1 = a.match(b)
-    m2 = b.match(a)
-  else:
-    m1 = (a * variance).match(b)
-    m2 = (b * variance).match(a)
-  let cmp = compare(m1, m2)
-  if cmp > 0:
-    b
-  elif cmp < 0:
-    a
-  elif m1.level in {tmEqual, tmAlmostEqual}:
-    a
-  elif doUnion: # union here meaning either
-    union(a, b)
-  else:
-    NoType
-
-proc commonSuperType*(a, b: Type, doUnion = true, variance = Covariant): Type =
-  var m1, m2: TypeMatch
-  if variance == Covariant:
-    m1 = a.match(b)
-    m2 = b.match(a)
-  else:
-    m1 = (a * variance).match(b)
-    m2 = (b * variance).match(a)
-  let cmp = compare(m1, m2)
-  if cmp > 0:
-    a
-  elif cmp < 0:
-    b
-  elif m1.level in {tmEqual, tmAlmostEqual}:
-    a
-  elif doUnion:
-    union(a, b)
-  else:
-    NoType

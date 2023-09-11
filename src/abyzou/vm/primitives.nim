@@ -176,7 +176,9 @@ type
     Invariant
     Ultravariant
   
-  ParameterInstantiation* = Table[TypeParameter, Type]
+  ParameterInstantiation* = object
+    strict*: bool
+    table*: Table[TypeParameter, Type]
 
   NativeType* = enum
     ntyNone,
@@ -203,11 +205,9 @@ type
     name*: string
     nativeType*: NativeType
     arguments*: seq[TypeParameter]
-    typeMatcher*: proc (pattern, t: Type): TypeMatch
+    typeMatcher*: proc (pattern, t: Type, inst: var ParameterInstantiation): TypeMatch
     valueMatcher*: proc (v: Value, thisType: Type): bool
-    # not sure if these are temporary:
-    genericMatcher*: proc (pattern: Type, t: Type, table: var ParameterInstantiation, variance = Covariant)
-    genericFiller*: proc (pattern: var Type, table: ParameterInstantiation)
+    paramFiller*: proc (pattern: var Type, table: ParameterInstantiation)
 
   TypeParameter* = ref object
     id*: TypeParameterId # this needs to be assigned
@@ -215,7 +215,7 @@ type
     bound*: TypeBound
   
   Type* = object
-    # XXX (3) for easier generics etc maybe just have a base type, argument types, and properties
+    # XXX (3) figure out which kinds to merge with tyCompound
     properties*: Table[TypeBase, Type]
       # can be a multitable later on
     case kind*: TypeKind

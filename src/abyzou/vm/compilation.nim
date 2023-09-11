@@ -1,15 +1,13 @@
 import
   std/[hashes, tables, sets, strutils],
   ../language/[expressions, number, shortstring],
-  ./[primitives, arrays,
-    typebasics, typematch, generictypes,
-    valueconstr, checktype, guesstype,
-    treewalk]
+  ./[primitives, arrays, typebasics, typematch,
+    valueconstr, checktype, guesstype, treewalk]
 
 defineTypeBase Meta, TypeBase(name: "Meta",
   arguments: @[newTypeParameter("", +Type(kind: tyBase, typeBase: FunctionTy))])
 
-proc newVariable*(name: string, knownType: Type = default(Type)): Variable =
+proc newVariable*(name: string, knownType: Type = NoType): Variable =
   Variable(name: name, nameHash: name.hash, knownType: knownType)
 
 proc newContext*(imports: seq[Context]): Context =
@@ -175,12 +173,13 @@ proc symbols*(scope: Scope, name: string, bound: TypeBound, doImports = true, na
     if (v.nameHash == 0 or v.nameHash == nameHash) and name == v.name:
       var t = v.getType
       if v.genericParams.len != 0:
-        var matches: ParameterInstantiation = initTable[TypeParameter, Type](v.genericParams.len)
+        var matches = ParameterInstantiation(strict: true,
+          table: initTable[TypeParameter, Type](v.genericParams.len))
         try:
-          matchParameters(t, bound.boundType, matches)
-        except GenericMatchError:
-          matches.clear()
-        if matches.len != 0:
+          discard match(t, bound.boundType, matches)
+        except ParameterMatchError:
+          matches.table.clear()
+        if matches.table.len != 0:
           fillParameters(t, matches)
       if bound.matchBound(t):
         result.add(v.shallowReference(t))
