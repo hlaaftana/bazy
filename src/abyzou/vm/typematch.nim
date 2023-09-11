@@ -246,7 +246,6 @@ proc match*(matcher, t: Type, inst: var ParameterInstantiation): TypeMatch =
         res.children[i] = m
         if m.level < res.level: res.level = m.level
         if res.level <= tmNone: return res
-    # this is probably wrong:
     if not matcher.varargs.isNoType and not t.varargs.isNoType:
       let vm = match(+matcher.varargs.unbox, t.varargs.unbox)
       if vm.level < res.level: res.level = vm.level
