@@ -305,21 +305,23 @@ proc match*(matcher, t: Type, inst: var ParameterInstantiation): TypeMatch =
       match(+matcher.typeWithProperty.unbox, t))
   of tyParameter:
     let param = matcher.parameter
+    let boundMatch = match(param.bound, t)
+    if not boundMatch.matches:
+      return boundMatch
+    var newType = t
     if param in inst.table:
       let oldType = inst.table[param]
-      let newType = commonSuperType(oldType, t, doUnion = false, variance = param.bound.variance)
+      newType = commonSuperType(oldType, newType, doUnion = false, variance = param.bound.variance)
       if newType.isNoType and inst.strict:
         raise (ref ParameterMatchError)(
           msg: "param " & $param & " had type " & $newType & " but got " & $t,
           parameter: param,
           presumed: oldType,
           conflicting: t)
-      inst.table[param] = newType
-    else:
-      inst.table[param] = t
+    inst.table[param] = newType
     minLevel(
       tmGeneric,
-      match(matcher.parameter.bound, t))
+      match(newType, t))
   of tyValue:
     case t.kind
     of tyValue:
