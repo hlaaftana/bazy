@@ -144,6 +144,7 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
 
   var
     stage = inBase
+    digits: seq[byte]
     lastZeros = 0 # Natural
     recordedExp: int16 = 0
   
@@ -156,10 +157,11 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
     if result.kind != Floating:
       if lastZeros < -result.exp:
         result.kind = Floating
-      elif result.exp < 0 and -result.exp < result.digits.len:
+      elif result.exp < 0 and -result.exp < digits.len:
         # remove excessive zeros, ie 10000e-3 is simplified to 10
         result.exp = 0
-        result.digits.setLen(result.digits.len + result.exp)
+        digits.setLen(digits.len + result.exp)
+    result.digits = toDigitSequence(digits)
 
   for c in tz.runes:
     case stage
@@ -170,7 +172,7 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
           inc lastZeros
         else:
           lastZeros = 0
-        result.digits.add(c.byte - '0'.byte)
+        digits.add(c.byte - '0'.byte)
       of '.':
         result.kind = Floating
         stage = inDecimalStart
@@ -212,7 +214,7 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
           inc lastZeros
         else:
           lastZeros = 0
-        result.digits.add(c.byte - '0'.byte)
+        digits.add(c.byte - '0'.byte)
         dec result.exp
       of 'e', 'E':
         stage = inExpStart
