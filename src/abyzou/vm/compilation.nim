@@ -341,9 +341,9 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
   result = nil
   var argumentTypes = newSeq[Type](ex.arguments.len)
   for t in argumentTypes.mitems: t = AnyTy
-  # XXX pass type bound as well as scope, to pass both to a compile proc
+  # XXX (7) pass type bound as well as scope, to pass both to a compile proc
   # maybe by passing a meta call context object
-  # XXX validate output statement
+  # XXX (7) validate output statement
   var realArgumentTypes = newSeq[Type](ex.arguments.len + 1)
   realArgumentTypes[0] = ScopeTy
   for i in 1 ..< realArgumentTypes.len:

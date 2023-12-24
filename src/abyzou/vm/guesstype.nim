@@ -16,7 +16,7 @@ proc getType*(x: FullValueObj): Type =
   of vkUint64: result = Uint64Ty
   of vkFloat64: result = Float64Ty
   of vkBool: result = BoolTy
-  of vkReference: result = ReferenceTy[x.referenceValue[].getType]
+  of vkReference: result = ReferenceTy[x.referenceValue.unref.getType]
   of vkBoxed: result = getType(x.boxedValue[])
   of vkList: result = ListTy[x.listValue.unref[0].getType]
   of vkString: result = StringTy
@@ -59,7 +59,7 @@ proc getType*(x: Value): Type =
   of vkUint64: result = Uint64Ty
   of vkFloat64: result = Float64Ty
   of vkBool: result = BoolTy
-  of vkReference: result = ReferenceTy[x.referenceValue[].getType]
+  of vkReference: result = ReferenceTy[x.referenceValue.unref.getType]
   of boxedValueKinds - {vkInt64, vkUint64, vkFloat64}:
     result = x.boxedValue[].getType
   of vkEffect:

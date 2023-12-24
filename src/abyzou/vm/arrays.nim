@@ -1,7 +1,7 @@
 import ../defines
 
 when useArrays:
-  # XXX (7) maybe optimize and use ref array[3, T] for small sizes and seq for bigger sizes
+  # XXX (6) maybe optimize and use ref array[3, T] for small sizes and seq for bigger sizes
   import ../disabled/arrayimpl
   export ../disabled/arrayimpl
   type ArrayRef*[T] = ref Array[T]

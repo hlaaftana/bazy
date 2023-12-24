@@ -272,15 +272,15 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
   let resultKind = result.kind
   case s.kind
   of skNone:
-    discard # nothing
-    when false:
-      case resultKind
-      of SetRegister:
-        fn.add(Instr(kind: SetRegisterConstant, src: (res: result.register, constant: Value(kind: vkNone))))
-      of Value:
-        result.value = fn.newRegister()
-        fn.add(Instr(kind: SetRegisterConstant, src: (res: result.value, constant: Value(kind: vkNone))))
-      of Statement: discard # nothing
+    case resultKind
+    of SetRegister:
+      fn.add(Instr(kind: SetRegisterRegister, srr:
+        (res: result.register, val: fn.getConstant(Value(kind: vkNone)))))
+    of Value:
+      result.value = fn.newRegister()
+      fn.add(Instr(kind: SetRegisterRegister, srr:
+        (res: result.value, val: fn.getConstant(Value(kind: vkNone)))))
+    of Statement: discard # nothing
   of skConstant:
     fn.add(Instr(kind: LoadConstant, lc: (res: resultRegister(fn, result),
       constant: fn.getConstant(s.constant))))
@@ -317,7 +317,7 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
       fn.add(Instr(kind: SetConstIndex, sci:
         (coll: args, ind: i.int32, val: value(a))))
     for _, d in s.dispatchees.items:
-      # XXX types are ignored here because they should be in the boxed function values
+      # XXX (4) types are ignored here because they should be in the boxed function values
       # this is not terrible, but check that it's enforced everywhere
       fn.add(Instr(kind: TryDispatch, tdisp:
         (res: res, callee: value(d), args: args, successPos: successPos)))
@@ -402,7 +402,7 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
     fn.add(Instr(kind: InitList, coll:
       (res: res, siz: s.elements.len.int32)))
     for i, a in s.elements:
-      # XXX SetIndex for lists and strings should only work if their pointer is
+      # XXX (6) SetIndex for lists and strings should only work if their pointer is
       # in the same location in memory as arrays
       fn.add(Instr(kind: SetConstIndex, sci:
         (coll: res, ind: i.int32, val: value(a))))
@@ -412,7 +412,7 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
     fn.add(Instr(kind: InitSet, coll:
       (res: res, siz: s.elements.len.int32)))
     for a in s.elements:
-      # XXX no SetIndex for sets
+      # XXX (6) no SetIndex for sets
       fn.add(Instr(kind: SetIndex, sri:
         (coll: res, ind: value(a), val: value(a))))
   of skTable:
@@ -421,7 +421,7 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
     fn.add(Instr(kind: InitTable, coll:
       (res: res, siz: s.elements.len.int32)))
     for k, v in s.entries.items:
-      # XXX probably no SetIndex for tables
+      # XXX (6) probably no SetIndex for tables
       fn.add(Instr(kind: SetIndex, sri:
         (coll: res, ind: value(k), val: value(v))))
   of skGetIndex:

@@ -19,12 +19,12 @@ module collections:
     result.context.refreshStack()
     result.context.stack.set rf.stackIndex, toValue proc (args: openarray[Value]): Value =
       result = Value(kind: vkReference)
-      new(result.referenceValue)
-      result.referenceValue[] = args[0].toFullValueObj
+      new(result.referenceValue.realRef)
+      result.referenceValue.realRef[] = args[0].toFullValueObj
     result.context.stack.set urf.stackIndex, toValue proc (args: openarray[Value]): Value =
-      args[0].referenceValue[].toSmallValue
+      args[0].referenceValue.unref.toSmallValue
     result.context.stack.set upd.stackIndex, toValue proc (args: openarray[Value]): Value =
-      args[0].referenceValue[] = args[1].toFullValueObj
+      args[0].referenceValue.realRef[] = args[1].toFullValueObj
   define ".[]", funcType(StatementTy, [ScopeTy, StatementTy, StatementTy]).withProperties(
     property(Meta, funcType(AnyTy, [Type(kind: tyBase, typeBase: TupleTy), Int32Ty]))
   ), toValue proc (valueArgs: openarray[Value]): Value =

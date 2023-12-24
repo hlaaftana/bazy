@@ -42,7 +42,6 @@ hashRefObj Stack
 template hashObj(T): untyped {.dirty.} =
   proc hash*(v: T): Hash {.noSideEffect.} =
     for f in fields(v):
-      # XXX reference value?
       when f is ref:
         when compiles(hash(f[])):
           if not f.isNil:
@@ -168,13 +167,6 @@ proc `$`*(t: Type): string =
       if afterFirst: result.add(", ")
       else: afterFirst = true
       result.add($arg)
-      when false:
-        if args.len != 0:
-          result.add('(')
-          for i, arg in args:
-            if i != 0: result.add(", ")
-            result.add($arg)
-          result.add(')')
     result.add('}')
 
 proc `$`*(tb: TypeBound): string =

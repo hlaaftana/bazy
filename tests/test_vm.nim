@@ -100,7 +100,7 @@ a = 0
     "a = (1, (2, 3), 4); a[0] == 1 and a[1][1] == 3": toValue(true),
     "`.[]=`(a: Int, b: Int, c: Int) = a * b + c; 3[4] = 5": toValue(17),
     # also tests generics:
-    "a = ref 1; update a, 1 + unref a; a": Value(kind: vkReference, referenceValue: toValue(2).toFullValueObj.toRef),
+    "a = ref 1; update a, 1 + unref a; unref a": toValue(2),
 
     # closures with references (mutable):
     "a = ref 1; foo() = unref a; [foo(), (update(a, 2); foo()), foo()]": toValue(@[toValue(1), toValue(2), toValue(2)]),
@@ -165,78 +165,7 @@ static
 c = foo()
 [a.getter.(), b.getter.(), c.getter.()]""": toValue(@[toValue(3), toValue(1), toValue(1)])
   }
-  when false:
-    # no longer allowed
-    tests.add {
-      """
-      foo() =
-        x = 1
-        (getter: (() => x),
-        setter: ((y: Int) => x = y)) 
-      a = foo()
-      _ = a.setter.(3)
-      a.getter.()""": toValue(3),
-      """
-      foo() =
-        x = 1
-        (getter: (() => x),
-        setter: ((y: Int,) => x := y)) 
-      a = foo()
-      _ = a.setter.(3)
-      _ = a.getter.()""": toValue(1),
-      """
-      foo() =
-        x = 1
-        (getter: (
-          () => x),
-        setter: (
-          (y: Int) => x = y)) 
-      static a = foo()
-      _ = a.setter.(3)
-      a.getter.()""": toValue(3),
-      """
-      foo() =
-        x = 1
-        (getter: (() => x),
-        setter: ((y: Int) => x = y)) 
-      static
-        a = foo()
-        _ = a.setter.(3)
-      a.getter.()""": toValue(3),
-      """
-      foo() =
-        x = 1
-        (getter: (() => x),
-        setter: ((y: Int) => x = y)) 
-      a = foo()
-      _ = a.setter.(3)
-      b = foo()
-      [a.getter.(), b.getter.()]""": toValue(@[toValue(3), toValue(1)]),
-      """
-      foo() =
-        x = 1
-        (getter: (
-          () => x),
-        setter: (
-          (y: Int) => x = y)) 
-      static a = foo()
-      _ = a.setter.(3)
-      static b = foo()
-      c = foo()
-      [a.getter.(), b.getter.(), c.getter.()]""": toValue(@[toValue(3), toValue(1), toValue(1)]),
-      """
-      foo() =
-        x = 1
-        (getter: (() => x),
-        setter: ((y: Int) => x = y)) 
-      static
-        a = foo()
-        _ = a.setter.(3)
-        b = foo()
-      c = foo()
-      [a.getter.(), b.getter.(), c.getter.()]""": toValue(@[toValue(3), toValue(1), toValue(1)])
-    }
-  
+
   for inp, outp in tests.items:
     {.push warning[BareExcept]: off.}
     try:

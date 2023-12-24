@@ -10,9 +10,16 @@ template toRef*[T](x: T): ref T =
   new(res)
   res[] = x
   res
+type Reference*[T] = distinct ref T
+proc `==`*[T](a, b: Reference[T]): bool = system.`==`((ref T)(a), (ref T)(b))
+proc hash*[T](a: Reference[T]): Hash =
+  result = result !& hash(cast[pointer]((ref T)(a)))
+  result = !$ result
 template unref*[T](x: ref T): untyped = x[]
 template unref*[T](x: Box[T]): untyped = x.unbox
+template unref*[T](x: Reference[T]): untyped = (ref T)(x)[]
 template unref*[T](x: T): untyped = x
+template realRef*[T](x: Reference[T]): ref T = (ref T)(x)
 
 # type system exists for both static and runtime dispatch
 # runtime-only types should only be subtypes of static-only types
@@ -72,7 +79,7 @@ type
     of vkEffect:
       effectValue*: Box[Value]
     of vkReference:
-      referenceValue*: ref FullValueObj
+      referenceValue*: Reference[FullValueObj]
     of vkBoxed:
       boxedValue*: FullValue
     of vkInt64:
@@ -84,13 +91,13 @@ type
     of vkType:
       typeValue*: Type
     of vkArray:
-      # XXX pointer field location should be same as vkList, vkString
+      # XXX (6) pointer field location should be same as vkList, vkString
       tupleValue*: Array[Value]
     of vkString:
-      # XXX pointer field location should be same as vkArray, vkList
+      # XXX (6) pointer field location should be same as vkArray, vkList
       stringValue*: string
     of vkList:
-      # XXX pointer field location should be same as vkArray, vkString
+      # XXX (6) pointer field location should be same as vkArray, vkString
       listValue*: seq[Value]
     of vkSet:
       setValue*: HashSet[Value]
@@ -124,7 +131,7 @@ type
     of vkEffect:
       effectValue*: Box[Value]
     of vkReference:
-      referenceValue*: ref FullValueObj
+      referenceValue*: Reference[FullValueObj]
     of boxedValueKinds:
       boxedValue*: FullValue
   
@@ -221,15 +228,15 @@ type
     case kind*: TypeKind
     of tyNoType, tyAny, tyNone: discard
     of tyCompound:
-      # XXX (7) seq might cause performance drop, add tySingleCompound, tyDoubleCompound etc
+      # XXX (6) seq might cause performance drop, add tySingleCompound, tyDoubleCompound etc
       # or optimize Array like that and use it
       base*: TypeBase
       baseArguments*: seq[Type]
     of tyTuple:
       elements*: seq[Type]
       varargs*: Box[Type] # for now only trailing
-        # XXX either move to property, or allow non-trailing
-        # XXX definite length varargs? i.e. array[3, int]
+        # XXX (2) either move to property, or allow non-trailing
+        # XXX (2) definite length varargs? i.e. array[3, int]
       elementNames*: Table[string, int]
       # XXX (2) also Defaults purely for initialization/conversion?
       # meaning only considered in function type relation
@@ -355,7 +362,7 @@ type
 
   StatementObj* = object
     ## typed/compiled expression
-    # XXX differentiate between validated and unvalidated,
+    # XXX (7) differentiate between validated and unvalidated,
     # maybe allow things like skFromExpression for metas
     knownType*: Type
     case kind*: StatementKind

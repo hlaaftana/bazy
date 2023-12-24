@@ -214,7 +214,7 @@ proc match*(matcher, t: Type, inst: var ParameterInstantiation): TypeMatch =
             atomicMatch(tmNone)
           else:
             atomicMatch(tmUnknown)
-      # XXX handle native types in TypeKind
+      # XXX (3) handle native types in TypeKind (why? we have nativetypekind)
       else: return atomicMatch(tmUnknown)
       if matcher.base != t.base: return atomicMatch(tmUnknown)
       var res = atomicMatch(tmAlmostEqual)
