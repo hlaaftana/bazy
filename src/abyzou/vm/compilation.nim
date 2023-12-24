@@ -1,21 +1,21 @@
 import
   std/[hashes, tables, sets, strutils],
   ../language/[expressions, number, shortstring],
-  ./[primitives, arrays, typebasics, typematch,
+  ./[ids, primitives, arrays, typebasics, typematch,
     valueconstr, checktype, guesstype, treewalk]
 
 defineTypeBase Meta, TypeBase(name: "Meta",
   arguments: @[newTypeParameter("", +Type(kind: tyBase, typeBase: FunctionTy))])
 
 proc newVariable*(name: string, knownType: Type = NoType): Variable =
-  Variable(name: name, nameHash: name.hash, knownType: knownType)
+  Variable(id: newVariableId(), name: name, nameHash: name.hash, knownType: knownType)
 
-proc newContext*(imports: seq[Context]): Context =
-  result = Context(stack: Stack(), imports: imports)
-  result.top = Scope(context: result)
+proc newContext*(parent: Scope = nil, imports: seq[Scope] = @[]): Context =
+  result = Context(stack: Stack(), origin: parent)
+  result.top = Scope(context: result, imports: imports)
 
-proc childContext*(context: Context): Context =
-  result = newContext(@[context])
+proc childContext*(scope: Scope): Context =
+  result = newContext(parent = scope)
 
 proc childScope*(scope: Scope): Scope =
   result = Scope(parent: scope, context: scope.context)
@@ -24,31 +24,26 @@ proc refreshStack*(context: Context) =
   ## grow static stack if new variables have been added
   ## recursively do the same for imports
   ## should be called after full compilation
-  for im in context.imports:
-    im.refreshStack()
-  if context.imports.len != context.stack.imports.len:
-    var newImports = newArray[Stack](context.imports.len)
-    for i in 0 ..< context.stack.imports.len:
-      newImports[i] = context.stack.imports[i]
-    for i in context.stack.imports.len ..< context.imports.len:
-      newImports[i] = context.imports[i].stack
-    context.stack.imports = newImports
+  if context.origin != nil:
+    context.origin.context.refreshStack()
   if context.stackSize != context.stack.stack.len:
     var newStack = newArray[Value](context.stackSize)
     for i in 0 ..< context.stack.stack.len:
       newStack[i] = context.stack.stack[i]
     context.stack.stack = newStack
+  for i, slot in context.stackSlots:
+    if slot.kind == Capture:
+      context.stack.stack[i] = slot.variable.scope.context.stack.stack[slot.variable.stackIndex]
 
 proc evaluateStatic*(context: Context, instr: Instruction): Value =
   context.refreshStack()
   instr.evaluate(context.stack)
 
-proc define*(scope: Scope, variable: Variable, inMemory = true) =
+proc define*(scope: Scope, variable: Variable) =
   variable.scope = scope
-  if inMemory:
-    variable.stackIndex = scope.context.stackSize
-    inc scope.context.stackSize
-  scope.context.allVariables.add(variable)
+  variable.stackIndex = scope.context.stackSize
+  inc scope.context.stackSize
+  scope.context.stackSlots.add((Local, variable))
   scope.variables.add(variable)
 
 proc toInstruction*(st: Statement): Instruction =
@@ -79,15 +74,9 @@ proc toInstruction*(st: Statement): Instruction =
   of skVariableSet:
     Instruction(kind: VariableSet, variableSetIndex: st.variableSetIndex,
       variableSetValue: map st.variableSetValue)
-  of skGetAddress:
-    Instruction(kind: GetAddress,
-      getAddress: map st.getAddress.indices)
-  of skSetAddress:
-    Instruction(kind: SetAddress,
-      setAddress: map st.setAddress.indices,
-      setAddressValue: map st.setAddressValue)
   of skArmStack:
-    Instruction(kind: ArmStack, armStackFunction: map st.armStackFunction)
+    Instruction(kind: ArmStack, armStackFunction: map st.armStackFunction,
+      armStackCaptures: map st.armStackCaptures)
   of skIf:
     Instruction(kind: If, ifCondition: map st.ifCond,
       ifTrue: map st.ifTrue, ifFalse: map st.ifFalse)
@@ -137,6 +126,10 @@ type
   CannotCallError* = object of NoOverloadFoundError
     `type`*: Type
     argumentTypes*: seq[Type]
+  
+  OutOfScopeModifyError* = object of CompileError
+    variable*: Variable
+    referenceKind*: VariableReferenceKind
 
 proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement
 
@@ -156,19 +149,27 @@ proc getType*(variable: Variable): Type =
   variable.knownType
 
 proc shallowReference*(v: Variable, `type`: Type = v.getType): VariableReference {.inline.} =
-  VariableReference(variable: v, type: `type`, address: VariableAddress(indices: @[v.stackIndex]))
+  VariableReference(variable: v, type: `type`, kind: Local)
 
-proc symbols*(scope: Scope, name: string, bound: TypeBound, doImports = true, nameHash = name.hash): seq[VariableReference] =
+proc symbols*(scope: Scope, name: string, bound: TypeBound, doOrigin = true, doImports = true, nameHash = name.hash): seq[VariableReference] =
   if scope.isNil: return
-  if doImports:
-    for i, im in scope.context.imports:
-      let addrs = symbols(im.top, name, bound, nameHash = nameHash)
-      for a in addrs:
-        var b = a
-        b.address.indices.add(i)
-        result.add(b)
   if not scope.parent.isNil:
-    result.add(symbols(scope.parent, name, bound, doImports = false, nameHash = nameHash))
+    result.add(symbols(scope.parent, name, bound, nameHash = nameHash))
+  elif not scope.context.origin.isNil and doOrigin:
+    for a in symbols(scope.context.origin, name, bound, nameHash = nameHash):
+      let b =
+        if a.kind == Constant:
+          a
+        else:
+          VariableReference(variable: a.variable, type: a.type,
+            kind: Capture, captureIndex: -1)
+      result.add(b)
+  if doImports:
+    for i, im in scope.imports:
+      let addrs = symbols(im, name, bound, nameHash = nameHash)
+      for a in addrs:
+        result.add(VariableReference(variable: a.variable, type: a.type,
+          kind: Constant))
   for i, v in scope.variables:
     if (v.nameHash == 0 or v.nameHash == nameHash) and name == v.name:
       var t = v.getType
@@ -195,18 +196,46 @@ proc overloads*(scope: Scope | Context, name: string, bound: TypeBound): seq[Var
     order = if bound.variance == Covariant: Ascending else: Descending)
   result.reverse()
 
-proc variableGet*(r: VariableReference): Statement =
-  let t = r.type
-  result = Statement(kind: skGetAddress,
-    getAddress: r.address,
-    knownType: t)
+proc capture*(c: Context, v: Variable): int =
+  if v.scope.context == c:
+    result = v.stackIndex
+  else:
+    if not c.origin.isNil:
+      discard c.origin.context.capture(v)
+    result = c.captures.mgetOrPut(v, c.stackSize)
+    c.stackSlots.add((Capture, v))
+    inc c.stackSize
 
-proc variableSet*(r: VariableReference, value: Statement): Statement =
+proc variableGet*(c: Context, r: VariableReference): Statement =
   let t = r.type
-  result = Statement(kind: skSetAddress,
-    setAddress: r.address,
-    setAddressValue: value,
-    knownType: t)
+  case r.kind
+  of Constant:
+    result = Statement(kind: skConstant,
+      constant: r.variable.scope.context.stack.stack[r.variable.stackIndex],
+      knownType: t)
+  of Local:
+    result = Statement(kind: skVariableGet,
+      variableGetIndex: r.variable.stackIndex,
+      knownType: t)
+  of Capture:
+    result = Statement(kind: skVariableGet,
+      variableGetIndex: c.capture(r.variable),
+      knownType: t)
+
+proc variableSet*(c: Context, r: VariableReference, value: Statement, source: Expression = nil): Statement =
+  let t = r.type
+  case r.kind
+  of Local:
+    result = Statement(kind: skVariableSet,
+      variableSetIndex: r.variable.stackIndex,
+      variableSetValue: value,
+      knownType: t)
+  of Constant, Capture:
+    raise (ref OutOfScopeModifyError)(expression: source,
+      variable: r.variable, referenceKind: r.kind,
+      msg: "cannot modify " &
+        (if r.kind == Capture: "captured " else: "constant ") &
+        r.variable.name & ", use a reference instead")
 
 template constant*(value: Value, ty: Type): Statement =
   Statement(kind: skConstant, constant: value, knownType: ty)
@@ -377,7 +406,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
         else:
           arguments[i + 1] = constant(copy ex.arguments[i], ExpressionTy)
       let call = Statement(kind: skFunctionCall,
-        callee: variableGet(meta),
+        callee: variableGet(scope.context, meta),
         arguments: arguments).toInstruction
       result = scope.context.evaluateStatic(call).boxedValue.statementValue
     else:
@@ -393,7 +422,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
           var argumentStatement = newSeq[Statement](arguments.len)
           for i, a in arguments: argumentStatement[i] = constant(a, a.getType)
           let call = Statement(kind: skFunctionCall,
-            callee: variableGet(d),
+            callee: variableGet(scope.context, d),
             arguments: argumentStatement).toInstruction
           result = scope.context.evaluateStatic(call).boxedValue.statementValue
           break
@@ -444,7 +473,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
               d[0][i] = AnyTy
             else:
               d[0][i] = pt
-          d[1] = variableGet(subs[i])
+          d[1] = variableGet(scope.context, subs[i])
         result = Statement(kind: skDispatch,
           knownType: functionType.baseArguments[1],
             # we could calculate a union here but it could become too complex
@@ -469,7 +498,7 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
       functionType = funcType(if bound.variance == Covariant: AnyTy else: bound.boundType, argumentTypes)
       let overs = overloads(scope, ".call", -functionType)
       if overs.len != 0:
-        let dotCall = variableGet(overs[0])
+        let dotCall = variableGet(scope.context, overs[0])
         result = Statement(kind: skFunctionCall,
           knownType: dotCall.knownType.baseArguments[1],
           callee: callee,
@@ -586,7 +615,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
   of Name, Symbol:
     # XXX warn on ambiguity, thankfully recency is accounted for
     let name = if ex.kind == Symbol: $ex.symbol else: ex.identifier
-    result = variableGet(resolve(scope, ex, name, bound))
+    result = variableGet(scope.context, resolve(scope, ex, name, bound))
   of Dot:
     if ex.right.kind == Name:
       let lhs = map ex.left
@@ -623,13 +652,12 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       bound: bound,
       type: result.knownType,
       msg: "bound " & $bound & " does not match type " & $result.knownType &
-       " in expression " & $ex)
+        " in expression " & $ex)
 
 type Program* = TreeWalkFunction
 
-proc compile*(ex: Expression, imports: seq[Context], bound: TypeBound = +AnyTy): Program =
-  #new(result)
-  var context = newContext(imports)
+proc compile*(ex: Expression, imports: seq[Scope], bound: TypeBound = +AnyTy): Program =
+  var context = newContext(imports = imports)
   result.instruction = compile(context.top, ex, bound).toInstruction
   context.refreshStack()
   result.stack = context.stack

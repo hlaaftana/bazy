@@ -1,29 +1,26 @@
-import ./[primitives, arrays]
+import ./[primitives, arrays], std/tables
 
 # XXX make runner
 
 # xxx do some kind of register last use analysis to merge some registers
 # xxx constant pool can be long string of serialized values,
 # then they are deserialized and cached into registers when loaded
-# reference constants have to be reified
 
 type
   Register* = distinct uint16 # 32 bit would be nice
-    # xxx maybe unify with constants, make signed, index constant pool when negative
-    # ^ just occupy normal registers
   JumpLocation* = distinct uint16
     # can rename to just Location or Position
+  Constant* = distinct uint16
 
   LinearInstructionKind* = enum
     NoOp
-    SetRegisterConstant # push
+    LoadConstant
+      ## shallow copies element from constant pool
     SetRegisterRegister # mov
     NullaryCall, UnaryCall, BinaryCall, TernaryCall
     TupleCall
     TryDispatch
-    VariableGet, VariableSet # go
-    GetAddress, SetAddress # go
-    ArmStack # stay but arm captures
+    ArmStack, RefreshStack
     JumpPoint
     IfTrueJump, IfFalseJump
     Jump
@@ -44,10 +41,8 @@ type
     # cannot recurse
     case kind*: LinearInstructionKind
     of NoOp: discard
-    of SetRegisterConstant:
-      src*: tuple[res: Register, constant: Value]
-        # xxx should be an index in constant pool instead (actually just register)
-        # reference constants also have special behavior when loaded
+    of LoadConstant:
+      lc*: tuple[res: Register, constant: Constant]
     of SetRegisterRegister:
       srr*: tuple[res, val: Register]
     of NullaryCall:
@@ -62,16 +57,10 @@ type
       tupcall*: tuple[res, callee, args: Register]
     of TryDispatch:
       tdisp*: tuple[res, callee, args: Register, successPos: JumpLocation]
-    of VariableGet:
-      vg*: tuple[res: Register, index: int32]
-    of VariableSet:
-      vs*: tuple[index: int32, val: Register]
-    of GetAddress:
-      gadr*: tuple[res: Register, address: Array[int32]]
-    of SetAddress:
-      sadr*: tuple[address: Array[int32], val: Register]
     of ArmStack:
-      arm*: tuple[fun: Register]
+      arm*: tuple[fun: Register, ind: int32, val: Register]
+    of RefreshStack:
+      rfs*: tuple[fun: Register]
     of JumpPoint:
       jpt*: tuple[loc: JumpLocation]
     of IfTrueJump:
@@ -111,6 +100,8 @@ type
     registerCount*: int
     jumpLocationCount*: int
     jumpLocationByteIndex*: seq[int]
+    constants*: Table[Value, int] # XXX serialize values
+    variableRegisters*: seq[Register]
     usedSpecialRegisters: set[SpecialRegister]
     specialRegisters: array[SpecialRegister, Register]
   
@@ -132,15 +123,15 @@ const
   highBinary = DivFloat32
   lowUnary = NegInt32
   highUnary = NegFloat32
-  instructionKindMap: array[low(BinaryInstructionKind) .. high(UnaryInstructionKind), LinearInstructionKind] = [
-    # binary
-    AddInt: AddInt32, SubInt: SubInt32, MulInt: MulInt32, DivInt: DivInt32,
-    AddFloat: AddFloat32, SubFloat: SubFloat32, MulFloat: MulFloat32, DivFloat: DivFloat32,
-    # unary
-    NegInt: NegInt32, NegFloat: NegFloat32
+  binaryInstructions: array[BinaryInstructionKind, range[lowBinary .. highBinary]] = [
+    AddInt: range[lowBinary .. highBinary] AddInt32, SubInt: SubInt32, MulInt: MulInt32, DivInt: DivInt32,
+    AddFloat: AddFloat32, SubFloat: SubFloat32, MulFloat: MulFloat32, DivFloat: DivFloat32
+  ]
+  unaryInstructions: array[UnaryInstructionKind, range[lowUnary .. highUnary]] = [
+    NegInt: range[lowUnary .. highUnary] NegInt32, NegFloat: NegFloat32
   ]
 
-proc byteCount*(atom: Register | int32 | JumpLocation): int =
+proc byteCount*(atom: Register | int32 | JumpLocation | Constant): int =
   result = sizeof(atom)
 
 proc byteCount*[T: tuple](tup: T): int =
@@ -160,7 +151,7 @@ proc addBytes*(bytes: var openarray[byte], i: var int, instr: LinearInstruction)
   template add(b: byte) =
     bytes[i] = b
     inc i
-  template add(r: Register | JumpLocation) =
+  template add(r: Register | JumpLocation | Constant) =
     let u = r.uint16
     add(byte((u shr 8) and 0xFF))
     add(byte(u and 0xFF))
@@ -180,8 +171,8 @@ proc addBytes*(bytes: var openarray[byte], i: var int, instr: LinearInstruction)
   add instr.kind.byte
   case instr.kind
   of NoOp: discard
-  of SetRegisterConstant:
-    discard "add instr.src" # XXX serialize values (but not here, in constant pool)
+  of LoadConstant:
+    add instr.lc
   of SetRegisterRegister:
     add instr.srr
   of NullaryCall:
@@ -196,16 +187,10 @@ proc addBytes*(bytes: var openarray[byte], i: var int, instr: LinearInstruction)
     add instr.tupcall
   of TryDispatch:
     add instr.tdisp
-  of VariableGet:
-    add instr.vg
-  of VariableSet:
-    add instr.vs
-  of GetAddress:
-    add instr.gadr
-  of SetAddress:
-    add instr.sadr
   of ArmStack:
     add instr.arm
+  of RefreshStack:
+    add instr.rfs
   of JumpPoint:
     add instr.jpt
   of IfTrueJump:
@@ -264,6 +249,9 @@ proc newJumpLocation(fn: BytecodeContext): JumpLocation =
 proc jumpPoint(fn: BytecodeContext, loc: JumpLocation) =
   fn.add(LinearInstruction(kind: JumpPoint, jpt: (loc: loc)))
 
+proc getConstant(fn: BytecodeContext, constant: Value): Constant =
+  result = Constant(fn.constants.mgetOrPut(constant, fn.constants.len))
+
 proc resultRegister(fn: BytecodeContext, res: var Result): Register =
   case res.kind
   of SetRegister: result = res.register
@@ -284,16 +272,18 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
   let resultKind = result.kind
   case s.kind
   of skNone:
-    case resultKind
-    of SetRegister:
-      fn.add(Instr(kind: SetRegisterConstant, src: (res: result.register, constant: Value(kind: vkNone))))
-    of Value:
-      result.value = fn.newRegister()
-      fn.add(Instr(kind: SetRegisterConstant, src: (res: result.value, constant: Value(kind: vkNone))))
-    of Statement: discard # nothing
+    discard # nothing
+    when false:
+      case resultKind
+      of SetRegister:
+        fn.add(Instr(kind: SetRegisterConstant, src: (res: result.register, constant: Value(kind: vkNone))))
+      of Value:
+        result.value = fn.newRegister()
+        fn.add(Instr(kind: SetRegisterConstant, src: (res: result.value, constant: Value(kind: vkNone))))
+      of Statement: discard # nothing
   of skConstant:
-    # XXX maybe do nothing on statement, but load constant
-    fn.add(Instr(kind: SetRegisterConstant, src: (res: resultRegister(fn, result), constant: s.constant)))
+    fn.add(Instr(kind: LoadConstant, lc: (res: resultRegister(fn, result),
+      constant: fn.getConstant(s.constant))))
   of skFunctionCall:
     let f = value(s.callee)
     let res = resultRegister(fn, result)
@@ -301,11 +291,16 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
     of 0:
       fn.add(Instr(kind: NullaryCall, ncall: (res: res, callee: f)))
     of 1:
-      fn.add(Instr(kind: UnaryCall, ucall: (res: res, callee: f, arg1: value(s.arguments[0]))))
+      fn.add(Instr(kind: UnaryCall, ucall:
+        (res: res, callee: f, arg1: value(s.arguments[0]))))
     of 2:
-      fn.add(Instr(kind: BinaryCall, bcall: (res: res, callee: f, arg1: value(s.arguments[0]), arg2: value(s.arguments[1]))))
+      fn.add(Instr(kind: BinaryCall, bcall:
+        (res: res, callee: f, arg1: value(s.arguments[0]),
+          arg2: value(s.arguments[1]))))
     of 3:
-      fn.add(Instr(kind: TernaryCall, tcall: (res: res, callee: f, arg1: value(s.arguments[0]), arg2: value(s.arguments[1]), arg3: value(s.arguments[2]))))
+      fn.add(Instr(kind: TernaryCall, tcall:
+        (res: res, callee: f, arg1: value(s.arguments[0]),
+          arg2: value(s.arguments[1]), arg3: value(s.arguments[2]))))
     else:
       let args = fn.newRegister()
       fn.add(Instr(kind: InitTuple, coll: (res: args, siz: s.arguments.len.int32)))
@@ -316,13 +311,16 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
     let res = resultRegister(fn, result)
     let successPos = fn.newJumpLocation()
     let args = fn.newRegister()
-    fn.add(Instr(kind: InitTuple, coll: (res: args, siz: s.dispatchArguments.len.int32)))
+    fn.add(Instr(kind: InitTuple, coll:
+      (res: args, siz: s.dispatchArguments.len.int32)))
     for i, a in s.dispatchArguments:
-      fn.add(Instr(kind: SetConstIndex, sci: (coll: args, ind: i.int32, val: value(a))))
+      fn.add(Instr(kind: SetConstIndex, sci:
+        (coll: args, ind: i.int32, val: value(a))))
     for _, d in s.dispatchees.items:
       # XXX types are ignored here because they should be in the boxed function values
       # this is not terrible, but check that it's enforced everywhere
-      fn.add(Instr(kind: TryDispatch, tdisp: (res: res, callee: value(d), args: args, successPos: successPos)))
+      fn.add(Instr(kind: TryDispatch, tdisp:
+        (res: res, callee: value(d), args: args, successPos: successPos)))
     fn.jumpPoint(successPos)
   of skSequence:
     let h = s.sequence.len - 1
@@ -330,27 +328,18 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
       statement(s.sequence[i])
     linearize(context, fn, result, s.sequence[h])
   of skVariableGet:
-    # XXX (1) should be equivalent to getting a register
-    fn.add(Instr(kind: VariableGet, vg: (res: resultRegister(fn, result), index: s.variableGetIndex.int32)))
-  of skVariableSet:
-    # XXX (1) should be equivalent to setting a register
-    let val = value(s.variableSetValue)
-    fn.add(Instr(kind: VariableSet, vs: (index: s.variableSetIndex.int32, val: val)))
-    case resultKind
+    case result.kind
     of SetRegister:
-      fn.add(Instr(kind: SetRegisterRegister, srr: (res: result.register, val: val)))
+      fn.add(Instr(kind: SetRegisterRegister, srr:
+        (res: result.register,
+          val: fn.variableRegisters[s.variableGetIndex])))
     of Value:
-      result.value = val
+      result.value = fn.variableRegisters[s.variableGetIndex]
     of Statement: discard
-  of skGetAddress:
-    var arr = newArray[int32](s.getAddress.indices.len)
-    for i, x in s.getAddress.indices: arr[i] = x.int32
-    fn.add(Instr(kind: GetAddress, gadr: (res: resultRegister(fn, result), address: arr)))
-  of skSetAddress:
-    var arr = newArray[int32](s.setAddress.indices.len)
-    for i, x in s.setAddress.indices: arr[i] = x.int32
-    let val = value(s.setAddressValue)
-    fn.add(Instr(kind: SetAddress, sadr: (address: arr, val: val)))
+  of skVariableSet:
+    let val = value(s.variableSetValue)
+    fn.add(Instr(kind: SetRegisterRegister, srr:
+      (res: fn.variableRegisters[s.variableSetIndex], val: val)))
     case resultKind
     of SetRegister:
       fn.add(Instr(kind: SetRegisterRegister, srr: (res: result.register, val: val)))
@@ -358,12 +347,16 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
       result.value = val
     of Statement: discard
   of skArmStack:
-    # XXX (1) should need info about captures
-    fn.add(Instr(kind: ArmStack, arm: (fun: value(s.armStackFunction))))
+    let fun = value(s.armStackFunction)
+    for a, b in s.armStackCaptures.items:
+      fn.add(Instr(kind: ArmStack, arm:
+        (fun: fun, ind: a.int32, val: fn.variableRegisters[b])))
+    fn.add(Instr(kind: RefreshStack, rfs: (fun: fun)))
   of skIf:
     # the true location is immediately afterward so we don't really need it
     let falseLoc = fn.newJumpLocation()
-    fn.add(Instr(kind: IfFalseJump, iffj: (cond: value(s.ifCond), falsePos: falseLoc)))
+    fn.add(Instr(kind: IfFalseJump, iffj:
+      (cond: value(s.ifCond), falsePos: falseLoc)))
     linearize(context, fn, result, s.ifTrue)
     let endLoc = fn.newJumpLocation()
     fn.add(Instr(kind: Jump, jmp: (pos: endLoc)))
@@ -376,7 +369,8 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
     let startLoc = fn.newJumpLocation()
     let endLoc = fn.newJumpLocation()
     fn.jumpPoint(startLoc)
-    fn.add(Instr(kind: IfFalseJump, iffj: (cond: value(s.whileCond), falsePos: endLoc)))
+    fn.add(Instr(kind: IfFalseJump, iffj:
+      (cond: value(s.whileCond), falsePos: endLoc)))
     linearize(context, fn, result, s.whileBody)
     fn.jumpPoint(endLoc)
   of skDoUntil:
@@ -384,50 +378,65 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
     let endLoc = fn.newJumpLocation()
     fn.jumpPoint(startLoc)
     linearize(context, fn, result, s.doUntilBody)
-    fn.add(Instr(kind: IfTrueJump, iftj: (cond: value(s.doUntilCond), truePos: endLoc)))
+    fn.add(Instr(kind: IfTrueJump, iftj:
+      (cond: value(s.doUntilCond), truePos: endLoc)))
     fn.jumpPoint(endLoc)
   of skEmitEffect:
     fn.add(Instr(kind: EmitEffect, emit: (effect: value(s.effect))))
   of skHandleEffect:
-    fn.add(Instr(kind: PushEffectHandler, pueh: (handler: value(s.effectHandler))))
+    fn.add(Instr(kind: PushEffectHandler, pueh:
+      (handler: value(s.effectHandler))))
     linearize(context, fn, result, s.effectBody)
     fn.add(Instr(kind: PopEffectHandler))
   of skTuple:
     # XXX statement shouldn't build collection
     let res = resultRegister(fn, result)
-    fn.add(Instr(kind: InitTuple, coll: (res: res, siz: s.elements.len.int32)))
+    fn.add(Instr(kind: InitTuple, coll:
+      (res: res, siz: s.elements.len.int32)))
     for i, a in s.elements:
-      fn.add(Instr(kind: SetConstIndex, sci: (coll: res, ind: i.int32, val: value(a))))
+      fn.add(Instr(kind: SetConstIndex, sci:
+        (coll: res, ind: i.int32, val: value(a))))
   of skList:
     # XXX statement shouldn't build collection
     let res = resultRegister(fn, result)
-    fn.add(Instr(kind: InitList, coll: (res: res, siz: s.elements.len.int32)))
+    fn.add(Instr(kind: InitList, coll:
+      (res: res, siz: s.elements.len.int32)))
     for i, a in s.elements:
       # XXX SetIndex for lists and strings should only work if their pointer is
       # in the same location in memory as arrays
-      fn.add(Instr(kind: SetConstIndex, sci: (coll: res, ind: i.int32, val: value(a))))
+      fn.add(Instr(kind: SetConstIndex, sci:
+        (coll: res, ind: i.int32, val: value(a))))
   of skSet:
     # XXX statement shouldn't build collection
     let res = resultRegister(fn, result)
-    fn.add(Instr(kind: InitSet, coll: (res: res, siz: s.elements.len.int32)))
+    fn.add(Instr(kind: InitSet, coll:
+      (res: res, siz: s.elements.len.int32)))
     for a in s.elements:
       # XXX no SetIndex for sets
-      fn.add(Instr(kind: SetIndex, sri: (coll: res, ind: value(a), val: value(a))))
+      fn.add(Instr(kind: SetIndex, sri:
+        (coll: res, ind: value(a), val: value(a))))
   of skTable:
     # XXX statement shouldn't build collection
     let res = resultRegister(fn, result)
-    fn.add(Instr(kind: InitTable, coll: (res: res, siz: s.elements.len.int32)))
+    fn.add(Instr(kind: InitTable, coll:
+      (res: res, siz: s.elements.len.int32)))
     for k, v in s.entries.items:
       # XXX probably no SetIndex for tables
-      fn.add(Instr(kind: SetIndex, sri: (coll: res, ind: value(k), val: value(v))))
+      fn.add(Instr(kind: SetIndex, sri:
+        (coll: res, ind: value(k), val: value(v))))
   of skGetIndex:
-    fn.add(Instr(kind: GetConstIndex, gci: (res: resultRegister(fn, result), coll: value(s.getIndexAddress), ind: s.getIndex.int32)))
+    fn.add(Instr(kind: GetConstIndex, gci:
+      (res: resultRegister(fn, result),
+        coll: value(s.getIndexAddress),
+        ind: s.getIndex.int32)))
   of skSetIndex:
     let val = value(s.setIndexValue)
-    fn.add(Instr(kind: SetConstIndex, sci: (coll: value(s.setIndexAddress), ind: s.setIndex.int32, val: val)))
+    fn.add(Instr(kind: SetConstIndex, sci:
+      (coll: value(s.setIndexAddress), ind: s.setIndex.int32, val: val)))
     case resultKind
     of SetRegister:
-      fn.add(Instr(kind: SetRegisterRegister, srr: (res: result.register, val: val)))
+      fn.add(Instr(kind: SetRegisterRegister, srr:
+        (res: result.register, val: val)))
     of Value:
       result.value = val
     of Statement: discard
@@ -439,7 +448,8 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
         result.value = fn.newRegister()
         result.value
       of Statement: fn.getRegister(Void)
-    fn.add(Instr(kind: range[lowUnary..highUnary] instructionKindMap[s.unaryInstructionKind], unary: (res: res, arg: value(s.unary))))
+    fn.add(Instr(kind: unaryInstructions[s.unaryInstructionKind], unary:
+      (res: res, arg: value(s.unary))))
   of skBinaryInstruction:
     let res =
       case resultKind
@@ -448,10 +458,14 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
         result.value = fn.newRegister()
         result.value
       of Statement: fn.getRegister(Void)
-    fn.add(Instr(kind: range[lowBinary..highBinary] instructionKindMap[s.binaryInstructionKind], binary: (res: res, arg1: value(s.binary1), arg2: value(s.binary2))))
+    fn.add(Instr(kind: binaryInstructions[s.binaryInstructionKind], binary:
+      (res: res, arg1: value(s.binary1), arg2: value(s.binary2))))
 
 proc linear*(context: Context, body: Statement): BytecodeContext =
   var stack = BytecodeContext()
+  stack.variableRegisters.newSeq(context.stackSlots.len)
+  for vr in stack.variableRegisters.mitems:
+    vr = stack.newRegister()
   var res = Result(kind: Value)
   linearize(context, stack, res, body)
   result = stack

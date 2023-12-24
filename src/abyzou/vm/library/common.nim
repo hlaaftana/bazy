@@ -71,8 +71,8 @@ template doFn*(body): untyped =
     body)
 
 template module*(moduleName, definitions): untyped {.dirty.} =
-  proc `moduleName`*: Context =
-    result = newContext(@[])
+  proc `moduleName`*: Scope =
+    result = newContext().top
     template define(n: string, typ: Type, x: Value) {.used.} =
       define(result, n, typ, x)
     template define(n: string, x: Value) {.used.} =

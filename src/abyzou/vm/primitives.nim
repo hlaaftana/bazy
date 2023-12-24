@@ -229,6 +229,7 @@ type
       elements*: seq[Type]
       varargs*: Box[Type] # for now only trailing
         # XXX either move to property, or allow non-trailing
+        # XXX definite length varargs? i.e. array[3, int]
       elementNames*: Table[string, int]
       # XXX (2) also Defaults purely for initialization/conversion?
       # meaning only considered in function type relation
@@ -254,7 +255,6 @@ type
     variance*: Variance
 
   Stack* = ref object
-    imports*: Array[Stack]
     stack*: Array[Value]
 
   TreeWalkFunction* = object
@@ -270,7 +270,6 @@ type
     Sequence
     # stack
     VariableGet, VariableSet
-    GetAddress, SetAddress
     ArmStack
     # goto
     If, While, DoUntil
@@ -288,7 +287,7 @@ type
   BinaryInstructionKind* = range[AddInt .. DivFloat]
   UnaryInstructionKind* = range[NegInt .. NegFloat]
 
-  InstructionObj* {.acyclic.} = object ## compact version of Statement
+  InstructionObj* = object ## compact version of Statement
     case kind*: InstructionKind
     of NoOp: discard
     of Constant:
@@ -306,13 +305,9 @@ type
     of VariableSet:
       variableSetIndex*: int
       variableSetValue*: Instruction
-    of GetAddress:
-      getAddress*: Array[int]
-    of SetAddress:
-      setAddress*: Array[int]
-      setAddressValue*: Instruction
     of ArmStack:
       armStackFunction*: Instruction
+      armStackCaptures*: Array[tuple[index, valueIndex: int]]
     of If:
       ifCondition*, ifTrue*, ifFalse*: Instruction
     of While:
@@ -339,11 +334,7 @@ type
     of low(BinaryInstructionKind) .. high(BinaryInstructionKind):
       binary1*, binary2*: Instruction
   Instruction* = ref InstructionObj
-  
-  VariableAddress* = object
-    ## address of variable relative to context
-    indices*: seq[int]
-  
+
   StatementKind* = enum
     skNone
     skConstant
@@ -351,11 +342,7 @@ type
     skSequence
     # stack
     skVariableGet, skVariableSet
-      # XXX (1) should go, closure variables should be loaded to local stack with ArmStack
-    skGetAddress, skSetAddress
-      # XXX (1) remove, only use above
     skArmStack
-      # XXX (1) should load closure captures
     # goto
     skIf, skWhile, skDoUntil
     # effect, can emulate goto
@@ -366,7 +353,7 @@ type
     # custom instructions
     skUnaryInstruction, skBinaryInstruction
 
-  StatementObj* {.acyclic.} = object
+  StatementObj* = object
     ## typed/compiled expression
     # XXX differentiate between validated and unvalidated,
     # maybe allow things like skFromExpression for metas
@@ -388,13 +375,11 @@ type
     of skVariableSet:
       variableSetIndex*: int
       variableSetValue*: Statement
-    of skGetAddress:
-      getAddress*: VariableAddress
-    of skSetAddress:
-      setAddress*: VariableAddress
-      setAddressValue*: Statement
     of skArmStack:
       armStackFunction*: Statement
+      armStackCaptures*: seq[tuple[index, valueIndex: int]]
+        ## list of (variable in function stack, variable in local stack)
+        ## only used for passing captures so the value is just a variable index
     of skIf:
       ifCond*, ifTrue*, ifFalse*: Statement
     of skWhile:
@@ -425,6 +410,7 @@ type
   Statement* = ref StatementObj
   
   Variable* = ref object
+    id*: VariableId
     name*: string
     nameHash*: Hash
     knownType*: Type
@@ -437,38 +423,31 @@ type
 
   Context* = ref object
     ## current module or function
-    imports*: seq[Context]
-      # XXX (1) imports should not work like this/exist
-      # modules should create a module object with all exported variables
-      # the imported variables are like closure captures from the other module
-      # before a module is run, imported variables should be loaded into its stack by the module graph
-      # stacks should never persist, persistent memory should be vkReference
-      # static code should still run exactly like normal code, static memory
-      # can still use vkReference which will be re-allocated at runtime with
-      # the final static value of the reference
-      # values not accessed from a vkReference always have value semantics and are internally immutable
-      # comments might be outdated:
-        # for now keep this but use it less
-        # register memory can still exist as well as constant memory that gets inlined
-    parent*: Context
-      # XXX (1) context closure is defined in
-    captures*: seq[VariableReference] # XXX (1)
+    origin*: Scope
+      ## context closure is defined in
+    captures*: Table[Variable, int]
     stack*: Stack
     stackSize*: int
     top*: Scope
-    allVariables*: seq[Variable] ## should not shrink
+    stackSlots*: seq[tuple[kind: VariableReferenceKind, variable: Variable]] ## should not shrink
   
   Scope* = ref object
     ## restricted subset of variables in a context
-    #imports*: seq[Scope] # maybe add blacklist
     parent*: Scope
     context*: Context
+    imports*: seq[Scope]
     variables*: seq[Variable] ## should not shrink
+
+  VariableReferenceKind* = enum
+    Local, Constant, Capture
 
   VariableReference* = object
     variable*: Variable
     `type`*: Type ## must have a known type
-    address*: VariableAddress
+    case kind*: VariableReferenceKind
+    of Local, Constant: discard
+    of Capture:
+      captureIndex*: int
 
 static:
   doAssert sizeof(Value) <= 2 * sizeof(int)

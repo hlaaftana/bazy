@@ -9,21 +9,21 @@ module collections:
     let T = Type(kind: tyParameter, parameter: newTypeParameter("T"))
     let rf = define(result, "ref", funcType(ReferenceTy[T], [T]))
     rf.genericParams = @[T.parameter]
-    result.top.define(rf)
+    result.define(rf)
     let urf = define(result, "unref", funcType(T, [ReferenceTy[T]]))
     urf.genericParams = @[T.parameter]
-    result.top.define(urf)
+    result.define(urf)
     let upd = define(result, "update", funcType(NoneTy, [ReferenceTy[T], T]))
     upd.genericParams = @[T.parameter]
-    result.top.define(upd)
-    result.refreshStack()
-    result.stack.set rf.stackIndex, toValue proc (args: openarray[Value]): Value =
+    result.define(upd)
+    result.context.refreshStack()
+    result.context.stack.set rf.stackIndex, toValue proc (args: openarray[Value]): Value =
       result = Value(kind: vkReference)
       new(result.referenceValue)
       result.referenceValue[] = args[0].toFullValueObj
-    result.stack.set urf.stackIndex, toValue proc (args: openarray[Value]): Value =
+    result.context.stack.set urf.stackIndex, toValue proc (args: openarray[Value]): Value =
       args[0].referenceValue[].toSmallValue
-    result.stack.set upd.stackIndex, toValue proc (args: openarray[Value]): Value =
+    result.context.stack.set upd.stackIndex, toValue proc (args: openarray[Value]): Value =
       args[0].referenceValue[] = args[1].toFullValueObj
   define ".[]", funcType(StatementTy, [ScopeTy, StatementTy, StatementTy]).withProperties(
     property(Meta, funcType(AnyTy, [Type(kind: tyBase, typeBase: TupleTy), Int32Ty]))

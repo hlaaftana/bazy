@@ -19,6 +19,7 @@ template idObject[T: ref](t: type T) {.dirty.} =
 
 idObject(TypeBase)
 idObject(TypeParameter)
+idObject(Variable)
 
 proc hash*(v: FullValueObj): Hash {.noSideEffect.}
 proc hash*(v: Value): Hash {.noSideEffect.}
@@ -41,6 +42,7 @@ hashRefObj Stack
 template hashObj(T): untyped {.dirty.} =
   proc hash*(v: T): Hash {.noSideEffect.} =
     for f in fields(v):
+      # XXX reference value?
       when f is ref:
         when compiles(hash(f[])):
           if not f.isNil:
@@ -89,8 +91,13 @@ proc `$`*(vt: Box[Type]): string =
   else: $vt.unbox
 
 proc `$`*(value: Value): string
+proc `$`*(value: FullValueObj): string
 
 proc `$`*(value: FullValue): string =
+  if value.isNil: "<nil>"
+  else: $value[]
+
+proc `$`*(value: FullValueObj): string =
   result = case value.kind
   of vkNone: "()"
   of vkInt32: $value.int32Value
@@ -180,26 +187,34 @@ proc `$`*(tb: TypeBound): string =
 proc `$`*(variable: Variable): string =
   variable.name & ": " & $variable.knownType
 
+proc `$`*(scope: Scope): string
+
 proc `$`*(context: Context): string =
   result = "context\n"
-  for v in context.allVariables:
-    result.add("  " & $v & "\n")
-  result.add("imports\n")
-  for c in context.imports:
-    for line in splitLines($c):
-      result.add("  " & line & "\n")
+  for v in context.stackSlots:
+    let prefix =
+      case v.kind
+      of Capture:
+        "  capture "
+      of Constant: # not used
+        "  constant "
+      of Local:
+        "  "
+    result.add(prefix & $v.variable & "\n")
+  result.add("parent\n")
+  for line in splitLines($context.origin):
+    result.add("  " & line & "\n")
 
 proc `$`*(scope: Scope): string =
   result = "scope\n"
   for v in scope.variables:
     result.add("  " & $v & "\n")
-  if scope.parent.isNil:
-    result.add("imports\n")
-    for c in scope.context.imports:
-      for line in splitLines($c):
-        result.add("  " & line & "\n")
-  else:
+  if not scope.parent.isNil:
     result.add("parent ")
     for line in splitLines($scope.parent):
       result.add("  " & line & "\n")
-
+  if scope.imports.len != 0:
+    result.add("imports\n")
+    for c in scope.imports:
+      for line in splitLines($c):
+        result.add("  " & line & "\n")

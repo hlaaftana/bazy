@@ -10,7 +10,7 @@ proc set*(stack: Stack, index: int, value: sink Value) {.inline.} =
   stack.stack[index] = value
 
 proc shallowRefresh*(stack: Stack): Stack =
-  result = Stack(imports: stack.imports)
+  result = Stack()
   var newStack = newArray[Value](stack.stack.len)
   for i in 0 ..< stack.stack.len:
     newStack[i] = stack.stack[i]
@@ -84,24 +84,13 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
   of VariableSet:
     result = run ins.variableSetValue
     stack.set(ins.variableSetIndex, result)
-  of GetAddress:
-    var s = stack
-    var i = ins.getAddress.len
-    while i > 1:
-      dec i
-      s = s.imports[ins.getAddress[i]]
-    result = s.get(ins.getAddress[0])
-  of SetAddress:
-    result = run ins.setAddressValue
-    var s = stack
-    var i = ins.setAddress.len
-    while i > 1:
-      dec i
-      s = s.imports[ins.setAddress[i]]
-    s.set(ins.setAddress[0], result)
   of ArmStack:
     result = run ins.armStackFunction
-    result.boxedValue.functionValue.stack.imports[0] = stack
+    var fun = result.boxedValue.functionValue
+    for a, b in ins.armStackCaptures.items:
+      fun.stack.set(a, stack.get(b))
+    fun.stack = fun.stack.shallowRefresh()
+    result = toValue fun
   of If:
     let cond = run ins.ifCondition
     if cond.toBool:

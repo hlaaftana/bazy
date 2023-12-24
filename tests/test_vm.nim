@@ -33,7 +33,7 @@ test "compile success":
   failing "while 1.0, ()"
 
 test "eval values":
-  let tests = {
+  var tests = {
     "a = \"abcd\"; a": toValue("abcd"), # breaks arc
     "a = (b = do c = 1); [a, 2, b,  3, c]":
       toValue(@[toValue(1), toValue(2), toValue(1), toValue(3), toValue(1)]),
@@ -86,78 +86,9 @@ fibo(i: Int): Int =
 
 [fibo(3), fibo(4), fibo(5)]""": toValue(@[toValue(2), toValue(3), toValue(5)]),
 
-    # closures: xxx (1) mutable variables should be reference
+    # closures, mutation only through references
     "a = 1; foo() = a; foo()": toValue(1),
     "a = 1; foo() = (b = 2; bar() = (c = 3; (a, b, c)); bar()); foo()": toValue(toArray([toValue(1), toValue(2), toValue(3)])),
-    """
-foo() =
-  x = 1
-  (getter: (() => x),
-  setter: ((y: Int) => x = y)) 
-a = foo()
-_ = a.setter.(3)
-a.getter.()""": toValue(3),
-    """
-foo() =
-  x = 1
-  (getter: (() => x),
-  setter: ((y: Int,) => x := y)) 
-a = foo()
-_ = a.setter.(3)
-_ = a.getter.()""": toValue(1),
-    """
-foo() =
-  x = 1
-  (getter: (
-    () => x),
-  setter: (
-    (y: Int) => x = y)) 
-static a = foo()
-_ = a.setter.(3)
-a.getter.()""": toValue(3),
-    """
-foo() =
-  x = 1
-  (getter: (() => x),
-  setter: ((y: Int) => x = y)) 
-static
-  a = foo()
-  _ = a.setter.(3)
-a.getter.()""": toValue(3),
-    # xxx not working, gives 1 for a
-    "1": when true: toValue(1) else: {"""
-foo() =
-  x = 1
-  (getter: (() => x),
-  setter: ((y: Int) => x = y)) 
-a = foo()
-_ = a.setter.(3)
-b = foo()
-[a.getter.(), b.getter.()]""": toValue(@[toValue(3), toValue(1)]),
-    """
-foo() =
-  x = 1
-  (getter: (
-    () => x),
-  setter: (
-    (y: Int) => x = y)) 
-static a = foo()
-_ = a.setter.(3)
-static b = foo()
-c = foo()
-[a.getter.(), b.getter.(), c.getter.()]""": toValue(@[toValue(3), toValue(1), toValue(1)]),
-    """
-foo() =
-  x = 1
-  (getter: (() => x),
-  setter: ((y: Int) => x = y)) 
-static
-  a = foo()
-  _ = a.setter.(3)
-  b = foo()
-c = foo()
-[a.getter.(), b.getter.(), c.getter.()]""": toValue(@[toValue(3), toValue(1), toValue(1)])
-    },
 
     "(true and false, true and true, false and true, false and false)": toValue(toArray([toValue(false), toValue(true), toValue(false), toValue(false)])),
     """
@@ -201,8 +132,6 @@ static
   a = foo()
   _ = a.setter.(3)
 a.getter.()""": toValue(3),
-    # XXX (1) not working yet (a gives 1), stack refreshing probably needs to copy references properly:
-    "1": when true: toValue(1) else: {
     """
 foo() =
   x = ref 1
@@ -235,8 +164,78 @@ static
   b = foo()
 c = foo()
 [a.getter.(), b.getter.(), c.getter.()]""": toValue(@[toValue(3), toValue(1), toValue(1)])
-    },
   }
+  when false:
+    # no longer allowed
+    tests.add {
+      """
+      foo() =
+        x = 1
+        (getter: (() => x),
+        setter: ((y: Int) => x = y)) 
+      a = foo()
+      _ = a.setter.(3)
+      a.getter.()""": toValue(3),
+      """
+      foo() =
+        x = 1
+        (getter: (() => x),
+        setter: ((y: Int,) => x := y)) 
+      a = foo()
+      _ = a.setter.(3)
+      _ = a.getter.()""": toValue(1),
+      """
+      foo() =
+        x = 1
+        (getter: (
+          () => x),
+        setter: (
+          (y: Int) => x = y)) 
+      static a = foo()
+      _ = a.setter.(3)
+      a.getter.()""": toValue(3),
+      """
+      foo() =
+        x = 1
+        (getter: (() => x),
+        setter: ((y: Int) => x = y)) 
+      static
+        a = foo()
+        _ = a.setter.(3)
+      a.getter.()""": toValue(3),
+      """
+      foo() =
+        x = 1
+        (getter: (() => x),
+        setter: ((y: Int) => x = y)) 
+      a = foo()
+      _ = a.setter.(3)
+      b = foo()
+      [a.getter.(), b.getter.()]""": toValue(@[toValue(3), toValue(1)]),
+      """
+      foo() =
+        x = 1
+        (getter: (
+          () => x),
+        setter: (
+          (y: Int) => x = y)) 
+      static a = foo()
+      _ = a.setter.(3)
+      static b = foo()
+      c = foo()
+      [a.getter.(), b.getter.(), c.getter.()]""": toValue(@[toValue(3), toValue(1), toValue(1)]),
+      """
+      foo() =
+        x = 1
+        (getter: (() => x),
+        setter: ((y: Int) => x = y)) 
+      static
+        a = foo()
+        _ = a.setter.(3)
+        b = foo()
+      c = foo()
+      [a.getter.(), b.getter.(), c.getter.()]""": toValue(@[toValue(3), toValue(1), toValue(1)])
+    }
   
   for inp, outp in tests.items:
     {.push warning[BareExcept]: off.}
@@ -277,13 +276,13 @@ module withGeneric:
   let T = Type(kind: tyParameter, parameter: newTypeParameter("T"))
   let f = define(result, "foo", funcType(ListTy[T], [T]))
   f.genericParams = @[T.parameter]
-  result.top.define(f)
+  result.define(f)
   let f2 = define(result, "foo", funcType(ListTy[Int32Ty], [Int32Ty]))
-  result.top.define(f2)
-  result.refreshStack()
-  result.stack.set f.stackIndex, toValue proc (args: openarray[Value]): Value =
+  result.define(f2)
+  result.context.refreshStack()
+  result.context.stack.set f.stackIndex, toValue proc (args: openarray[Value]): Value =
     result = toValue(@[args[0]])
-  result.stack.set f2.stackIndex, toValue proc (args: openarray[Value]): Value =
+  result.context.stack.set f2.stackIndex, toValue proc (args: openarray[Value]): Value =
     result = toValue(@[toValue(-args[0].int32Value)])
 
 test "generic":
@@ -299,17 +298,17 @@ module withGenericMeta:
     property(Meta, funcType(ListTy[T], [T]))
   ))
   f.genericParams = @[T.parameter]
-  result.top.define(f)
+  result.define(f)
   let f2 = define(result, "foo", funcType(StatementTy, [ScopeTy, StatementTy]).withProperties(
     property(Meta, funcType(ListTy[Int32Ty], [Int32Ty]))
   ))
-  result.top.define(f2)
-  result.refreshStack()
-  result.stack.set f.stackIndex, toValue proc (args: openarray[Value]): Value =
+  result.define(f2)
+  result.context.refreshStack()
+  result.context.stack.set f.stackIndex, toValue proc (args: openarray[Value]): Value =
     let scope = args[0].boxedValue.scopeValue
     result = toValue compile(scope, Expression(kind: Array,
       elements: @[args[1].boxedValue.expressionValue]), +AnyTy)
-  result.stack.set f2.stackIndex, toValue proc (args: openarray[Value]): Value =
+  result.context.stack.set f2.stackIndex, toValue proc (args: openarray[Value]): Value =
     result = toValue Statement(kind: skList,
       knownType: ListTy[Int32Ty],
       elements: @[Statement(kind: skUnaryInstruction,

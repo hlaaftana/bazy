@@ -89,7 +89,7 @@ proc unboxStripType*(x: FullValueObj | FullValue): Value =
     result.boxedValue = toRef x
 
 when false:
-  # XXX (1) this is probably important
+  # XXX this is probably important
   proc copy*(value: Value): Value =
     case value.kind
     of vkNone, vkInt64, vkBool, vkUint64, vkFloat64,

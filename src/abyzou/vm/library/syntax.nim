@@ -16,7 +16,7 @@ module syntax:
   # XXX (3) generic assignments or functions
   proc makeFn(scope: Scope, arguments: seq[Expression], body: Expression,
     name: string, returnBound: TypeBound, returnBoundSet: bool): Statement =
-    let context = scope.context.childContext()
+    let context = scope.childContext()
     let bodyScope = context.top
     var fnTypeArguments = Type(kind: tyTuple, elements: newSeq[Type](arguments.len))
     for i in 0 ..< arguments.len:
@@ -42,11 +42,15 @@ module syntax:
       TreeWalkFunction(stack: bodyScope.context.stack.shallowRefresh(), instruction: body.toInstruction))
     fun.boxedValue.type = toRef(fnType)
     if not v.isNil:
-      context.refreshStack()
+      scope.context.refreshStack()
       scope.context.stack.set(v.stackIndex, fun)
+    var captures: seq[tuple[index, valueIndex: int]]
+    for c, ci in context.captures:
+      captures.add((ci, context.origin.context.capture(c)))
     result = Statement(kind: skArmStack,
       knownType: fnType,
-      armStackFunction: constant(fun, fnType))
+      armStackFunction: constant(fun, fnType),
+      armStackCaptures: captures)
 
   templ "=>", 2:
     var lhs = args[0]
@@ -82,7 +86,7 @@ module syntax:
       let name = $lhs
       let value = compile(scope, rhs, bound)
       let v = scope.define(name, if typeSet: bound.boundType else: value.knownType)
-      result = toValue variableSet(v.shallowReference, value)
+      result = toValue variableSet(scope.context, v.shallowReference, value, source = lhs)
     of CallKinds:
       result = toValue makeFn(scope, lhs.arguments, rhs, $lhs.address, bound, typeSet)
     else: assert false, $lhs
@@ -102,11 +106,11 @@ module syntax:
       if (let a = scope.overloads(name, bound); a.len != 0):
         let v = a[0]
         let value = compile(scope, rhs, +v.type)
-        result = toValue variableSet(v, value)
+        result = toValue variableSet(scope.context, v, value, source = lhs)
       else:
         let value = compile(scope, rhs, bound)
         let v = scope.define(name, value.knownType)
-        result = toValue variableSet(v.shallowReference, value)
+        result = toValue variableSet(scope.context, v.shallowReference, value, source = lhs)
     of CallKinds:
       result = toValue makeFn(scope, lhs.arguments, rhs, $lhs.address, bound, typeSet)
     of Subscript:
