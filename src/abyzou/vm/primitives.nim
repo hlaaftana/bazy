@@ -422,7 +422,7 @@ type
     nameHash*: Hash
     knownType*: Type
     stackIndex*: int
-    scope*: Scope
+    scope* {.cursor.}: Scope
     genericParams*: seq[TypeParameter]
       # XXX (3) maybe make this a tuple type too with signature for named and default generic params
     lazyExpression*: Expression
