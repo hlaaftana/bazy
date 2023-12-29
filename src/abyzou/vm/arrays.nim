@@ -39,7 +39,7 @@ elif arrayImpl == "hybrid":
   import ../disabled/hybridarrays
   export hybridarrays
 elif arrayImpl == "ref":
-  import ../disabled/refarray
+  import ../util/refarray
   export refarray
 
 when arrayImpl != "ref":
