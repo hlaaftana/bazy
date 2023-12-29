@@ -1,7 +1,7 @@
 import
   std/tables,
   ../../language/[expressions, shortstring],
-  ../[primitives, compilation, typebasics, valueconstr, treewalk]
+  ../[primitives, compilation, typebasics, valueconstr]
 
 import common
 
@@ -37,13 +37,11 @@ module syntax:
     let body = bodyScope.compile(body, returnBound)
     if not v.isNil and not returnBoundSet:
       v.knownType.baseArguments[1] = body.knownType
-    bodyScope.context.refreshStack()
     var fun = toValue(
-      TreeWalkFunction(stack: bodyScope.context.stack.shallowRefresh(), instruction: body.toInstruction))
+      TreeWalkFunction(stack: bodyScope.context.makeStack(), instruction: body.toInstruction))
     fun.boxedValue.type = toRef(fnType)
     if not v.isNil:
-      scope.context.refreshStack()
-      scope.context.stack.set(v.stackIndex, fun)
+      scope.context.set(v, fun)
     var captures: seq[tuple[index, valueIndex: int]]
     for c, ci in context.captures:
       captures.add((ci, context.origin.context.capture(c)))

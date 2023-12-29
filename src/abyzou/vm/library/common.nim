@@ -1,7 +1,7 @@
 import
   std/tables,
   ../../language/expressions,
-  ../[primitives, compilation, typebasics, treewalk, guesstype]
+  ../[primitives, compilation, typebasics, guesstype]
 
 proc define*(scope: Scope, n: string, typ: Type): Variable =
   result = newVariable(n, typ)
@@ -10,8 +10,7 @@ proc define*(scope: Scope, n: string, typ: Type): Variable =
 proc define*(scope: Scope, n: string, typ: Type, x: sink Value) =
   let variable = define(scope, n, typ)
   if x.kind in boxedValueKinds: x.boxedValue.type = toRef(typ)
-  scope.context.refreshStack()
-  scope.context.stack.set(variable.stackIndex, x)
+  scope.context.set(variable, x)
 
 proc define*(context: Context, n: string, typ: Type): Variable {.inline.} =
   context.top.define(n, typ)
@@ -19,8 +18,7 @@ proc define*(context: Context, n: string, typ: Type): Variable {.inline.} =
 proc define*(context: Context, n: string, typ: Type, x: sink Value) =
   let variable = define(context, n, typ)
   if x.kind in boxedValueKinds: x.boxedValue.type = toRef(typ)
-  context.refreshStack()
-  context.stack.set(variable.stackIndex, x)
+  context.set(variable, x)
 
 proc templType*(arity: int): Type {.inline.} =
   var args = newSeq[Type](arity + 1)

@@ -426,15 +426,18 @@ type
     lazyExpression*: Expression
     evaluated*: bool
 
+  StackSlot* = object
+    kind*: VariableReferenceKind
+    variable*: Variable
+    value*: Value
+
   Context* = ref object
     ## current module or function
     origin*: Scope
       ## context closure is defined in
     captures*: Table[Variable, int]
-    stack*: Stack
-    stackSize*: int
     top*: Scope
-    stackSlots*: seq[tuple[kind: VariableReferenceKind, variable: Variable]] ## should not shrink
+    stackSlots*: seq[StackSlot] ## should not shrink
   
   Scope* = ref object
     ## restricted subset of variables in a context

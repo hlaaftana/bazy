@@ -178,7 +178,7 @@ c = foo()
       raise
     {.pop.}
 
-import abyzou/vm/[library/common, treewalk]
+import abyzou/vm/[library/common]
 
 module withVarargsFn:
   define "max", funcTypeWithVarargs(Int32Ty, [], Int32Ty), (doFn do:
@@ -208,10 +208,9 @@ module withGeneric:
   result.define(f)
   let f2 = define(result, "foo", funcType(ListTy[Int32Ty], [Int32Ty]))
   result.define(f2)
-  result.context.refreshStack()
-  result.context.stack.set f.stackIndex, toValue proc (args: openarray[Value]): Value =
+  result.context.set f, toValue proc (args: openarray[Value]): Value =
     result = toValue(@[args[0]])
-  result.context.stack.set f2.stackIndex, toValue proc (args: openarray[Value]): Value =
+  result.context.set f2, toValue proc (args: openarray[Value]): Value =
     result = toValue(@[toValue(-args[0].int32Value)])
 
 test "generic":
@@ -232,12 +231,11 @@ module withGenericMeta:
     property(Meta, funcType(ListTy[Int32Ty], [Int32Ty]))
   ))
   result.define(f2)
-  result.context.refreshStack()
-  result.context.stack.set f.stackIndex, toValue proc (args: openarray[Value]): Value =
+  result.context.set f, toValue proc (args: openarray[Value]): Value =
     let scope = args[0].boxedValue.scopeValue
     result = toValue compile(scope, Expression(kind: Array,
       elements: @[args[1].boxedValue.expressionValue]), +AnyTy)
-  result.context.stack.set f2.stackIndex, toValue proc (args: openarray[Value]): Value =
+  result.context.set f2, toValue proc (args: openarray[Value]): Value =
     result = toValue Statement(kind: skList,
       knownType: ListTy[Int32Ty],
       elements: @[Statement(kind: skUnaryInstruction,

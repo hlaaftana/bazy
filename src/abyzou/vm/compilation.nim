@@ -11,7 +11,7 @@ proc newVariable*(name: string, knownType: Type = NoType): Variable =
   Variable(id: newVariableId(), name: name, nameHash: name.hash, knownType: knownType)
 
 proc newContext*(parent: Scope = nil, imports: seq[Scope] = @[]): Context =
-  result = Context(stack: Stack(), origin: parent)
+  result = Context(origin: parent)
   result.top = Scope(context: result, imports: imports)
 
 proc childContext*(scope: Scope): Context =
@@ -20,31 +20,34 @@ proc childContext*(scope: Scope): Context =
 proc childScope*(scope: Scope): Scope =
   result = Scope(parent: scope, context: scope.context)
 
-proc refreshStack*(context: Context) =
-  ## grow static stack if new variables have been added
-  ## recursively do the same for imports
-  ## should be called after full compilation
-  if context.origin != nil:
-    context.origin.context.refreshStack()
-  if context.stackSize != context.stack.stack.len:
-    var newStack = newArray[Value](context.stackSize)
-    for i in 0 ..< context.stack.stack.len:
-      newStack[i] = context.stack.stack[i]
-    context.stack.stack = newStack
-  for i, slot in context.stackSlots:
-    if slot.kind == Capture:
-      context.stack.stack[i] = slot.variable.scope.context.stack.stack[slot.variable.stackIndex]
+proc makeStack*(context: Context): Stack =
+  result = Stack(stack: newArray[Value](context.stackSlots.len))
+  for i in 0 ..< context.stackSlots.len:
+    result.stack[i] = context.stackSlots[i].value
+
+proc fillStack(context: Context, stack: Stack) =
+  for i in 0 ..< stack.stack.len:
+    context.stackSlots[i].value = stack.stack[i]
+
+template withStack*(context: Context, body) =
+  let stack {.inject.} = makeStack(context)
+  body
+  fillStack(context, stack)
 
 proc evaluateStatic*(context: Context, instr: Instruction): Value =
-  context.refreshStack()
-  instr.evaluate(context.stack)
+  context.withStack:
+    result = instr.evaluate(stack)
 
 proc define*(scope: Scope, variable: Variable) =
   variable.scope = scope
-  variable.stackIndex = scope.context.stackSize
-  inc scope.context.stackSize
-  scope.context.stackSlots.add((Local, variable))
+  variable.stackIndex = scope.context.stackSlots.len
+  scope.context.stackSlots.add(
+    StackSlot(kind: Local, variable: variable))
   scope.variables.add(variable)
+
+proc set*(context: Context, variable: Variable, value: sink Value) =
+  assert variable.scope.context == context
+  context.stackSlots[variable.stackIndex].value = value
 
 proc toInstruction*(st: Statement): Instruction =
   template map[T](s: T): T =
@@ -137,10 +140,10 @@ proc evaluateStatic*(scope: Scope, ex: Expression, bound: TypeBound = +AnyTy): V
   scope.context.evaluateStatic(scope.compile(ex, bound).toInstruction)
 
 proc setStatic*(variable: Variable, expression: Expression) =
-  variable.scope.context.refreshStack()
   let value = variable.scope.compile(expression, +variable.knownType)
   variable.knownType = value.knownType
-  variable.scope.context.stack.set(variable.stackIndex, value.toInstruction.evaluate(variable.scope.context.stack))
+  variable.scope.context.withStack:
+    stack.set(variable.stackIndex, value.toInstruction.evaluate(stack))
   variable.evaluated = true
 
 proc getType*(variable: Variable): Type =
@@ -151,11 +154,12 @@ proc getType*(variable: Variable): Type =
 proc shallowReference*(v: Variable, `type`: Type = v.getType): VariableReference {.inline.} =
   VariableReference(variable: v, type: `type`, kind: Local)
 
-proc symbols*(scope: Scope, name: string, bound: TypeBound, doOrigin = true, doImports = true, nameHash = name.hash): seq[VariableReference] =
+proc symbols*(scope: Scope, name: string, bound: TypeBound,
+  nameHash = name.hash): seq[VariableReference] =
   if scope.isNil: return
   if not scope.parent.isNil:
     result.add(symbols(scope.parent, name, bound, nameHash = nameHash))
-  elif not scope.context.origin.isNil and doOrigin:
+  elif not scope.context.origin.isNil:
     for a in symbols(scope.context.origin, name, bound, nameHash = nameHash):
       let b =
         if a.kind == Constant:
@@ -164,12 +168,11 @@ proc symbols*(scope: Scope, name: string, bound: TypeBound, doOrigin = true, doI
           VariableReference(variable: a.variable, type: a.type,
             kind: Capture, captureIndex: -1)
       result.add(b)
-  if doImports:
-    for i, im in scope.imports:
-      let addrs = symbols(im, name, bound, nameHash = nameHash)
-      for a in addrs:
-        result.add(VariableReference(variable: a.variable, type: a.type,
-          kind: Constant))
+  for i, im in scope.imports:
+    let addrs = symbols(im, name, bound, nameHash = nameHash)
+    for a in addrs:
+      result.add(VariableReference(variable: a.variable, type: a.type,
+        kind: Constant))
   for i, v in scope.variables:
     if (v.nameHash == 0 or v.nameHash == nameHash) and name == v.name:
       var t = v.getType
@@ -187,7 +190,7 @@ proc symbols*(scope: Scope, name: string, bound: TypeBound, doOrigin = true, doI
 
 import algorithm
 
-proc overloads*(scope: Scope | Context, name: string, bound: TypeBound): seq[VariableReference] =
+proc overloads*(scope: Scope, name: string, bound: TypeBound): seq[VariableReference] =
   result = symbols(scope, name, bound)
   # sort must be stable to preserve definition/import order
   result.sort(
@@ -202,16 +205,17 @@ proc capture*(c: Context, v: Variable): int =
   else:
     if not c.origin.isNil:
       discard c.origin.context.capture(v)
-    result = c.captures.mgetOrPut(v, c.stackSize)
-    c.stackSlots.add((Capture, v))
-    inc c.stackSize
+    result = c.captures.mgetOrPut(v, c.stackSlots.len)
+    c.stackSlots.add(
+      StackSlot(kind: Capture, variable: v,
+        value: v.scope.context.stackSlots[v.stackIndex].value))
 
 proc variableGet*(c: Context, r: VariableReference): Statement =
   let t = r.type
   case r.kind
   of Constant:
     result = Statement(kind: skConstant,
-      constant: r.variable.scope.context.stack.stack[r.variable.stackIndex],
+      constant: r.variable.scope.context.stackSlots[r.variable.stackIndex].value,
       knownType: t)
   of Local:
     result = Statement(kind: skVariableGet,
@@ -659,8 +663,7 @@ type Program* = TreeWalkFunction
 proc compile*(ex: Expression, imports: seq[Scope], bound: TypeBound = +AnyTy): Program =
   var context = newContext(imports = imports)
   result.instruction = compile(context.top, ex, bound).toInstruction
-  context.refreshStack()
-  result.stack = context.stack
+  result.stack = makeStack(context)
 
 proc run*(program: Program, effectHandler: EffectHandler = nil): Value =
   evaluate(program.instruction, program.stack, effectHandler)

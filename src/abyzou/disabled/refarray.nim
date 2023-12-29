@@ -10,7 +10,7 @@ template uninitArr*(arr, L): untyped =
   arr.impl.length = L
 
 when false and (NimMajor, NimMinor) >= (2, 0):
-  # this doesn't work:
+  # XXX doesn't work
   proc `=wasMoved`*[T](arr: var ArrayObj[T]) =
     arr.length = 0
   proc `=destroy`*[T](arr: ArrayObj[T]) =
@@ -144,4 +144,5 @@ when isMainModule:
   proc tree(arr: varargs[Foo]): Foo =
     Foo(atom: false, node: toArray(@arr))
   proc leaf(x: int): Foo = Foo(atom: true, leaf: x)
-  echo tree(leaf(1), tree(leaf(2), tree(leaf(3), tree(leaf(4), tree(leaf(5))))))
+  let x = tree(leaf(1), tree(leaf(2), tree(leaf(3), tree(leaf(4), tree(leaf(5))))))
+  echo x

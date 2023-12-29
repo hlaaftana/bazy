@@ -1,5 +1,5 @@
 import
-  ../[primitives, compilation, valueconstr, typebasics, treewalk]
+  ../[primitives, compilation, valueconstr, typebasics]
 
 import common
 
@@ -16,14 +16,13 @@ module collections:
     let upd = define(result, "update", funcType(NoneTy, [ReferenceTy[T], T]))
     upd.genericParams = @[T.parameter]
     result.define(upd)
-    result.context.refreshStack()
-    result.context.stack.set rf.stackIndex, toValue proc (args: openarray[Value]): Value =
+    result.context.set rf, toValue proc (args: openarray[Value]): Value =
       result = Value(kind: vkReference)
       new(result.referenceValue.realRef)
       result.referenceValue.realRef[] = args[0].toFullValueObj
-    result.context.stack.set urf.stackIndex, toValue proc (args: openarray[Value]): Value =
+    result.context.set urf, toValue proc (args: openarray[Value]): Value =
       args[0].referenceValue.unref.toSmallValue
-    result.context.stack.set upd.stackIndex, toValue proc (args: openarray[Value]): Value =
+    result.context.set upd, toValue proc (args: openarray[Value]): Value =
       args[0].referenceValue.realRef[] = args[1].toFullValueObj
   define ".[]", funcType(StatementTy, [ScopeTy, StatementTy, StatementTy]).withProperties(
     property(Meta, funcType(AnyTy, [Type(kind: tyBase, typeBase: TupleTy), Int32Ty]))
