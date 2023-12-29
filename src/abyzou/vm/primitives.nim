@@ -19,8 +19,6 @@ template unref*[T](x: ref T): untyped = x[]
 template unref*[T](x: Box[T]): untyped = x.unbox
 template unref*[T](x: Reference[T]): untyped = (ref T)(x)[]
 template unref*[T](x: T): untyped = x
-when Array[int] is ref:
-  template unref*[T](x: Array[T]): untyped = x
 template realRef*[T](x: Reference[T]): ref T = (ref T)(x)
 
 # type system exists for both static and runtime dispatch

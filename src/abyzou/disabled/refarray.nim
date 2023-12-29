@@ -2,61 +2,70 @@ type
   ArrayObj[T] = object
     length: int
     data: UncheckedArray[T]
-  Array*[T] = ref ArrayObj[T]
+  Array*[T] = object
+    impl: ref ArrayObj[T]
 
 template uninitArr*(arr, L): untyped =
-  unsafeNew(arr, sizeof(arr.length) + L * sizeof(T))
-  arr.length = L
+  unsafeNew(arr.impl, sizeof(arr.impl.length) + L * sizeof(T))
+  arr.impl.length = L
 
-proc `=destroy`*[T](arr: var ArrayObj[T]) =
-  arr.length = 0
-  for i in 0 ..< arr.length:
-    {.cast(raises: []).}:
-      `=destroy`(arr.data[i])
-
-#proc `=copy`*[T](a: var ArrayObj[T], b: ArrayObj[T]) =
-#  let L = b.length
-#  a.length = L
-#  a.data = cast[typeof(a.data)](alloc(L * sizeof(T)))
-#  for i in 0 ..< L:
-#    a.data[i] = b.data[i]
+when false and (NimMajor, NimMinor) >= (2, 0):
+  # this doesn't work:
+  proc `=wasMoved`*[T](arr: var ArrayObj[T]) =
+    arr.length = 0
+  proc `=destroy`*[T](arr: ArrayObj[T]) =
+    for i in 0 ..< arr.length:
+      {.cast(raises: []).}:
+        `=destroy`(addr(arr.data[i])[])
+else:
+  {.warning[Deprecated]: off.}
+  proc `=destroy`*[T](arr: var ArrayObj[T]) =
+    for i in 0 ..< arr.length:
+      {.cast(raises: []).}:
+        `=destroy`(arr.data[i])
+    arr.length = 0
 
 proc `=trace`*[T](arr: var ArrayObj[T]; env: pointer) =
   for i in 0 ..< arr.length:
     `=trace`(arr.data[i], env)
 
+proc `=trace`*[T](arr: var Array[T]; env: pointer) =
+  if not arr.impl.isNil:
+    for i in 0 ..< arr.impl.length:
+      `=trace`(arr.impl.data[i], env)
+
 proc len*[T](x: Array[T]): int {.inline.} =
-  if x.isNil: 0
-  else: x.length
+  if x.impl.isNil: 0
+  else: x.impl.length
 
 proc `[]`*[T](x: Array[T], i: int): lent T {.inline.} =
-  x.data[i]
+  x.impl.data[i]
 
 proc `[]`*[T](x: var Array[T], i: int): var T {.inline.} =
-  x.data[i]
+  x.impl.data[i]
 
 proc `[]=`*[T](x: var Array[T], i: int, val: sink T) {.inline.} =
-  x.data[i] = val
+  x.impl.data[i] = val
 
 iterator items*[T](x: Array[T]): T =
   let L = x.len
   for i in 0 ..< L:
-    yield x.data[i]
+    yield x.impl.data[i]
 
 iterator mitems*[T](x: var Array[T]): var T =
   let L = x.len
   for i in 0 ..< L:
-    yield x.data[i]
+    yield x.impl.data[i]
 
 iterator pairs*[T](x: Array[T]): (int, T) =
   let L = x.len
   for i in 0 ..< L:
-    yield (i, x.data[i])
+    yield (i, x.impl.data[i])
 
 iterator mpairs*[T](x: var Array[T]): (int, var T) =
   let L = x.len
   for i in 0 ..< L:
-    yield (i, x.data[i])
+    yield (i, x.impl.data[i])
 
 proc newArrayUninitialized*[T](length: int): Array[T] =
   uninitArr result, length
@@ -64,7 +73,7 @@ proc newArrayUninitialized*[T](length: int): Array[T] =
 proc newArray*[T](length: int): Array[T] =
   uninitArr result, length
   for i in 0 ..< length:
-    result.data[i] = default(T)
+    result.impl.data[i] = default(T)
 
 proc toArray*[T](arr: openarray[T]): Array[T] =
   result = newArrayUninitialized[T](arr.len)
@@ -72,7 +81,7 @@ proc toArray*[T](arr: openarray[T]): Array[T] =
     result[i] = arr[i]
 
 template toOpenArray*[T](x: Array[T], first, last: int): auto =
-  toOpenArray(addr x.data, first, last)
+  toOpenArray(addr x.impl.data, first, last)
 
 proc `$`*[T](x: Array[T]): string =
   result = "Array("
