@@ -1,34 +1,33 @@
 type
-  Array*[T] = object
+  ArrayObj[T] = object
     length: int
-    data: ptr UncheckedArray[T]
+    data: UncheckedArray[T]
+  Array*[T] = ref ArrayObj[T]
 
-template initarr*(arr, L, allocProc): untyped =
+template uninitArr*(arr, L): untyped =
+  unsafeNew(arr, sizeof(arr.length) + L * sizeof(T))
   arr.length = L
-  arr.data = cast[typeof(arr.data)](allocProc(L * sizeof(T)))
 
-when false: # codebase doesn't work well with
-  proc `=destroy`*[T](arr: var Array[T]) =
-    if not arr.data.isNil:
-      for i in 0 ..< arr.length:
-        `=destroy`(arr.data[i])
-      dealloc(arr.data)
-      arr.data = nil
+proc `=destroy`*[T](arr: var ArrayObj[T]) =
+  arr.length = 0
+  for i in 0 ..< arr.length:
+    {.cast(raises: []).}:
+      `=destroy`(arr.data[i])
 
-  proc `=copy`*[T](a: var Array[T], b: Array[T]) =
-    let L = b.length
-    a.length = L
-    if not b.data.isNil:
-      a.data = cast[typeof(a.data)](alloc(L * sizeof(T)))
-      for i in 0 ..< L:
-        a.data[i] = b.data[i]
+#proc `=copy`*[T](a: var ArrayObj[T], b: ArrayObj[T]) =
+#  let L = b.length
+#  a.length = L
+#  a.data = cast[typeof(a.data)](alloc(L * sizeof(T)))
+#  for i in 0 ..< L:
+#    a.data[i] = b.data[i]
 
-proc `=trace`*[T](arr: var Array[T]; env: pointer) =
+proc `=trace`*[T](arr: var ArrayObj[T]; env: pointer) =
   for i in 0 ..< arr.length:
     `=trace`(arr.data[i], env)
 
 proc len*[T](x: Array[T]): int {.inline.} =
-  x.length
+  if x.isNil: 0
+  else: x.length
 
 proc `[]`*[T](x: Array[T], i: int): lent T {.inline.} =
   x.data[i]
@@ -60,10 +59,12 @@ iterator mpairs*[T](x: var Array[T]): (int, var T) =
     yield (i, x.data[i])
 
 proc newArrayUninitialized*[T](length: int): Array[T] =
-  initarr result, length, alloc
+  uninitArr result, length
 
 proc newArray*[T](length: int): Array[T] =
-  initarr result, length, alloc0
+  uninitArr result, length
+  for i in 0 ..< length:
+    result.data[i] = default(T)
 
 proc toArray*[T](arr: openarray[T]): Array[T] =
   result = newArrayUninitialized[T](arr.len)
@@ -71,7 +72,7 @@ proc toArray*[T](arr: openarray[T]): Array[T] =
     result[i] = arr[i]
 
 template toOpenArray*[T](x: Array[T], first, last: int): auto =
-  toOpenArray(x.data, first, last)
+  toOpenArray(addr x.data, first, last)
 
 proc `$`*[T](x: Array[T]): string =
   result = "Array("

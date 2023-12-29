@@ -38,22 +38,29 @@ elif arrayImpl == "seq":
 elif arrayImpl == "hybrid":
   import ../disabled/hybridarrays
   export hybridarrays
+elif arrayImpl == "ref":
+  import ../disabled/refarray
+  export refarray
 
-type ArrayRef*[T] = ref Array[T]
-template toArrayRef*(foo): ArrayRef =
-  var res = new(typeof(toArray(foo)))
-  res[] = toArray(foo)
-  res
+when arrayImpl != "ref":
+  type ArrayRef*[T] = ref Array[T]
+  template toArrayRef*(foo): ArrayRef =
+    var res = new(typeof(toArray(foo)))
+    res[] = toArray(foo)
+    res
 
-proc `==`*[T](a, b: ArrayRef[T]): bool {.inline.} =
-  mixin `==`
-  system.`==`(a, b) or (not a.isNil and not b.isNil and a[] == b[])
+  proc `==`*[T](a, b: ArrayRef[T]): bool {.inline.} =
+    mixin `==`
+    system.`==`(a, b) or (not a.isNil and not b.isNil and a[] == b[])
 
-import hashes
+  import hashes
 
-proc hash*[T](x: ArrayRef[T]): Hash =
-  mixin hash
-  if x.isNil:
-    hash(pointer nil)
-  else:
-    hash(x[])
+  proc hash*[T](x: ArrayRef[T]): Hash =
+    mixin hash
+    if x.isNil:
+      hash(pointer nil)
+    else:
+      hash(x[])
+else:
+  type ArrayRef*[T] = Array[T]
+  template toArrayRef*(foo): ArrayRef = toArray(foo)
