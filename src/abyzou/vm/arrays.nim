@@ -1,16 +1,10 @@
 import ../defines
 
-when useArrays:
+when arrayImpl == "custom":
   # XXX (6) maybe optimize and use ref array[3, T] for small sizes and seq for bigger sizes
   import ../disabled/arrayimpl
   export ../disabled/arrayimpl
-  type ArrayRef*[T] = ref Array[T]
-  template toArrayRef*(foo): ArrayRef =
-    var r: ref typeof(toArray(foo))
-    new(r)
-    r[] = toArray(foo)
-    r
-else:
+elif arrayImpl == "seq":
   template distinctSeq(name) {.dirty.} =
     type `name`*[T] = distinct seq[T]
 
@@ -41,12 +35,15 @@ else:
       `==`(toSeq(a), toSeq(b))
 
   distinctSeq Array
+elif arrayImpl == "hybrid":
+  import ../disabled/hybridarrays
+  export hybridarrays
 
-  type ArrayRef*[T] = ref Array[T]
-  template toArrayRef*(foo): ArrayRef =
-    var res = new(typeof(toArray(foo)))
-    res[] = toArray(foo)
-    res
+type ArrayRef*[T] = ref Array[T]
+template toArrayRef*(foo): ArrayRef =
+  var res = new(typeof(toArray(foo)))
+  res[] = toArray(foo)
+  res
 
 proc `==`*[T](a, b: ArrayRef[T]): bool {.inline.} =
   mixin `==`

@@ -7,4 +7,4 @@ const
   doLineColumn* = block: (const abyzouDoLineColumn {.booldefine.} = true; abyzouDoLineColumn)
   refToken* = block: (const abyzouRefToken {.booldefine.} = defined(js); abyzouRefToken)
     ## make token type a reference rather than a value type
-  useArrays* = block: (const abyzouUseArrays {.booldefine.} = false; abyzouUseArrays)
+  arrayImpl* = block: (const abyzouArrayImpl {.strdefine.} = "seq"; abyzouArrayImpl)

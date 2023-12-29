@@ -228,8 +228,6 @@ type
     case kind*: TypeKind
     of tyNoType, tyAny, tyNone: discard
     of tyCompound:
-      # XXX (6) seq might cause performance drop, add tySingleCompound, tyDoubleCompound etc
-      # or optimize Array like that and use it
       base*: TypeBase
       baseArguments*: seq[Type]
     of tyTuple:
