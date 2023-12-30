@@ -632,7 +632,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           arguments: @[ex.left, ex.right]))
   of CallKinds: result = compileCall(scope, ex, bound)
   of Subscript:
-    # XXX specialize for overloaded variables
+    # XXX specialize for generics
     result = forward(Expression(kind: PathCall,
       address: newSymbolExpression(short".[]"),
       arguments: @[ex.address] & ex.arguments))

@@ -1,9 +1,9 @@
-import ./[primitives, arrays], std/tables
+import ./[primitives, arrays, valueconstr, typebasics], std/tables
 
-# XXX make runner
+# XXX (1) make runner
 
 # xxx do some kind of register last use analysis to merge some registers
-# xxx constant pool can be long string of serialized values,
+# xxx (1) constant pool can be long string of serialized values,
 # then they are deserialized and cached into registers when loaded
 
 type
@@ -19,7 +19,7 @@ type
     SetRegisterRegister # mov
     NullaryCall, UnaryCall, BinaryCall, TernaryCall
     TupleCall
-    TryDispatch
+    TryDispatch, ArmType
     ArmStack, RefreshStack
     JumpPoint
     IfTrueJump, IfFalseJump
@@ -57,6 +57,8 @@ type
       tupcall*: tuple[res, callee, args: Register]
     of TryDispatch:
       tdisp*: tuple[res, callee, args: Register, successPos: JumpLocation]
+    of ArmType:
+      armt*: tuple[val, typ: Register]
     of ArmStack:
       arm*: tuple[fun: Register, ind: int32, val: Register]
     of RefreshStack:
@@ -94,13 +96,13 @@ type
   SpecialRegister = enum
     Void
 
-  BytecodeContext* = ref object
+  LinearContext* = ref object
     instructions*: seq[LinearInstruction]
     byteCount*: int
     registerCount*: int
     jumpLocationCount*: int
     jumpLocationByteIndex*: seq[int]
-    constants*: Table[Value, int] # XXX serialize values
+    constants*: Table[Value, Constant] # XXX (1) serialize values
     variableRegisters*: seq[Register]
     usedSpecialRegisters: set[SpecialRegister]
     specialRegisters: array[SpecialRegister, Register]
@@ -187,6 +189,8 @@ proc addBytes*(bytes: var openarray[byte], i: var int, instr: LinearInstruction)
     add instr.tupcall
   of TryDispatch:
     add instr.tdisp
+  of ArmType:
+    add instr.armt
   of ArmStack:
     add instr.arm
   of RefreshStack:
@@ -221,20 +225,26 @@ proc addBytes*(bytes: var openarray[byte], i: var int, instr: LinearInstruction)
   of NegInt32, NegFloat32:
     add instr.unary
 
-proc add(fn: BytecodeContext, instr: LinearInstruction) =
+proc toBytes*(fn: LinearContext): seq[byte] =
+  result = newSeq[byte](fn.byteCount)
+  var i = 0
+  for instr in fn.instructions:
+    addBytes(result, i, instr)
+
+proc add(fn: LinearContext, instr: LinearInstruction) =
   fn.instructions.add(instr)
   fn.byteCount += instr.byteCount
   if instr.kind == JumpPoint:
     fn.jumpLocationByteIndex.setLen(fn.jumpLocationCount)
     fn.jumpLocationByteIndex[instr.jpt.loc.int] = fn.byteCount
 
-# xxx add way to read instruction from bytes
+# XXX (1) add way to read instruction from bytes (probably in runner)
 
-proc newRegister(fn: BytecodeContext): Register =
+proc newRegister(fn: LinearContext): Register =
   result = fn.registerCount.Register
   inc fn.registerCount
 
-proc getRegister(fn: BytecodeContext, sr: SpecialRegister): Register =
+proc getRegister(fn: LinearContext, sr: SpecialRegister): Register =
   if sr in fn.usedSpecialRegisters:
     result = fn.specialRegisters[sr]
   else:
@@ -242,17 +252,17 @@ proc getRegister(fn: BytecodeContext, sr: SpecialRegister): Register =
     fn.specialRegisters[sr] = result
     fn.usedSpecialRegisters.incl(sr)
 
-proc newJumpLocation(fn: BytecodeContext): JumpLocation =
+proc newJumpLocation(fn: LinearContext): JumpLocation =
   result = fn.jumpLocationCount.JumpLocation
   inc fn.jumpLocationCount
 
-proc jumpPoint(fn: BytecodeContext, loc: JumpLocation) =
+proc jumpPoint(fn: LinearContext, loc: JumpLocation) =
   fn.add(LinearInstruction(kind: JumpPoint, jpt: (loc: loc)))
 
-proc getConstant(fn: BytecodeContext, constant: Value): Constant =
-  result = Constant(fn.constants.mgetOrPut(constant, fn.constants.len))
+proc getConstant(fn: LinearContext, constant: Value): Constant =
+  result = fn.constants.mgetOrPut(constant, Constant(fn.constants.len))
 
-proc resultRegister(fn: BytecodeContext, res: var Result): Register =
+proc resultRegister(fn: LinearContext, res: var Result): Register =
   case res.kind
   of SetRegister: result = res.register
   of Value:
@@ -260,7 +270,7 @@ proc resultRegister(fn: BytecodeContext, res: var Result): Register =
     res.value = result
   of Statement: result = fn.getRegister(Void)
 
-proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: Statement) =
+proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Statement) =
   type Instr = LinearInstruction
   template value(s: Statement): Register =
     var res = Result(kind: Value)
@@ -274,12 +284,12 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
   of skNone:
     case resultKind
     of SetRegister:
-      fn.add(Instr(kind: SetRegisterRegister, srr:
-        (res: result.register, val: fn.getConstant(Value(kind: vkNone)))))
+      fn.add(Instr(kind: LoadConstant, lc:
+        (res: result.register, constant: fn.getConstant(Value(kind: vkNone)))))
     of Value:
       result.value = fn.newRegister()
-      fn.add(Instr(kind: SetRegisterRegister, srr:
-        (res: result.value, val: fn.getConstant(Value(kind: vkNone)))))
+      fn.add(Instr(kind: LoadConstant, lc:
+        (res: result.value, constant: fn.getConstant(Value(kind: vkNone)))))
     of Statement: discard # nothing
   of skConstant:
     fn.add(Instr(kind: LoadConstant, lc: (res: resultRegister(fn, result),
@@ -316,9 +326,15 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
     for i, a in s.dispatchArguments:
       fn.add(Instr(kind: SetConstIndex, sci:
         (coll: args, ind: i.int32, val: value(a))))
-    for _, d in s.dispatchees.items:
-      # XXX (4) types are ignored here because they should be in the boxed function values
-      # this is not terrible, but check that it's enforced everywhere
+    let tReg = fn.newRegister()
+    for t, d in s.dispatchees.items:
+      # XXX make sure this type arming works
+      let ty = funcType(AnyTy, t)
+      fn.add(Instr(kind: LoadConstant, lc:
+        (res: tReg, constant: fn.getConstant(toValue(ty)))))
+      let fun = value(d)
+      fn.add(Instr(kind: ArmType, armt:
+        (val: fun, typ: tReg)))
       fn.add(Instr(kind: TryDispatch, tdisp:
         (res: res, callee: value(d), args: args, successPos: successPos)))
     fn.jumpPoint(successPos)
@@ -461,11 +477,18 @@ proc linearize*(context: Context, fn: BytecodeContext, result: var Result, s: St
     fn.add(Instr(kind: binaryInstructions[s.binaryInstructionKind], binary:
       (res: res, arg1: value(s.binary1), arg2: value(s.binary2))))
 
-proc linear*(context: Context, body: Statement): BytecodeContext =
-  var stack = BytecodeContext()
-  stack.variableRegisters.newSeq(context.stackSlots.len)
-  for vr in stack.variableRegisters.mitems:
-    vr = stack.newRegister()
+proc createLinearContext*(context: Context): LinearContext =
+  result = LinearContext()
+  result.variableRegisters.newSeq(context.stackSlots.len)
+  for i, vr in result.variableRegisters.mpairs:
+    vr = result.newRegister()
+    when false: # this is bad for arming captures later
+      let defaultValue = context.stackSlots[i].value
+      if defaultValue.kind != vkNone:
+        result.add(LinearInstruction(kind: LoadConstant, lc:
+          (res: vr, constant: result.getConstant(defaultValue))))
+
+proc linear*(context: Context, body: Statement): LinearContext =
+  result = createLinearContext(context)
   var res = Result(kind: Value)
-  linearize(context, stack, res, body)
-  result = stack
+  linearize(context, result, res, body)

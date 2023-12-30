@@ -45,7 +45,8 @@ type
     options*: TokenizerOptions
     str*: string
       # XXX (5) convert to abstraction of resetPos, nextRune, hasRune
-      # either proc pointers or generic type overloads
+      # maybe just have 1 proc pointer that loads a buffer of
+      # some nonzero size at a time then operate on that buffer
     lastKind*: TokenKind
     queue*: seq[Token]
     queuePos*: int

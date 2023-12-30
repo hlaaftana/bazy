@@ -1,7 +1,6 @@
 import ../defines
 
 when arrayImpl == "custom":
-  # XXX (6) maybe optimize and use ref array[3, T] for small sizes and seq for bigger sizes
   import ../disabled/arrayimpl
   export ../disabled/arrayimpl
 elif arrayImpl == "seq":

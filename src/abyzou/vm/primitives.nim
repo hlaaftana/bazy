@@ -267,6 +267,14 @@ type
       ## persistent stack
       ## gets shallow copied when function is run
     instruction*: Instruction
+  
+  LinearFunction* = object
+    # XXX (1) incorporate into Value
+    initialStack*: Stack # XXX maybe remove and just have constants but we need to arm captures
+    registerCount*: int
+    constants*: Array[Value]
+    jumpLocations*: Array[int]
+    instructions*: seq[byte]
 
   InstructionKind* = enum
     NoOp
