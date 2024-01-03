@@ -11,19 +11,23 @@ template uninitArr*(arr, L): untyped =
 
 when false and (NimMajor, NimMinor) >= (2, 0):
   # XXX doesn't work
-  proc `=wasMoved`*[T](arr: var ArrayObj[T]) =
-    arr.length = 0
   proc `=destroy`*[T](arr: ArrayObj[T]) =
     for i in 0 ..< arr.length:
       {.cast(raises: []).}:
-        `=destroy`(addr(arr.data[i])[])
+        when false:
+          `=destroy`(addr(arr.data[i])[])
+        else:
+          when compiles(`=destroy`(arr.data[i])):
+            `=destroy`(arr.data[i])
 else:
   {.warning[Deprecated]: off.}
   proc `=destroy`*[T](arr: var ArrayObj[T]) =
     for i in 0 ..< arr.length:
       {.cast(raises: []).}:
         `=destroy`(arr.data[i])
-    arr.length = 0
+
+proc `=wasMoved`*[T](arr: var ArrayObj[T]) {.inline.} =
+  arr.length = 0
 
 proc `=trace`*[T](arr: var ArrayObj[T]; env: pointer) =
   for i in 0 ..< arr.length:
@@ -119,7 +123,7 @@ proc hash*[T](a: Array[T]): Hash =
   result = !$ result
 
 when isMainModule:
-  when false:
+  when true:
     type Foo = ref object
       x: int
     proc foo(x: int): Foo = Foo(x: x)
@@ -134,15 +138,16 @@ when isMainModule:
     block:
       echo f
   
-  type Foo = object
-    case atom: bool
-    of false:
-      node: Array[Foo]
-    of true:
-      leaf: int
-  
-  proc tree(arr: varargs[Foo]): Foo =
-    Foo(atom: false, node: toArray(@arr))
-  proc leaf(x: int): Foo = Foo(atom: true, leaf: x)
-  let x = tree(leaf(1), tree(leaf(2), tree(leaf(3), tree(leaf(4), tree(leaf(5))))))
-  echo x
+  block:
+    type Foo = object
+      case atom: bool
+      of false:
+        node: Array[Foo]
+      of true:
+        leaf: int
+    
+    proc tree(arr: varargs[Foo]): Foo =
+      Foo(atom: false, node: toArray(@arr))
+    proc leaf(x: int): Foo = Foo(atom: true, leaf: x)
+    let x = tree(leaf(1), tree(leaf(2), tree(leaf(3), tree(leaf(4), tree(leaf(5))))))
+    echo x

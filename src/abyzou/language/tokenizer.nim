@@ -1,4 +1,7 @@
-import number, shortstring, tokens, ../defines, std/strutils, info
+import
+  std/strutils,
+  ../defines, ../util/stringresize,
+  ./[number, shortstring, tokens, info]
 
 when useUnicode:
   import std/unicode
@@ -29,10 +32,10 @@ else:
 
 type
   TokenizerOptions* = object
-    file*: CachedFile
     symbolWords*: seq[ShortString]
     stringBackslashEscape*, stringQuoteEscape*: bool
     backslashBreakNewline*, commaIgnoreIndent*: bool
+    file*: CachedFile
   
   IndentContext* = object
     levels*: seq[int]
@@ -43,18 +46,20 @@ type
 
   Tokenizer* = ref object
     options*: TokenizerOptions
-    str*: string
-      # XXX (5) convert to abstraction of resetPos, nextRune, hasRune
-      # maybe just have 1 proc pointer that loads a buffer of
-      # some nonzero size at a time then operate on that buffer
-    lastKind*: TokenKind
-    queue*: seq[Token]
-    queuePos*: int
-    queueMode*: QueueMode
+    buffer*: string
+    bufferLoader*: proc (): string
+      ## loads a string at a time to add to the buffer when needed
+      ## set to nil after returning empty string
     indentContexts*: seq[IndentContext]
-    indent*: int
+    lastKind*: TokenKind
+    queueMode*: QueueMode
     recordingIndent*, comment*: bool
     currentRune*: Rune
+    queue*: seq[Token]
+    queuePos*: int
+    indent*: int
+    consumedPos*: int
+      ## position before which we can cull the buffer
     pos*, previousPos*: int
     when doLineColumn:
       ln*, cl*, previousCol*: int
@@ -75,8 +80,44 @@ proc resetTokenizer*(tz: var Tokenizer) =
   tz.indentContexts = @[IndentContext()]
 
 proc newTokenizer*(str: sink string = "", options = defaultOptions()): Tokenizer =
-  result = Tokenizer(str: str, options: options)
+  result = Tokenizer(buffer: str, options: options)
   result.resetTokenizer()
+
+proc newTokenizer*(loader: proc(): string, options = defaultOptions()): Tokenizer =
+  result = Tokenizer(bufferLoader: loader, options: options)
+  result.resetTokenizer()
+
+proc extendBufferOne(tz: var Tokenizer) =
+  if not tz.bufferLoader.isNil:
+    let ex = tz.bufferLoader()
+    if ex.len == 0:
+      tz.bufferLoader = nil
+    else:
+      if tz.buffer.smartResizeAdd(ex, tz.consumedPos):
+        tz.pos -= tz.consumedPos
+        tz.previousPos -= tz.consumedPos
+
+proc extendBufferBy(tz: var Tokenizer, n: int) =
+  var i = 0
+  while not tz.bufferLoader.isNil and i < n:
+    let ex = tz.bufferLoader()
+    if ex.len == 0:
+      tz.bufferLoader = nil
+    else:
+      i += ex.len
+      if tz.buffer.smartResizeAdd(ex, tz.consumedPos):
+        tz.pos -= tz.consumedPos
+        tz.previousPos -= tz.consumedPos
+
+proc peekCharOrZero(tz: var Tokenizer): char =
+  if tz.pos < tz.buffer.len:
+    result = tz.buffer[tz.pos]
+  else:
+    tz.extendBufferOne()
+    if tz.pos < tz.buffer.len:
+      result = tz.buffer[tz.pos]
+    else:
+      result = '\0'
 
 proc resetPos*(tz: var Tokenizer) =
   assert tz.previousPos != -1, "no previous position to reset to"
@@ -87,23 +128,48 @@ proc resetPos*(tz: var Tokenizer) =
     if tz.currentRune == '\n':
       dec tz.ln
 
-proc nextRune*(tz: var Tokenizer) =
+proc nextRune*(tz: var Tokenizer): bool =
   ## converts \r\n to \n and updates line and column
   tz.previousPos = tz.pos
   when doLineColumn:
     tz.previousCol = tz.cl
-  if tz.pos + 1 < len(tz.str) and
-    tz.str[tz.pos .. tz.pos + 1] == "\r\n":
+  let c =
+    if tz.pos < tz.buffer.len:
+      tz.buffer[tz.pos]
+    else:
+      tz.extendBufferOne()
+      if tz.pos < tz.buffer.len:
+        tz.buffer[tz.pos]
+      else:
+        return false
+  if c == '\r' and (inc tz.pos;
+      tz.peekCharOrZero() == '\n' or
+        (dec tz.pos; false)):
     tz.currentRune = Rune '\n'
-    tz.pos += 2
+    inc tz.pos
     when doLineColumn:
       tz.ln += 1
       tz.cl = 0
   else:
     when useUnicode:
-      fastRuneAt(tz.str, tz.pos, tz.currentRune, true)
+      # may need testing
+      let b = byte(c)
+      if (b and 0b10000000) != 0:
+        var n = 0
+        if b shr 5 == 0b110:
+          n = 1
+        elif b shr 4 == 0b1110:
+          n = 2
+        elif b shr 3 == 0b11110:
+          n = 3
+        elif b shr 2 == 0b111110:
+          n = 4
+        elif b shr 1 == 0b1111110:
+          n = 5
+        extendBufferBy(tz, n)
+      fastRuneAt(tz.buffer, tz.pos, tz.currentRune, true)
     else:
-      tz.currentRune = tz.str[tz.pos]
+      tz.currentRune = c
       inc tz.pos
     when doLineColumn:
       if tz.currentRune == '\n':
@@ -111,10 +177,11 @@ proc nextRune*(tz: var Tokenizer) =
         tz.cl = 0
       else:
         tz.cl += 1
+  tz.consumedPos = tz.previousPos
+  result = true
 
 iterator runes*(tz: var Tokenizer): Rune =
-  while tz.pos < len(tz.str): # XXX (5) use hasRune
-    tz.nextRune()
+  while tz.nextRune():
     yield tz.currentRune
 
 proc recordString*(tz: var Tokenizer, quote: char): string =
@@ -128,9 +195,9 @@ proc recordString*(tz: var Tokenizer, quote: char): string =
     elif tz.options.stringBackslashEscape and c == '\\':
       escaped = true
     elif c == quote:
-      # XXX (5) single char lookahead
-      if tz.options.stringQuoteEscape and tz.pos < tz.str.len and tz.str[tz.pos] == quote:
-        tz.nextRune()
+      if tz.options.stringQuoteEscape and tz.peekCharOrZero() == quote:
+        let gotNext = tz.nextRune()
+        assert gotNext
         result.add(c)
       else:
         return
@@ -149,7 +216,9 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
     lastZeros = 0 # Natural
     recordedExp: int16 = 0
   
-  var prevPos2: int # XXX (5) complex lookahead
+  var
+    prevPosSet = false
+    prevPos2: int
   when doLineColumn:
     var prevCol2: int
   
@@ -165,26 +234,35 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
     result.digits = toDigitSequence(digits)
 
   for c in tz.runes:
+    if prevPosSet:
+      # would be prevPos2, but we can't keep track of how much the buffer shifts left
+      # (unless we move this logic inside the tokenizer)
+      tz.consumedPos = 0
     case stage
     of inBase:
-      case c.asChar
+      let ch = c.asChar
+      case ch
       of '0'..'9':
         if c == '0':
           inc lastZeros
         else:
           lastZeros = 0
-        digits.add(c.byte - '0'.byte)
+        digits.add(ch.byte - '0'.byte)
       of '.':
         result.kind = Floating
         stage = inDecimalStart
         prevPos2 = tz.previousPos
         when doLineColumn:
           prevCol2 = tz.previousCol
+        prevPosSet = true
+        tz.consumedPos = 0
       of 'e', 'E':
         stage = inExpStart
         prevPos2 = tz.previousPos
         when doLineColumn:
           prevCol2 = tz.previousCol
+        prevPosSet = true
+        tz.consumedPos = 0
       of 'i', 'I':
         result.kind = Integer
         stage = inBits
@@ -207,21 +285,25 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
         tz.pos = prevPos2
         when doLineColumn:
           tz.cl = prevCol2
+        prevPosSet = false
         return
     of inDecimal:
-      case c.asChar
+      let ch = c.asChar
+      case ch
       of '0'..'9':
         if c == '0':
           inc lastZeros
         else:
           lastZeros = 0
-        digits.add(c.byte - '0'.byte)
+        digits.add(ch.byte - '0'.byte)
         dec result.exp
       of 'e', 'E':
         stage = inExpStart
         prevPos2 = tz.previousPos
         when doLineColumn:
           prevCol2 = tz.previousCol
+        prevPosSet = true
+        tz.consumedPos = 0
       else:
         tz.resetPos()
         return
@@ -239,11 +321,13 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
         tz.pos = prevPos2
         when doLineColumn:
           tz.cl = prevCol2
+        prevPosSet = false
         return
     of inExp, inExpNeg:
-      case c.asChar
+      let ch = c.asChar
+      case ch
       of '0'..'9':
-        var val = (c.byte - '0'.byte).int16
+        var val = (ch.byte - '0'.byte).int16
         if stage == inExpNeg: val = -val
         recordedExp = recordedExp * 10 + val
       of 'i', 'I':
@@ -259,9 +343,10 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
         tz.resetPos()
         return
     of inBits:
-      case c.asChar
+      let ch = c.asChar
+      case ch
       of '0'..'9':
-        result.bits = (result.bits * 10) + (c.byte - '0'.byte)
+        result.bits = (result.bits * 10) + (ch.byte - '0'.byte)
       else:
         tz.resetPos()
         return
@@ -472,8 +557,7 @@ proc nextToken*(tz: var Tokenizer): Token =
         let n = recordNumber(tz)
         add Token(kind: tkNumber, num: n)
       of '+', '-':
-        # XXX (5) single char lookahead
-        if tz.pos < tz.str.len and tz.str[tz.pos] in {'0'..'9'}:
+        if tz.peekCharOrZero() in {'0'..'9'}:
           add Token(kind: tkNumber, num: recordNumber(tz, ch == '-'))
         else:
           tz.resetPos()

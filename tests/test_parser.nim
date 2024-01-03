@@ -276,6 +276,7 @@ test "equivalent syntax":
 when not defined(nimscript) and defined(testsBenchmark):
   import std/monotimes, strutils
   template bench(name, body) =
+    checkpoint name
     let a = getMonoTime()
     body
     let b = getMonoTime()
@@ -283,7 +284,9 @@ when not defined(nimscript) and defined(testsBenchmark):
     echo name, " took ", time, " ms"
 else:
   # nimscript is actually really slow here
-  template bench(name, body) = body
+  template bench(name, body) =
+    checkpoint name
+    body
 
 test "parse files without crashing":
   for f in [
@@ -297,6 +300,25 @@ test "parse files without crashing":
       let s = when declared(read): read(f) else: readFile(f)
     bench("tokenizing"):
       let ts = tokenize(s)
+    proc collated(s: string, n: int): proc(): string =
+      var i = 0
+      result = proc(): string =
+        if i < s.len:
+          let j = min(s.len, i + n)
+          result = s[i ..< j]
+          i = j
+        else:
+          result = ""
+    bench("tokenizing with buffer loader of 4"):
+      block:
+        var tz = newTokenizer(collated(s, 4))
+        let ts2 = tokenize(tz)
+        check ts == ts2
+    bench("tokenizing with char buffer loader"):
+      block:
+        var tz = newTokenizer(collated(s, 1))
+        let ts2 = tokenize(tz)
+        check ts == ts2
     bench("parsing"):
       let p {.used.} = parse(ts)
 
