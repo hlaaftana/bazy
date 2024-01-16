@@ -11,9 +11,9 @@ template withkindboxv(vk, kv, val): untyped =
 template withkindbox(k, val): untyped =
   withkindboxv(`vk k`, `k Value`, val)
 
-proc toValue*(x: int32): Value = withkind(int32, x)
-proc toValue*(x: uint32): Value = withkind(uint32, x)
-proc toValue*(x: float32): Value = withkind(float32, x)
+proc toValue*(x: int32): Value {.inline.} = withkind(int32, x)
+proc toValue*(x: uint32): Value {.inline.} = withkind(uint32, x)
+proc toValue*(x: float32): Value {.inline.} = withkind(float32, x)
 proc toValue*(x: bool): Value = withkind(bool, x)
 proc toValue*(x: int64): Value = withkindbox(int64, x)
 proc toValue*(x: uint64): Value = withkindbox(uint64, x)
@@ -32,13 +32,13 @@ proc toValue*(x: uint): Value =
     toValue(uint64(x))
 proc toValue*(x: sink seq[Value]): Value = withkindbox(list, x)
 proc toValue*(x: sink string): Value = withkindbox(string, x)
-proc toValue*(x: sink Array[Value]): Value =
+proc toValue*(x: sink Array[Value]): Value {.inline.} =
   template arr(a: untyped): untyped =
-    when result.boxedValue.tupleValue is ArrayRef:
+    when result.tupleValue is ArrayRef:
       toArrayRef(a)
     else:
       toArray(a)
-  withkindboxv(vkArray, tupleValue, arr x.toOpenArray(0, x.len - 1))
+  withkind(array, arr x.toOpenArray(0, x.len - 1))
 proc toValue*(x: Type): Value = Value(kind: vkType, boxedValue: FullValue(kind: vkType, typeValue: x))
 proc toValue*(x: Box[Type]): Value = Value(kind: vkType, boxedValue: FullValue(kind: vkType, typeValue: x.unbox))
 proc toValue*(x: sink HashSet[Value]): Value = withkindbox(set, x)
@@ -57,6 +57,7 @@ proc toFullValueObj*(x: Value): FullValueObj =
   of vkFloat32: FullValueObj(kind: vkFloat32, float32Value: x.float32Value)
   of vkBool: FullValueObj(kind: vkBool, boolValue: x.boolValue)
   of vkReference: FullValueObj(kind: vkReference, referenceValue: x.referenceValue)
+  of vkArray: FullValueObj(kind: vkArray, tupleValue: x.arrayValue.unref)
   of boxedValueKinds: x.boxedValue[]
   of vkEffect: x.effectValue.unbox.toFullValueObj
 
@@ -71,6 +72,7 @@ proc toSmallValue*(x: FullValueObj | FullValue): Value =
     of vkBool: result = Value(kind: vkBool, boolValue: x.boolValue) 
     of vkReference: result = Value(kind: vkReference, referenceValue: x.referenceValue)
     of vkEffect: result = Value(kind: vkEffect, effectValue: x.effectValue)
+    of vkArray: result = Value(kind: vkArray, arrayValue: x.tupleValue.toArrayRef)
     of boxedValueKinds: discard # unreachable
   else:
     result = Value(kind: if unboxedKind: vkBoxed else: x.kind)
@@ -84,9 +86,16 @@ proc unboxStripType*(x: FullValueObj | FullValue): Value =
   of vkFloat32: result = Value(kind: vkFloat32, float32Value: x.float32Value) 
   of vkBool: result = Value(kind: vkBool, boolValue: x.boolValue) 
   of vkEffect: result = Value(kind: vkEffect, effectValue: x.effectValue)
+  of vkReference: result = Value(kind: vkReference, referenceValue: x.referenceValue)
+  of vkArray: result = Value(kind: vkArray, arrayValue: toArrayRef x.tupleValue)
   of boxedValueKinds:
     result = Value(kind: x.kind)
-    result.boxedValue = toRef x
+    result.boxedValue = when x is ref: x else: toRef x
+
+proc unboxStripType*(x: Value): Value {.inline.} =
+  case x.kind
+  of boxedValueKinds: result = unboxStripType(x.boxedValue)
+  else: result = x
 
 when false:
   # XXX this is probably important

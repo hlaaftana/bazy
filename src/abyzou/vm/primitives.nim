@@ -37,12 +37,12 @@ type
     vkReference
       ## reference value, can be mutable
       ## only value kind with reference semantics
+    vkArray
+      ## like java array but typed like TS, implementation of tuples
     vkBoxed # XXX (4) maybe do BoxedInt32, BoxedUint32 etc
     vkInt64, vkUint64, vkFloat64
     vkType
       ## type value
-    vkArray
-      ## like java array but typed like TS, implementation of tuples
     vkString
       ## general byte sequence type
     vkList
@@ -132,6 +132,8 @@ type
       effectValue*: Box[Value]
     of vkReference:
       referenceValue*: Reference[FullValueObj]
+    of vkArray:
+      arrayValue*: ArrayRef[Value]
     of boxedValueKinds:
       boxedValue*: FullValue
   
@@ -270,7 +272,6 @@ type
   
   LinearFunction* = object
     # XXX (1) incorporate into Value
-    initialStack*: Stack # XXX maybe remove and just have constants but we need to arm captures
     registerCount*: int
     constants*: Array[Value]
     jumpLocations*: Array[int]
@@ -470,6 +471,8 @@ static:
 
 proc isNoType*(t: Type): bool = t.kind == tyNoType
 proc isNoType*(vt: Box[Type]): bool = vt.isNil or vt.unbox.isNoType
+template tupleValue*(v: Value): untyped =
+  v.arrayValue
 
 import ./primitiveprocs
 export primitiveprocs

@@ -122,6 +122,21 @@ proc hash*[T](a: Array[T]): Hash =
     result = result !& hash a[i]
   result = !$ result
 
+type ArrayRef*[T] = distinct Array[T]
+
+template toArrayRef*[T](foo: Array[T]): ArrayRef[T] = ArrayRef[T](foo)
+template toArrayRef*(foo): ArrayRef = toArrayRef(toArray(foo))
+template unref*[T](arr: ArrayRef[T]): Array[T] = Array[T](arr)
+
+proc `[]=`*[T](x: ArrayRef[T], i: int, val: sink T) {.inline.} =
+  x.unref.impl.data[i] = val
+
+proc `==`*[T](a, b: ArrayRef[T]): bool {.inline.} =
+  `==`(a.unref, b.unref)
+
+proc hash*[T](x: ArrayRef[T]): Hash =
+  hash(x.unref)
+
 when isMainModule:
   when true:
     type Foo = ref object

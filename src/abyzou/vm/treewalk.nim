@@ -43,6 +43,7 @@ proc call*(fun: Value, args: sink Array[Value], effectHandler: EffectHandler = n
     result = fun.boxedValue.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
   of vkFunction:
     result = fun.boxedValue.functionValue.call(args, effectHandler)
+  # XXX (1) handle linear function
   else:
     discard # error
 
@@ -122,6 +123,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
         if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
           return false
         val.toBool
+    # XXX (1) handle linear function
     else:
       discard
     result = run(ins.effectEmitter, stack, handler)
@@ -157,7 +159,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     of vkList:
       result = x.boxedValue.listValue.unref[ins.getIndex]
     of vkArray:
-      result = x.boxedValue.tupleValue.unref[ins.getIndex]
+      result = x.tupleValue.unref[ins.getIndex]
     of vkString:
       result = toValue(x.boxedValue.stringValue.unref[ins.getIndex].int)
     else: discard # error
@@ -168,7 +170,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     of vkList:
       x.boxedValue.listValue.unref[ins.setIndex] = result
     of vkArray:
-      x.boxedValue.tupleValue.unref[ins.setIndex] = result
+      x.tupleValue[ins.setIndex] = result
     of vkString:
       assert result.kind == vkInt32 and result.int32Value >= 0 and result.int32Value <= 255
       x.boxedValue.stringValue.unref[ins.setIndex] = result.int32Value.char

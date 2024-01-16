@@ -102,7 +102,8 @@ type
     registerCount*: int
     jumpLocationCount*: int
     jumpLocationByteIndex*: seq[int]
-    constants*: Table[Value, Constant] # XXX (1) serialize values
+    constants*: seq[Value] # first are always variable default values
+    cachedConstants*: Table[Value, Constant] # XXX (1) serialize values
     variableRegisters*: seq[Register]
     usedSpecialRegisters: set[SpecialRegister]
     specialRegisters: array[SpecialRegister, Register]
@@ -260,7 +261,10 @@ proc jumpPoint(fn: LinearContext, loc: JumpLocation) =
   fn.add(LinearInstruction(kind: JumpPoint, jpt: (loc: loc)))
 
 proc getConstant(fn: LinearContext, constant: Value): Constant =
-  result = fn.constants.mgetOrPut(constant, Constant(fn.constants.len))
+  let cacheLen = fn.cachedConstants.len
+  result = fn.cachedConstants.mgetOrPut(constant, Constant(fn.constants.len))
+  if cacheLen != fn.cachedConstants.len:
+    fn.constants.add(constant)
 
 proc resultRegister(fn: LinearContext, res: var Result): Register =
   case res.kind
@@ -479,16 +483,19 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
 
 proc createLinearContext*(context: Context): LinearContext =
   result = LinearContext()
-  result.variableRegisters.newSeq(context.stackSlots.len)
-  for i, vr in result.variableRegisters.mpairs:
-    vr = result.newRegister()
-    when false: # this is bad for arming captures later
-      let defaultValue = context.stackSlots[i].value
-      if defaultValue.kind != vkNone:
-        result.add(LinearInstruction(kind: LoadConstant, lc:
-          (res: vr, constant: result.getConstant(defaultValue))))
+  result.variableRegisters.newSeq(context.stackSlots.len + 1)
+  result.constants.newSeq(context.stackSlots.len)
+  for i in 0 ..< context.stackSlots.len:
+    let reg = result.newRegister()
+    result.variableRegisters[i] = reg
+    # this might lose performance but is needed for capture arming
+    let defaultValue = context.stackSlots[i].value
+    result.constants[i] = defaultValue
+    result.add(LinearInstruction(kind: LoadConstant, lc:
+      (res: reg, constant: Constant(i))))
+  result.variableRegisters[^1] = result.newRegister()
 
 proc linear*(context: Context, body: Statement): LinearContext =
   result = createLinearContext(context)
-  var res = Result(kind: Value)
+  var res = Result(kind: SetRegister, register: result.variableRegisters[^1])
   linearize(context, result, res, body)

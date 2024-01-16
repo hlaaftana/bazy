@@ -41,7 +41,7 @@ elif arrayImpl == "ref":
   import ../util/refarray
   export refarray
 
-when arrayImpl != "ref":
+when not declared(ArrayRef):
   type ArrayRef*[T] = ref Array[T]
   template toArrayRef*(foo): ArrayRef =
     var res = new(typeof(toArray(foo)))
@@ -60,6 +60,3 @@ when arrayImpl != "ref":
       hash(pointer nil)
     else:
       hash(x[])
-else:
-  type ArrayRef*[T] = Array[T]
-  template toArrayRef*(foo): ArrayRef = toArray(foo)

@@ -60,6 +60,11 @@ proc getType*(x: Value): Type =
   of vkFloat64: result = Float64Ty
   of vkBool: result = BoolTy
   of vkReference: result = ReferenceTy[x.referenceValue.unref.getType]
+  of vkArray:
+    let val = x.arrayValue.unref
+    result = Type(kind: tyTuple, elements: newSeq[Type](val.len))
+    for i in 0 ..< x.tupleValue.unref.len:
+      result.elements[i] = val[i].getType
   of boxedValueKinds - {vkInt64, vkUint64, vkFloat64}:
     result = x.boxedValue[].getType
   of vkEffect:

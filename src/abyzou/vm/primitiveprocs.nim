@@ -133,6 +133,11 @@ proc `$`*(value: Value): string =
   of vkFloat32: $value.float32Value
   of vkBool: $value.boolValue
   of vkReference: "ref(" & $value.referenceValue.unref & ")"
+  of vkArray:
+    var s = ($value.tupleValue.unref)[1..^1]
+    s[0] = '('
+    s[^1] = ')'
+    s
   of vkEffect: "Effect(" & $value.effectValue.unref & ")"
   of boxedValueKinds: $value.boxedValue
 
