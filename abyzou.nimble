@@ -26,8 +26,10 @@ task docs, "build docs for all modules":
 task tests, "run tests for multiple backends":
   when declared(runTests):
     runTests(optionCombos = @[
-      "--gc:refc",
-      "--gc:orc",
+      "--mm:refc -d:abyzouUseBytecode=true",
+      "--mm:refc -d:abyzouUseBytecode=false",
+      "--mm:orc -d:abyzouUseBytecode=true",
+      "--mm:orc -d:abyzouUseBytecode=false",
       #"--gc:orc -d:useMalloc",
       #"--gc:orc -d:danger",
       #"-d:abyzouUseUnicode=false",

@@ -1,7 +1,8 @@
 import
   std/tables,
+  ../../defines,
   ../../language/[expressions, shortstring],
-  ../[primitives, compilation, typebasics, valueconstr]
+  ../[primitives, compilation, typebasics, valueconstr, linearizer]
 
 import common
 
@@ -22,14 +23,15 @@ module syntax:
     for i in 0 ..< arguments.len:
       var arg = arguments[i]
       if arg.kind == Colon:
-        fnTypeArguments.elements[i] = scope.evaluateStatic(arg.right, +TypeTy[AnyTy]).boxedValue.typeValue
+        fnTypeArguments.elements[i] = scope.evaluateStatic(arg.right, +TypeTy[AnyTy]).boxedValue.type[].unwrapTypeType
         arg = arg.left
       else:
         fnTypeArguments.elements[i] = AnyTy
       let name = $arg
       if name.len != 0 and name[0] != '_':
         fnTypeArguments.elementNames[name] = i
-      discard bodyScope.define(name, fnTypeArguments.elements[i])
+      let argVar = newVariable(name, fnTypeArguments.elements[i])
+      bodyScope.define(argVar, Argument)
     let fnType = FunctionTy[fnTypeArguments, returnBound.boundType]
     var v: Variable
     if name.len != 0:
@@ -37,8 +39,14 @@ module syntax:
     let body = bodyScope.compile(body, returnBound)
     if not v.isNil and not returnBoundSet:
       v.knownType.baseArguments[1] = body.knownType
-    var fun = toValue(
-      TreeWalkFunction(stack: bodyScope.context.makeStack(), instruction: body.toInstruction))
+    var fun: Value
+    if useBytecode:
+      let lc = linear(bodyScope.context, body)
+      fun = toValue(lc.toFunction())
+    else:
+      fun = toValue(TreeWalkFunction(
+        stack: bodyScope.context.makeStack(),
+        instruction: body.toInstruction))
     fun.boxedValue.type = toRef(fnType)
     if not v.isNil:
       scope.context.set(v, fun)
@@ -55,7 +63,7 @@ module syntax:
     var body = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.typeValue
+        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.type[].unwrapTypeType
         lhs = lhs.left
         (+t, true)
       else:
@@ -74,7 +82,7 @@ module syntax:
     let rhs = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.typeValue
+        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.type[].unwrapTypeType
         lhs = lhs.left
         (+t, true)
       else:
@@ -93,7 +101,7 @@ module syntax:
     let rhs = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.typeValue
+        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.type[].unwrapTypeType
         lhs = lhs.left
         (+t, true)
       else:

@@ -25,7 +25,7 @@ template toBool*(val: Value): bool =
 
 proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = nil): Value
 
-template run(instr: Instruction, stack, effectHandler): Value =
+template runCheckEffect(instr: Instruction, stack, effectHandler): Value =
   let val = evaluate(instr, stack, effectHandler)
   if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val.effectValue.unref)):
     return val
@@ -35,7 +35,9 @@ proc call*(fun: TreeWalkFunction, args: sink Array[Value], effectHandler: Effect
   var newStack = fun.stack.shallowRefresh()
   for i in 0 ..< args.len:
     newStack.set(i, args[i])
-  result = run(fun.instruction, newStack, effectHandler)
+  result = runCheckEffect(fun.instruction, newStack, effectHandler)
+
+include ./bytecode
 
 proc call*(fun: Value, args: sink Array[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
   case fun.kind
@@ -43,13 +45,13 @@ proc call*(fun: Value, args: sink Array[Value], effectHandler: EffectHandler = n
     result = fun.boxedValue.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
   of vkFunction:
     result = fun.boxedValue.functionValue.call(args, effectHandler)
-  # XXX (1) handle linear function
-  else:
-    discard # error
+  of vkLinearFunction:
+    result = fun.boxedValue.linearFunctionValue.run(args.toOpenArray(0, args.len - 1))
+  else: raiseAssert("cannot call " & $fun)
 
 proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = nil): Value =
   template run(instr; stack = stack; effectHandler = effectHandler): untyped =
-    run(instr, stack, effectHandler)
+    runCheckEffect(instr, stack, effectHandler)
   let ins = ins[]
   case ins.kind
   of NoOp:
@@ -123,9 +125,14 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
         if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
           return false
         val.toBool
-    # XXX (1) handle linear function
-    else:
-      discard
+    of vkLinearFunction:
+      let f = h.boxedValue.linearFunctionValue
+      handler = proc (effect: Value): bool =
+        let val = f.run([effect])
+        if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
+          return false
+        val.toBool
+    else: raiseAssert("cannot make " & $h & " into effect handler")
     result = run(ins.effectEmitter, stack, handler)
   of BuildTuple:
     if ins.elements.len <= 255:

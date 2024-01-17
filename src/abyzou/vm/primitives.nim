@@ -51,6 +51,7 @@ type
     vkTable
     vkFunction
       ## function
+    vkLinearFunction
     vkNativeFunction
       ## Nim function that takes values as argument
     # could be pointers or serialized but for now this is more efficient:
@@ -63,6 +64,7 @@ const boxedValueKinds* = {vkBoxed..high(ValueKind)}
 
 type
   FullValueObj* = object
+    # XXX (4) replace with BoxedValue[T]
     `type`*: ref Type
       # XXX (4) actually use and account for this without losing performance
       # for now it's mostly seen, but nothing initializes values with it 
@@ -89,7 +91,7 @@ type
     of vkFloat64:
       float64Value*: float64
     of vkType:
-      typeValue*: Type
+      discard#typeValue*: Type
     of vkArray:
       # XXX (6) pointer field location should be same as vkList, vkString
       tupleValue*: Array[Value]
@@ -105,6 +107,8 @@ type
       tableValue*: Table[Value, Value]
     of vkFunction:
       functionValue*: TreeWalkFunction
+    of vkLinearFunction:
+      linearFunctionValue*: LinearFunction
     of vkNativeFunction:
       nativeFunctionValue*: proc (args: openarray[Value]): Value {.nimcall.}
     of vkExpression:
@@ -224,6 +228,7 @@ type
     bound*: TypeBound
   
   Type* = object
+    # XXX 90 bytes
     # XXX (3) figure out which kinds to merge with tyCompound
     properties*: Table[TypeBase, Type]
       # can be a multitable later on
@@ -271,8 +276,8 @@ type
     instruction*: Instruction
   
   LinearFunction* = object
-    # XXX (1) incorporate into Value
     registerCount*: int
+    argPositions*: Array[int] ## last is result
     constants*: Array[Value]
     jumpLocations*: Array[int]
     instructions*: seq[byte]
@@ -456,13 +461,13 @@ type
     variables*: seq[Variable] ## should not shrink
 
   VariableReferenceKind* = enum
-    Local, Constant, Capture
+    Local, Argument, Constant, Capture
 
   VariableReference* = object
     variable*: Variable
     `type`*: Type ## must have a known type
     case kind*: VariableReferenceKind
-    of Local, Constant: discard
+    of Local, Argument, Constant: discard
     of Capture:
       captureIndex*: int
 

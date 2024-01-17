@@ -1,7 +1,5 @@
 import ./[primitives, arrays, valueconstr, typebasics], std/tables
 
-# XXX (1) make runner
-
 # xxx do some kind of register last use analysis to merge some registers
 # xxx (1) constant pool can be long string of serialized values,
 # then they are deserialized and cached into registers when loaded
@@ -44,7 +42,7 @@ type
     of LoadConstant:
       lc*: tuple[res: Register, constant: Constant]
     of SetRegisterRegister:
-      srr*: tuple[res, val: Register]
+      srr*: tuple[dest, src: Register]
     of NullaryCall:
       ncall*: tuple[res, callee: Register]
     of UnaryCall:
@@ -104,7 +102,7 @@ type
     jumpLocationByteIndex*: seq[int]
     constants*: seq[Value] # first are always variable default values
     cachedConstants*: Table[Value, Constant] # XXX (1) serialize values
-    variableRegisters*: seq[Register]
+    variableRegisters*, argRegisters*: seq[Register]
     usedSpecialRegisters: set[SpecialRegister]
     specialRegisters: array[SpecialRegister, Register]
   
@@ -134,6 +132,9 @@ const
     NegInt: range[lowUnary .. highUnary] NegInt32, NegFloat: NegFloat32
   ]
 
+when false:
+  proc `$`*(x: Register | Constant | JumpLocation): string = $x.uint16
+
 proc byteCount*(atom: Register | int32 | JumpLocation | Constant): int =
   result = sizeof(atom)
 
@@ -162,7 +163,7 @@ proc addBytes*(bytes: var openarray[byte], i: var int, instr: LinearInstruction)
     let u = cast[uint32](ii)
     add(byte((u shr 24) and 0xFF))
     add(byte((u shr 16) and 0xFF))
-    add(byte((u shr 0) and 0xFF))
+    add(byte((u shr 8) and 0xFF))
     add(byte(u and 0xFF))
   template add(ia: Array[int32]) =
     add(int32(ia.len))
@@ -239,8 +240,6 @@ proc add(fn: LinearContext, instr: LinearInstruction) =
     fn.jumpLocationByteIndex.setLen(fn.jumpLocationCount)
     fn.jumpLocationByteIndex[instr.jpt.loc.int] = fn.byteCount
 
-# XXX (1) add way to read instruction from bytes (probably in runner)
-
 proc newRegister(fn: LinearContext): Register =
   result = fn.registerCount.Register
   inc fn.registerCount
@@ -276,12 +275,12 @@ proc resultRegister(fn: LinearContext, res: var Result): Register =
 
 proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Statement) =
   type Instr = LinearInstruction
-  template value(s: Statement): Register =
+  template value(s: Statement): Register {.callsite.} =
     var res = Result(kind: Value)
     linearize(context, fn, res, s)
     res.value
   var statementResult = Result(kind: Statement)
-  template statement(s: Statement) =
+  template statement(s: Statement) {.callsite.} =
     linearize(context, fn, statementResult, s)
   let resultKind = result.kind
   case s.kind
@@ -351,18 +350,18 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
     case result.kind
     of SetRegister:
       fn.add(Instr(kind: SetRegisterRegister, srr:
-        (res: result.register,
-          val: fn.variableRegisters[s.variableGetIndex])))
+        (dest: result.register,
+          src: fn.variableRegisters[s.variableGetIndex])))
     of Value:
       result.value = fn.variableRegisters[s.variableGetIndex]
     of Statement: discard
   of skVariableSet:
     let val = value(s.variableSetValue)
     fn.add(Instr(kind: SetRegisterRegister, srr:
-      (res: fn.variableRegisters[s.variableSetIndex], val: val)))
+      (dest: fn.variableRegisters[s.variableSetIndex], src: val)))
     case resultKind
     of SetRegister:
-      fn.add(Instr(kind: SetRegisterRegister, srr: (res: result.register, val: val)))
+      fn.add(Instr(kind: SetRegisterRegister, srr: (dest: result.register, src: val)))
     of Value:
       result.value = val
     of Statement: discard
@@ -372,16 +371,25 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
       fn.add(Instr(kind: ArmStack, arm:
         (fun: fun, ind: a.int32, val: fn.variableRegisters[b])))
     fn.add(Instr(kind: RefreshStack, rfs: (fun: fun)))
+    case result.kind
+    of SetRegister:
+      fn.add(Instr(kind: SetRegisterRegister, srr: (dest: result.register, src: fun)))
+    of Value:
+      result.value = fun
+    of Statement: discard
   of skIf:
     # the true location is immediately afterward so we don't really need it
+    var branchRes =
+      if result.kind == Statement: result
+      else: Result(kind: SetRegister, register: fn.resultRegister(result))
     let falseLoc = fn.newJumpLocation()
     fn.add(Instr(kind: IfFalseJump, iffj:
       (cond: value(s.ifCond), falsePos: falseLoc)))
-    linearize(context, fn, result, s.ifTrue)
+    linearize(context, fn, branchRes, s.ifTrue)
     let endLoc = fn.newJumpLocation()
     fn.add(Instr(kind: Jump, jmp: (pos: endLoc)))
     fn.jumpPoint(falseLoc)
-    linearize(context, fn, result, s.ifFalse)
+    linearize(context, fn, branchRes, s.ifFalse)
     fn.jumpPoint(endLoc)
     # XXX maybe later optimize consecutive jump points to 1 jump point
     # like if s.ifFalse is a skNone statement
@@ -392,6 +400,7 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
     fn.add(Instr(kind: IfFalseJump, iffj:
       (cond: value(s.whileCond), falsePos: endLoc)))
     linearize(context, fn, result, s.whileBody)
+    fn.add(Instr(kind: Jump, jmp: (pos: startLoc)))
     fn.jumpPoint(endLoc)
   of skDoUntil:
     let startLoc = fn.newJumpLocation()
@@ -456,7 +465,7 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
     case resultKind
     of SetRegister:
       fn.add(Instr(kind: SetRegisterRegister, srr:
-        (res: result.register, val: val)))
+        (dest: result.register, src: val)))
     of Value:
       result.value = val
     of Statement: discard
@@ -488,14 +497,28 @@ proc createLinearContext*(context: Context): LinearContext =
   for i in 0 ..< context.stackSlots.len:
     let reg = result.newRegister()
     result.variableRegisters[i] = reg
+    if context.stackSlots[i].kind == Argument:
+      result.argRegisters.add(reg)
     # this might lose performance but is needed for capture arming
     let defaultValue = context.stackSlots[i].value
-    result.constants[i] = defaultValue
-    result.add(LinearInstruction(kind: LoadConstant, lc:
-      (res: reg, constant: Constant(i))))
-  result.variableRegisters[^1] = result.newRegister()
+    if defaultValue.kind != vkNone or context.stackSlots[i].kind == Capture:
+      result.constants[i] = defaultValue
+      result.add(LinearInstruction(kind: LoadConstant, lc:
+        (res: reg, constant: Constant(i))))
+  result.argRegisters.add(result.newRegister()) # result value
 
 proc linear*(context: Context, body: Statement): LinearContext =
   result = createLinearContext(context)
-  var res = Result(kind: SetRegister, register: result.variableRegisters[^1])
+  var res = Result(kind: SetRegister, register: result.argRegisters[^1])
   linearize(context, result, res, body)
+
+proc toFunction*(lc: LinearContext): LinearFunction =
+  var ap = newArray[int](lc.argRegisters.len)
+  for i in 0 ..< lc.argRegisters.len:
+    ap[i] = lc.argRegisters[i].int
+  result = LinearFunction(
+    registerCount: lc.registerCount,
+    argPositions: ap,
+    constants: toArray(lc.constants),
+    jumpLocations: toArray(lc.jumpLocationByteIndex),
+    instructions: lc.toBytes())

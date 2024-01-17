@@ -115,6 +115,11 @@ proc funcTypeWithVarargs*(returnType: Type, arguments: varargs[Type], varargs: T
 proc union*(s: varargs[Type]): Type =
   Type(kind: tyUnion, operands: @s)
 
+proc unwrapTypeType*(t: Type): Type {.inline.} =
+  result = t
+  if t.kind == tyCompound and t.base.nativeType == ntyType:
+    result = t.baseArguments[0]
+
 const definiteTypeLengths*: array[TypeKind, int] = [
   tyNoType: 0,
   tyCompound: -1,

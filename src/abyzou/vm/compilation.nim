@@ -1,8 +1,9 @@
 import
   std/[hashes, tables, sets, strutils],
+  ../defines,
   ../language/[expressions, number, shortstring],
   ./[ids, primitives, arrays, typebasics, typematch,
-    valueconstr, checktype, guesstype, treewalk]
+    valueconstr, checktype, guesstype, treewalk, linearizer]
 
 defineTypeBase Meta, TypeBase(name: "Meta",
   arguments: @[newTypeParameter("", +Type(kind: tyBase, typeBase: FunctionTy))])
@@ -38,11 +39,11 @@ proc evaluateStatic*(context: Context, instr: Instruction): Value =
   context.withStack:
     result = instr.evaluate(stack)
 
-proc define*(scope: Scope, variable: Variable) =
+proc define*(scope: Scope, variable: Variable, kind = Local) =
   variable.scope = scope
   variable.stackIndex = scope.context.stackSlots.len
   scope.context.stackSlots.add(
-    StackSlot(kind: Local, variable: variable))
+    StackSlot(kind: kind, variable: variable))
   scope.variables.add(variable)
 
 proc set*(context: Context, variable: Variable, value: sink Value) =
@@ -162,7 +163,7 @@ proc symbols*(scope: Scope, name: string, bound: TypeBound,
   elif not scope.context.origin.isNil:
     for a in symbols(scope.context.origin, name, bound, nameHash = nameHash):
       let b =
-        if a.kind == Constant:
+        if a.kind == VariableReferenceKind.Constant:
           a
         else:
           VariableReference(variable: a.variable, type: a.type,
@@ -217,7 +218,7 @@ proc variableGet*(c: Context, r: VariableReference): Statement =
     result = Statement(kind: skConstant,
       constant: r.variable.scope.context.stackSlots[r.variable.stackIndex].value,
       knownType: t)
-  of Local:
+  of Local, Argument:
     result = Statement(kind: skVariableGet,
       variableGetIndex: r.variable.stackIndex,
       knownType: t)
@@ -229,7 +230,7 @@ proc variableGet*(c: Context, r: VariableReference): Statement =
 proc variableSet*(c: Context, r: VariableReference, value: Statement, source: Expression = nil): Statement =
   let t = r.type
   case r.kind
-  of Local:
+  of Local, Argument:
     result = Statement(kind: skVariableSet,
       variableSetIndex: r.variable.stackIndex,
       variableSetValue: value,
@@ -658,12 +659,25 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       msg: "bound " & $bound & " does not match type " & $result.knownType &
         " in expression " & $ex)
 
-type Program* = TreeWalkFunction
+type
+  ProgramKind* = enum Linear, TreeWalk
+  Program* = object
+    case kind*: ProgramKind
+    of Linear: linear*: LinearFunction
+    of TreeWalk: tw*: TreeWalkFunction
 
 proc compile*(ex: Expression, imports: seq[Scope], bound: TypeBound = +AnyTy): Program =
   var context = newContext(imports = imports)
-  result.instruction = compile(context.top, ex, bound).toInstruction
-  result.stack = makeStack(context)
+  let body = compile(context.top, ex, bound)
+  if useBytecode:
+    let lc = linear(context, body)
+    result = Program(kind: Linear, linear: lc.toFunction())
+  else:
+    result = Program(kind: TreeWalk, tw: TreeWalkFunction(
+      instruction: body.toInstruction,
+      stack: makeStack(context)))
 
 proc run*(program: Program, effectHandler: EffectHandler = nil): Value =
-  evaluate(program.instruction, program.stack, effectHandler)
+  case program.kind
+  of TreeWalk: evaluate(program.tw.instruction, program.tw.stack, effectHandler)
+  of Linear: run(program.linear, [])

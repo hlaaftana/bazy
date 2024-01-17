@@ -45,6 +45,7 @@ test "eval values":
 
     # functions:
     "foo(x) = x + 1; foo(3)": toValue(4),
+    "a = 1; foo(x) = x + a; foo(3)": toValue(4),
     """
 gcd(a: Int, b: Int): Int =
   if b == 0
@@ -169,10 +170,16 @@ c = foo()
   for inp, outp in tests.items:
     {.push warning[BareExcept]: off.}
     try:
+      checkpoint inp
       check evaluate(inp) == outp
     except:
       echo "fail: ", (input: inp)
-      echo parse(inp)
+      let ex = parse(inp)
+      echo ex
+      when false:
+        var context = newContext(imports = @[Prelude])
+        let body = compile(context.top, ex, +AnyTy)
+        echo body
       if getCurrentException() of ref NoOverloadFoundError:
         echo (ref NoOverloadFoundError)(getCurrentException()).scope.variables
       raise

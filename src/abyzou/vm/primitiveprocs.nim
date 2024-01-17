@@ -116,8 +116,9 @@ proc `$`*(value: FullValueObj): string =
     s[0] = '('
     s[^1] = ')'
     s
-  of vkType: $value.typeValue
+  of vkType: $value.type[]
   of vkFunction: "<function>"
+  of vkLinearFunction: "<linear function>"
   of vkNativeFunction: "<native function>"
   of vkSet: $value.setValue
   of vkTable: $value.tableValue
@@ -195,6 +196,8 @@ proc `$`*(context: Context): string =
         "  capture "
       of Constant: # not used
         "  constant "
+      of Argument:
+        "  argument "
       of Local:
         "  "
     result.add(prefix & $v.variable & "\n")
@@ -215,3 +218,16 @@ proc `$`*(scope: Scope): string =
     for c in scope.imports:
       for line in splitLines($c):
         result.add("  " & line & "\n")
+
+when false:
+  proc `$`*(st: Statement): string =
+    result = ""
+    for a, b in fieldPairs(st[]):
+      when a == "kind":
+        result.add(($b)[2..^1])
+        result.add("(")
+      else:
+        result.add(a & ": ")
+        result.add($b)
+        result.add(", ")
+    result.add(")")

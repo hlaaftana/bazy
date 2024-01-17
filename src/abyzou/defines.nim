@@ -8,3 +8,4 @@ const
   refToken* = block: (const abyzouRefToken {.booldefine.} = defined(js); abyzouRefToken)
     ## make token type a reference rather than a value type
   arrayImpl* = block: (const abyzouArrayImpl {.strdefine.} = "ref"; abyzouArrayImpl)
+  useBytecode* = block: (const abyzouUseBytecode {.booldefine.} = true; abyzouUseBytecode)

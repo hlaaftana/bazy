@@ -25,12 +25,13 @@ proc getType*(x: FullValueObj): Type =
   of vkScope: result = ScopeTy
   of vkArray:
     let val = x.tupleValue.unref
-    result = Type(kind: tyTuple, elements: newSeq[Type](val.len))
+    var elems = newSeq[Type](val.len)
     for i in 0 ..< x.tupleValue.unref.len:
-      result.elements[i] = val[i].getType
+      elems[i] = val[i].getType
+    result = Type(kind: tyTuple, elements: elems)
   of vkType:
-    result = TypeTy[x.typeValue]
-  of vkFunction, vkNativeFunction:
+    result = x.type[]
+  of vkFunction, vkLinearFunction, vkNativeFunction:
     result = Type(kind: tyBase, typeBase: FunctionTy)
     # could save signature into Function object
     # but we can still use the type field in FullValue

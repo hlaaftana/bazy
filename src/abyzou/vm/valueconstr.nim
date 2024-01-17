@@ -2,7 +2,7 @@ import
   std/[sets, tables],
   ../util/box,
   ../language/expressions,
-  ./[primitives, arrays]
+  ./[primitives, arrays, typebasics]
 
 template withkind(k, val): Value =
   Value(kind: `vk k`, `k Value`: val)
@@ -39,12 +39,13 @@ proc toValue*(x: sink Array[Value]): Value {.inline.} =
     else:
       toArray(a)
   withkind(array, arr x.toOpenArray(0, x.len - 1))
-proc toValue*(x: Type): Value = Value(kind: vkType, boxedValue: FullValue(kind: vkType, typeValue: x))
-proc toValue*(x: Box[Type]): Value = Value(kind: vkType, boxedValue: FullValue(kind: vkType, typeValue: x.unbox))
+proc toValue*(x: Type): Value = Value(kind: vkType, boxedValue: FullValue(kind: vkType, type: toRef TypeTy[x]))
+proc toValue*(x: Box[Type]): Value = Value(kind: vkType, boxedValue: FullValue(kind: vkType, type: toRef TypeTy[x.unbox]))
 proc toValue*(x: sink HashSet[Value]): Value = withkindbox(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindbox(table, x)
 proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkindbox(nativeFunction, x)
 proc toValue*(x: TreeWalkFunction): Value = withkindbox(function, x)
+proc toValue*(x: LinearFunction): Value = withkindbox(linearFunction, x)
 proc toValue*(x: Expression): Value = withkindbox(expression, x)
 proc toValue*(x: Statement): Value = withkindbox(statement, x)
 proc toValue*(x: Scope): Value = withkindbox(scope, x)

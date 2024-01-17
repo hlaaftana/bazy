@@ -1,21 +1,33 @@
 # bytecode interpreter
-
-import ./[primitives, linearizer, arrays, treewalk, guesstype, checktype, typebasics, valueconstr],
+{.push hint[DuplicateModuleImport]: off.}
+import ./[primitives, linearizer, arrays, guesstype, checktype, typebasics, valueconstr],
   std/[sets, tables]
 
-proc run*(lf: LinearFunction): Value =
+when not declared(EffectHandler):
+  import ./treewalk
+{.pop.}
+
+proc run*(lf: LinearFunction, args: openarray[Value]): Value =
   var registers = newArray[Value](lf.registerCount)
   template put(reg: Register, val: Value) =
     registers[reg.int32] = val
   template get(reg: Register): Value =
     registers[reg.int32]
+  template getMut(reg: Register): var Value =
+    registers[reg.int32]
   template mov(src, dest: Register) =
     registers[dest.int32] = registers[src.int32]
+  
+  assert lf.argPositions.len == args.len + 1, $(lf.argPositions, args.len)
+  for i in 0 ..< args.len:
+    registers[lf.argPositions[i]] = args[i]
 
   var
     effectHandlers: seq[EffectHandler]
     effectHandler: EffectHandler
+    unhandledEffect = false
 
+  # remove these cursor annotations if needed
   let instructions {.cursor.} = lf.instructions
   var i = 0
   template read(b: var byte) =
@@ -24,11 +36,15 @@ proc run*(lf: LinearFunction): Value =
     inc i
   template read(b: var uint16) =
     assert i + 1 < instructions.len
-    b = cast[ptr uint16](addr instructions[i])[]
+    b = (instructions[i].uint16 shl 8) or
+      instructions[i + 1].uint16
     inc i, 2
   template read(b: var uint32) =
     assert i + 3 < instructions.len
-    b = cast[ptr uint32](addr instructions[i])[]
+    b = (instructions[i].uint32 shl 24) or
+      (instructions[i + 1].uint32 shl 16) or
+      (instructions[i + 2].uint32 shl 8) or
+      instructions[i + 3].uint32
     inc i, 4
   template read(r: var (Register | JumpLocation | Constant)) =
     var u: uint16
@@ -37,7 +53,7 @@ proc run*(lf: LinearFunction): Value =
   template read(ii: var int32) =
     var u: uint32
     read(u)
-    ii = cast[int32](u)
+    ii = int32(u)
   template read(ia: var Array[int32]) =
     var len: int32
     read(len)
@@ -49,24 +65,22 @@ proc run*(lf: LinearFunction): Value =
       read(a)
   
   template jump(p: JumpLocation) =
-    i = p.int
+    i = lf.jumpLocations[p.int]
 
-  template checkEffect(v: Value): Value =
-    let val = v
+  template checkEffect(val: Value): untyped =
     if val.kind == vkEffect:
       let eff = val.effectValue.unref
-      block handle:
-        for i in countdown(effectHandlers.high, 0):
-          if effectHandlers[i](eff):
-            break handle
-        return val
-    val
+      if effectHandler.isNil or not effectHandler(eff):
+        result = val
+        unhandledEffect = true
 
   while i < instructions.len:
     var opcode: byte
     read(opcode)
-    {.computedGoto.}
     var instr = LinearInstruction(kind: LinearInstructionKind(opcode))
+    if unhandledEffect and instr.kind != PopEffectHandler:
+      continue
+    {.computedGoto.}
     case instr.kind
     of NoOp: discard
     of LoadConstant:
@@ -75,76 +89,85 @@ proc run*(lf: LinearFunction): Value =
       put instr.lc.res, lf.constants[instr.lc.constant.int32]
     of SetRegisterRegister:
       read instr.srr
-      mov instr.srr.res, instr.srr.val
+      mov instr.srr.src, instr.srr.dest
     of NullaryCall:
       read instr.ncall
       let fn {.cursor.} = get instr.ncall.callee
-      case fn.kind
-      of vkNativeFunction:
-        put instr.ncall.res, checkEffect fn.boxedValue.nativeFunctionValue([])
-      of vkFunction:
-        put instr.ncall.res, checkEffect fn.boxedValue.functionValue.call(
-          default(Array[Value]),
-          effectHandler)
-      # XXX (1) handle linear function
-      else:
-        discard # error
+      let val =
+        case fn.kind
+        of vkNativeFunction:
+          fn.boxedValue.nativeFunctionValue([])
+        of vkFunction:
+          fn.boxedValue.functionValue.call(
+            default(Array[Value]),
+            effectHandler)
+        of vkLinearFunction:
+          fn.boxedValue.linearFunctionValue.run([])
+        else: raiseAssert("cannot call " & $fn)
+      checkEffect val
+      put instr.ncall.res, val
     of UnaryCall:
       read instr.ucall
       let fn {.cursor.} = get instr.ucall.callee
-      case fn.kind
-      of vkNativeFunction:
-        put instr.ucall.res, checkEffect fn.boxedValue.nativeFunctionValue(
-          [get instr.ucall.arg1])
-      of vkFunction:
-        put instr.ucall.res, checkEffect fn.boxedValue.functionValue.call(
-          toArray[Value]([get instr.ucall.arg1]),
-          effectHandler)
-      # XXX (1) handle linear function
-      else:
-        discard # error
+      let val =
+        case fn.kind
+        of vkNativeFunction:
+          fn.boxedValue.nativeFunctionValue(
+            [get instr.ucall.arg1])
+        of vkFunction:
+          fn.boxedValue.functionValue.call(
+            toArray[Value]([get instr.ucall.arg1]),
+            effectHandler)
+        of vkLinearFunction:
+          fn.boxedValue.linearFunctionValue.run([get instr.ucall.arg1])
+        else: raiseAssert("cannot call " & $fn)
+      checkEffect val
+      put instr.ucall.res, val
     of BinaryCall:
       read instr.bcall
       let fn {.cursor.} = get instr.bcall.callee
-      case fn.kind
-      of vkNativeFunction:
-        put instr.bcall.res, checkEffect fn.boxedValue.nativeFunctionValue(
-          [get instr.bcall.arg1, get instr.bcall.arg2])
-      of vkFunction:
-        put instr.bcall.res, checkEffect fn.boxedValue.functionValue.call(
-          toArray[Value]([get instr.bcall.arg1, get instr.bcall.arg2]),
-          effectHandler)
-      # XXX (1) handle linear function
-      else:
-        discard # error
+      let args = [get instr.bcall.arg1, get instr.bcall.arg2]
+      let val =
+        case fn.kind
+        of vkNativeFunction:
+          fn.boxedValue.nativeFunctionValue(args)
+        of vkFunction:
+          fn.boxedValue.functionValue.call(toArray[Value](args), effectHandler)
+        of vkLinearFunction:
+          fn.boxedValue.linearFunctionValue.run(args)
+        else: raiseAssert("cannot call " & $fn)
+      checkEffect val
+      put instr.bcall.res, val
     of TernaryCall:
       read instr.tcall
       let fn {.cursor.} = get instr.tcall.callee
-      case fn.kind
-      of vkNativeFunction:
-        put instr.tcall.res, checkEffect fn.boxedValue.nativeFunctionValue(
-          [get instr.tcall.arg1, get instr.tcall.arg2, get instr.tcall.arg3])
-      of vkFunction:
-        put instr.tcall.res, checkEffect fn.boxedValue.functionValue.call(
-          toArray[Value]([get instr.tcall.arg1, get instr.tcall.arg2, get instr.tcall.arg3]),
-          effectHandler)
-      # XXX (1) handle linear function
-      else:
-        discard # error
+      let args = [get instr.tcall.arg1, get instr.tcall.arg2, get instr.tcall.arg3]
+      let val =
+        case fn.kind
+        of vkNativeFunction:
+          fn.boxedValue.nativeFunctionValue(args)
+        of vkFunction:
+          fn.boxedValue.functionValue.call(toArray[Value](args), effectHandler)
+        of vkLinearFunction:
+          fn.boxedValue.linearFunctionValue.run(args)
+        else: raiseAssert("cannot call " & $fn)
+      checkEffect val
+      put instr.tcall.res, val
     of TupleCall:
       read instr.tupcall
       let fn {.cursor.} = get instr.tupcall.callee
       let args = (get instr.tupcall.args).tupleValue.unref # maybe move
-      case fn.kind
-      of vkNativeFunction:
-        put instr.tcall.res, checkEffect fn.boxedValue.nativeFunctionValue(
-          args.toOpenArray(0, args.len - 1))
-      of vkFunction:
-        put instr.tcall.res, checkEffect fn.boxedValue.functionValue.call(
-          args, effectHandler)
-      # XXX (1) handle linear function
-      else:
-        discard # error
+      let val =
+        case fn.kind
+        of vkNativeFunction:
+          fn.boxedValue.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
+        of vkFunction:
+          fn.boxedValue.functionValue.call(args, effectHandler)
+        of vkLinearFunction:
+          fn.boxedValue.linearFunctionValue.run(args.toOpenArray(0, args.len - 1))
+        else: raiseAssert("cannot call " & $fn)
+      checkEffect val
+      put instr.tupcall.res, val
     of TryDispatch:
       read instr.tdisp
       let fn {.cursor.} = get instr.tdisp.callee
@@ -154,22 +177,23 @@ proc run*(lf: LinearFunction): Value =
       let argt = t.baseArguments[0]
       if argsVal.checkType(argt):
         let args = argsVal.tupleValue.unref
-        case fn.kind
-        of vkNativeFunction:
-          put instr.tdisp.res, checkEffect fn.boxedValue.nativeFunctionValue(
-            args.toOpenArray(0, args.len - 1))
-        of vkFunction:
-          put instr.tdisp.res, checkEffect fn.boxedValue.functionValue.call(
-            args, effectHandler)
-        # XXX (1) handle linear function
-        else:
-          discard # error
+        let val =
+          case fn.kind
+          of vkNativeFunction:
+            fn.boxedValue.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
+          of vkFunction:
+            fn.boxedValue.functionValue.call(args, effectHandler)
+          of vkLinearFunction:
+            fn.boxedValue.linearFunctionValue.run(args.toOpenArray(0, args.len - 1))
+          else: raiseAssert("cannot call " & $fn)
+        checkEffect val
+        put instr.tdisp.res, val
         jump instr.tdisp.successPos
     of ArmType:
       read instr.armt
       let tVal = get(instr.armt.typ)
       assert tVal.kind == vkType
-      let t = tVal.boxedValue.typeValue
+      let t = tVal.boxedValue.type[].unwrapTypeType
       let val = get(instr.armt.val)
       if val.kind in boxedValueKinds:
         let box = val.boxedValue
@@ -190,19 +214,27 @@ proc run*(lf: LinearFunction): Value =
       case fn.kind
       of vkFunction:
         fn.boxedValue.functionValue.stack.set(instr.arm.ind, get(instr.arm.val))
-      # XXX (1) handle linear function
-      else: discard # error
+      of vkLinearFunction:
+        fn.boxedValue.linearFunctionValue.constants[instr.arm.ind] = get instr.arm.val
+      else: raiseAssert("cannot arm stack of " & $fn)
     of RefreshStack:
       read instr.rfs
       let fn = get(instr.rfs.fun)
       case fn.kind
       of vkFunction:
         fn.boxedValue.functionValue.stack = fn.boxedValue.functionValue.stack.shallowRefresh()
-      # XXX (1) handle linear function
-      else: discard # error
+      of vkLinearFunction:
+        let prev = fn.boxedValue.linearFunctionValue.constants
+        let oldBoxed = fn.boxedValue[]
+        getMut(instr.rfs.fun).boxedValue = nil
+        new(getMut(instr.rfs.fun).boxedValue)
+        getMut(instr.rfs.fun).boxedValue[] = oldBoxed
+        getMut(instr.rfs.fun).boxedValue.linearFunctionValue.constants =
+          toArray(prev.toOpenArray(0, prev.len - 1))
+      else: raiseAssert("cannot refresh stack of " & $fn)
     of JumpPoint:
       read instr.jpt
-      assert i == lf.jumpLocations[instr.jpt.loc.int] + byteCount(instr.jpt)
+      assert i == lf.jumpLocations[instr.jpt.loc.int]
     of IfTrueJump:
       read instr.iftj
       let cond = get(instr.iftj.cond)
@@ -217,12 +249,12 @@ proc run*(lf: LinearFunction): Value =
         jump instr.iffj.falsePos
     of Jump:
       read instr.jmp
-      jump instr.jpt.loc
+      jump instr.jmp.pos
     of EmitEffect:
       read instr.emit
       var eff = Value(kind: vkEffect)
       eff.effectValue.store get(instr.emit.effect)
-      discard checkEffect eff
+      checkEffect eff
     of PushEffectHandler:
       read instr.pueh
       let h = get instr.pueh.handler
@@ -239,12 +271,21 @@ proc run*(lf: LinearFunction): Value =
           if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
             return false
           val.toBool
-      # XXX (1) handle linear function
-      else: discard # error
+      of vkLinearFunction:
+        let f = h.boxedValue.linearFunctionValue
+        handler = proc (effect: Value): bool =
+          let val = f.run([effect])
+          if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
+            return false
+          val.toBool
+      else: raiseAssert("cannot make " & $h & " into effect handler")
       effectHandlers.add(handler)
     of PopEffectHandler:
       read instr.poeh
-      effectHandlers.setLen(effectHandlers.len - 1)
+      let handler = effectHandlers.pop()
+      if unhandledEffect and handler(result):
+        reset(result)
+        unhandledEffect = false
     of InitTuple:
       read instr.coll
       put instr.coll.res, toValue newArray[Value](instr.coll.siz)
@@ -259,10 +300,26 @@ proc run*(lf: LinearFunction): Value =
       put instr.coll.res, toValue initTable[Value, Value](instr.coll.siz)
     of GetConstIndex:
       read instr.gci
-      put instr.gci.res, get(instr.gci.coll).tupleValue.unref[instr.gci.ind.int]
+      let coll = get(instr.gci.coll)
+      case coll.kind
+      of vkArray:
+        put instr.gci.res, coll.tupleValue.unref[instr.gci.ind.int]
+      of vkList:
+        put instr.gci.res, coll.boxedValue.listValue[instr.gci.ind.int]
+      of vkString:
+        put instr.gci.res, toValue(coll.boxedValue.stringValue[instr.gci.ind.int].int)
+      else: discard # error
     of SetConstIndex:
       read instr.sci
-      get(instr.sci.coll).tupleValue[instr.sci.ind.int] = get(instr.sci.val)
+      let coll = get(instr.sci.coll)
+      case coll.kind
+      of vkArray:
+        coll.tupleValue[instr.sci.ind.int] = get(instr.sci.val)
+      of vkList:
+        coll.boxedValue.listValue[instr.sci.ind.int] = get(instr.sci.val)
+      of vkString:
+        coll.boxedValue.stringValue[instr.sci.ind.int] = get(instr.sci.val).int32Value.char
+      else: discard # error
     of GetIndex:
       read instr.gri
       let coll = get instr.gri.coll
@@ -315,7 +372,7 @@ proc run*(lf: LinearFunction): Value =
       read instr.binary
       let a = get(instr.binary.arg1).unboxStripType.int32Value
       let b = get(instr.binary.arg2).unboxStripType.int32Value
-      put instr.binary.res, toValue(a / b)
+      put instr.binary.res, toValue(a div b)
     of AddFloat32:
       read instr.binary
       let a = get(instr.binary.arg1).unboxStripType.float32Value
@@ -344,3 +401,5 @@ proc run*(lf: LinearFunction): Value =
       read instr.unary
       let a = get(instr.unary.arg).unboxStripType.float32Value
       put instr.unary.res, toValue(-a)
+
+  result = registers[lf.argPositions[args.len]]
