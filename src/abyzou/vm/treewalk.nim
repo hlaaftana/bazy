@@ -2,8 +2,6 @@ import
   std/[sets, tables],
   ./[primitives, arrays, valueconstr, checktype]
 
-# XXX (1) use linearizer for bytecode and evaluate that without recursion (but maybe keep this)
-
 proc get*(stack: Stack, index: int): lent Value {.inline.} =
   stack.stack[index]
 proc set*(stack: Stack, index: int, value: sink Value) {.inline.} =

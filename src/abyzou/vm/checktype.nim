@@ -38,7 +38,7 @@ proc checkType*(value: FullValueObj, t: Type): bool =
     of ntyFloat64: value.kind == vkFloat64
     of ntyFunction:
       # XXX (4) no information about signature
-      value.kind in {vkFunction, vkNativeFunction}
+      value.kind in {vkFunction, vkNativeFunction, vkLinearFunction}
     of ntyTuple:
       value.kind == vkArray and (t.kind == tyBase or value.tupleValue.unref.eachAre(t.baseArguments))
     of ntyReference:

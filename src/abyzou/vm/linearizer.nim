@@ -101,7 +101,7 @@ type
     jumpLocationCount*: int
     jumpLocationByteIndex*: seq[int]
     constants*: seq[Value] # first are always variable default values
-    cachedConstants*: Table[Value, Constant] # XXX (1) serialize values
+    cachedConstants*: Table[Value, Constant]
     variableRegisters*, argRegisters*: seq[Register]
     usedSpecialRegisters: set[SpecialRegister]
     specialRegisters: array[SpecialRegister, Register]

@@ -228,7 +228,7 @@ type
     bound*: TypeBound
   
   Type* = object
-    # XXX 90 bytes
+    # XXX (4) 90 bytes
     # XXX (3) figure out which kinds to merge with tyCompound
     properties*: Table[TypeBase, Type]
       # can be a multitable later on
@@ -278,7 +278,7 @@ type
   LinearFunction* = object
     registerCount*: int
     argPositions*: Array[int] ## last is result
-    constants*: Array[Value]
+    constants*: Array[Value] # XXX (1) serialize values
     jumpLocations*: Array[int]
     instructions*: seq[byte]
 
