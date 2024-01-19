@@ -478,27 +478,26 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
           bound.boundType
       let subs = overloads(scope, name, +functionType)
       if subs.len != 0:
-        var dispatchees = newSeq[(seq[Type], Statement)](subs.len)
-        var returnType = NoneTy
-        for i, d in dispatchees.mpairs:
+        # structured like this to make refc work
+        result = Statement(kind: skDispatch,
+          knownType: NoneTy,
+          dispatchees: newSeq[(seq[Type], Statement)](subs.len),
+          dispatchArguments: argumentStatements)
+        for i in 0 ..< result.dispatchees.len:
           let t = subs[i].type
-          d[0].newSeq(argumentStatements.len)
-          for i in 0 ..< argumentStatements.len:
-            let pt = t.param(i)
-            let m = match(-argumentTypes[i], pt)
+          var argTypes = newSeq[Type](argumentStatements.len)
+          for j in 0 ..< argumentStatements.len:
+            let pt = t.param(j)
+            let m = match(-argumentTypes[j], pt)
             if m.matches:
               # optimize checking types we know match
               # XXX (3) do this recursively using deep matches for some types
-              d[0][i] = AnyTy
+              argTypes[j] = AnyTy
             else:
-              d[0][i] = pt
-          d[1] = variableGet(scope.context, subs[i])
-          returnType = commonSuperType(returnType, t.baseArguments[1])
-        result = Statement(kind: skDispatch,
-          knownType: returnType,
-            # we could calculate a union here but it could become too complex
-          dispatchees: dispatchees,
-          dispatchArguments: argumentStatements)
+              argTypes[j] = pt
+          result.dispatchees[i] = (argTypes, variableGet(scope.context, subs[i]))
+          result.knownType = commonSuperType(result.knownType, t.baseArguments[1])
+            # could allow union here
 
 proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: sink seq[Statement] = newSeq[Statement](ex.arguments.len)): Statement =
