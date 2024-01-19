@@ -296,13 +296,6 @@ proc match*(matcher, t: Type, inst: var ParameterInstantiation): TypeMatch =
         tmSimilar,
         match(+matcher.someValueType.unbox, t.valueType.unbox))
     else: atomicMatch(tmNone)
-  of tyWithProperty:
-    minLevel(
-      if not t.properties.hasKey(matcher.withProperty):
-        tmFiniteFalse
-      else:
-        tmAlmostEqual,
-      match(+matcher.typeWithProperty.unbox, t))
   of tyParameter:
     let param = matcher.parameter
     let boundMatch = match(param.bound, t)

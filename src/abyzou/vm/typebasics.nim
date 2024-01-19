@@ -129,7 +129,6 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyUnion: -1,
   tyIntersection: -1,
   tyNot: 1,
-  tyWithProperty: -1,
   tyBase: 0,
   tySomeValue: 1,
   tyParameter: -1,
@@ -168,8 +167,6 @@ proc nth*(t: Type, i: int): Type =
     result = t.operands[i]
   of tyNot:
     result = t.notType.unbox
-  of tyWithProperty:
-    discard # inapplicable
   of tyBase:
     discard # inapplicable
   of tySomeValue:
@@ -209,8 +206,6 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
       fill(o)
   of tyNot:
     fill(pattern.notType)
-  of tyWithProperty:
-    fill(pattern.typeWithProperty)
   of tyValue:
     fill(pattern.valueType)
   of tySomeValue:

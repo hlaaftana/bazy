@@ -1,6 +1,6 @@
 import
   std/[tables, sets],
-  ./[primitives, typebasics, typematch, arrays, guesstype, valueconstr]
+  ./[primitives, typebasics, typematch, arrays, valueconstr]
 
 proc checkType*(value: Value, t: Type): bool =
   template eachAre(iter; types: seq[Type]): untyped =
@@ -76,8 +76,6 @@ proc checkType*(value: Value, t: Type): bool =
         break
     res
   of tyNot: not value.checkType(t.notType.unbox)
-  of tyWithProperty:
-    value.checkType(t.typeWithProperty.unbox) and value.getType.properties.hasKey(t.withProperty)
   of tySomeValue: false
   of tyParameter: value.checkType(t.parameter.bound.boundType)
   of tyValue: value.checkType(t.valueType.unbox) and t.value == value

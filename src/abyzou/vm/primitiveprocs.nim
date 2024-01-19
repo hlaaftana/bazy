@@ -150,7 +150,6 @@ proc `$`*(t: Type): string =
   of tyUnion: "Union(" & $t.operands & ")"
   of tyIntersection: "Intersection(" & $t.operands & ")"
   of tyNot: "Not " & $t.notType
-  of tyWithProperty: "WithProperty(" & $t.typeWithProperty & ", " & $t.withProperty & ")"
   of tyBase: "Base(" & $t.typeBase & ")"
   of tySomeValue: "SomeValue(" & $t.someValueType & ")"
   of tyParameter: "Parameter(" & $t.parameter.name & ")"

@@ -144,7 +144,6 @@ type
     # typeclass
     tyAny, tyNone, ## none is bottom type
     tyUnion, tyIntersection, tyNot,
-    tyWithProperty, # XXX unused
     tyBase,
     tySomeValue,
     # generic parameter
@@ -234,9 +233,6 @@ type
       operands*: seq[Type]
     of tyNot:
       notType*: Box[Type]
-    of tyWithProperty:
-      typeWithProperty*: Box[Type]
-      withProperty*: TypeBase
     of tyBase:
       typeBase*: TypeBase
     of tySomeValue:
