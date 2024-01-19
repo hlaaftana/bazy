@@ -21,7 +21,7 @@ idObject(TypeBase)
 idObject(TypeParameter)
 idObject(Variable)
 
-proc hash*(v: FullValueObj): Hash {.noSideEffect.}
+proc hash*(v: BoxedValueObj): Hash {.noSideEffect.}
 proc hash*(v: Value): Hash {.noSideEffect.}
 proc hash*(v: Type): Hash {.noSideEffect.}
 proc hash*(v: InstructionObj): Hash {.noSideEffect.}
@@ -34,6 +34,7 @@ template hashRefObj(T): untyped {.dirty.} =
       mix v[]
     result = !$ result
 
+hashRefObj BoxedValue
 hashRefObj(ref Value)
 hashRefObj(ref Type)
 hashRefObj Instruction
@@ -54,25 +55,27 @@ template hashObj(T): untyped {.dirty.} =
         mix f
     result = !$ result
 
-hashObj FullValueObj
+hashObj BoxedValueObj
 hashObj Value
 hashObj Type
 hashObj InstructionObj
 
-proc `==`*(a, b: FullValueObj): bool {.noSideEffect.}
+proc `==`*[T](a, b: BoxedValueObj[T]): bool {.noSideEffect.}
 proc `==`*(a, b: Value): bool {.noSideEffect.}
 proc `==`*(a, b: Type): bool {.noSideEffect.}
 proc `==`*(a, b: InstructionObj): bool {.noSideEffect.}
 proc `==`*(a, b: StatementObj): bool {.noSideEffect.}
 
 equals *(ref Value)
-equals *(ref FullValueObj)
+proc `==`*[T](a, b: BoxedValue[T]): bool {.noSideEffect.} =
+  system.`==`(a, b) or (not a.isNil and not b.isNil and a[] == b[])
 equals *(ref Type)
 equals *(ref InstructionObj)
 equals *(ref StatementObj)
 
 equals *Value
-equals *FullValueObj
+proc `==`*[T](a, b: BoxedValueObj[T]): bool {.noSideEffect.} =
+  a.type == b.type and (when compiles(a.value): a.value == b.value else: true)
 equals *Type
 equals *TypeMatch
 equals *InstructionObj
@@ -90,41 +93,13 @@ proc `$`*(vt: Box[Type]): string =
   else: $vt.unbox
 
 proc `$`*(value: Value): string
-proc `$`*(value: FullValueObj): string
 
-proc `$`*(value: FullValue): string =
+proc `$`*[T](value: BoxedValueObj[T]): string =
+  result = "Boxed(" & (when T isnot Type: $value.value else: "") & ")"
+
+proc `$`*(value: BoxedValue): string =
   if value.isNil: "<nil>"
   else: $value[]
-
-proc `$`*(value: FullValueObj): string =
-  result = case value.kind
-  of vkNone: "()"
-  of vkInt32: $value.int32Value
-  of vkUint32: $value.uint32Value
-  of vkFloat32: $value.float32Value
-  of vkBool: $value.boolValue
-  of vkEffect: "Effect(" & $value.effectValue.unref & ")"
-  of vkReference: "ref(" & $value.referenceValue.unref & ")"
-  of vkBoxed: $value.boxedValue
-  of vkInt64: $value.int64Value
-  of vkUint64: $value.uint64Value
-  of vkFloat64: $value.float64Value
-  of vkList: ($value.listValue.unref)[1..^1]
-  of vkString: value.stringValue.unref
-  of vkArray:
-    var s = ($value.tupleValue.unref)[1..^1]
-    s[0] = '('
-    s[^1] = ')'
-    s
-  of vkType: $value.type[]
-  of vkFunction: "<function>"
-  of vkLinearFunction: "<linear function>"
-  of vkNativeFunction: "<native function>"
-  of vkSet: $value.setValue
-  of vkTable: $value.tableValue
-  of vkExpression: $value.expressionValue[]
-  of vkStatement: $value.statementValue[]
-  of vkScope: $value.scopeValue[]
 
 proc `$`*(value: Value): string =
   case value.kind
@@ -133,14 +108,28 @@ proc `$`*(value: Value): string =
   of vkUint32: $value.uint32Value
   of vkFloat32: $value.float32Value
   of vkBool: $value.boolValue
-  of vkReference: "ref(" & $value.referenceValue.unref & ")"
+  of vkReference: "ref[" & $cast[int](value.referenceValue) & "](" & $value.referenceValue.unref & ")"
   of vkArray:
     var s = ($value.tupleValue.unref)[1..^1]
     s[0] = '('
     s[^1] = ')'
     s
   of vkEffect: "Effect(" & $value.effectValue.unref & ")"
-  of boxedValueKinds: $value.boxedValue
+  of vkBoxed: $value.boxedValue.value
+  of vkInt64: $value.int64Value.value
+  of vkUint64: $value.uint64Value.value
+  of vkFloat64: $value.float64Value.value
+  of vkList: ($value.listValue.value.unref)[1..^1]
+  of vkString: value.stringValue.value.unref
+  of vkType: $value.typeValue.type
+  of vkFunction: "<function>"
+  of vkLinearFunction: "<linear function>"
+  of vkNativeFunction: "<native function>"
+  of vkSet: $value.setValue.value
+  of vkTable: $value.tableValue.value
+  of vkExpression: $value.expressionValue[]
+  of vkStatement: $value.statementValue[]
+  of vkScope: $value.scopeValue[]
 
 proc `$`*(p: TypeBase): string {.inline.} = p.name
 

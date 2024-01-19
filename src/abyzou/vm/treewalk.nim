@@ -40,11 +40,11 @@ include ./bytecode
 proc call*(fun: Value, args: sink Array[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
   case fun.kind
   of vkNativeFunction:
-    result = fun.boxedValue.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
+    result = fun.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
   of vkFunction:
-    result = fun.boxedValue.functionValue.call(args, effectHandler)
+    result = fun.functionValue.value.call(args, effectHandler)
   of vkLinearFunction:
-    result = fun.boxedValue.linearFunctionValue.run(args.toOpenArray(0, args.len - 1))
+    result = fun.linearFunctionValue.value.run(args.toOpenArray(0, args.len - 1))
   else: raiseAssert("cannot call " & $fun)
 
 proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = nil): Value =
@@ -85,7 +85,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     stack.set(ins.variableSetIndex, result)
   of ArmStack:
     result = run ins.armStackFunction
-    var fun = result.boxedValue.functionValue
+    var fun = result.functionValue.value
     for a, b in ins.armStackCaptures.items:
       fun.stack.set(a, stack.get(b))
     fun.stack = fun.stack.shallowRefresh()
@@ -113,18 +113,18 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     var handler: proc (effect: Value): bool
     case h.kind
     of vkNativeFunction:
-      let f = h.boxedValue.nativeFunctionValue
+      let f = h.nativeFunctionValue
       handler = proc (effect: Value): bool =
         f([effect]).toBool
     of vkFunction:
-      let f = h.boxedValue.functionValue
+      let f = h.functionValue.value
       handler = proc (effect: Value): bool =
         let val = f.call([effect].toArray)
         if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
           return false
         val.toBool
     of vkLinearFunction:
-      let f = h.boxedValue.linearFunctionValue
+      let f = h.linearFunctionValue.value
       handler = proc (effect: Value): bool =
         let val = f.run([effect])
         if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
@@ -162,60 +162,59 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     let x = run ins.getIndexAddress
     case x.kind
     of vkList:
-      result = x.boxedValue.listValue.unref[ins.getIndex]
+      result = x.listValue.value.unref[ins.getIndex]
     of vkArray:
       result = x.tupleValue.unref[ins.getIndex]
     of vkString:
-      result = toValue(x.boxedValue.stringValue.unref[ins.getIndex].int)
+      result = toValue(x.stringValue.value.unref[ins.getIndex].int)
     else: discard # error
   of SetIndex:
     let x = run ins.setIndexAddress
     result = run ins.setIndexValue
     case x.kind
     of vkList:
-      x.boxedValue.listValue.unref[ins.setIndex] = result
+      x.listValue.value.unref[ins.setIndex] = result
     of vkArray:
       x.tupleValue[ins.setIndex] = result
     of vkString:
       assert result.kind == vkInt32 and result.int32Value >= 0 and result.int32Value <= 255
-      x.boxedValue.stringValue.unref[ins.setIndex] = result.int32Value.char
+      x.stringValue.value.unref[ins.setIndex] = result.int32Value.char
     else: discard # error
   of AddInt:
-    # XXX (4) account for boxing probably best with vkBoxedInt32
-    let a = run ins.binary1
-    let b = run ins.binary2
+    let a = unboxStripType run ins.binary1
+    let b = unboxStripType run ins.binary2
     result = toValue(a.int32Value + b.int32Value)
   of SubInt:
-    let a = run ins.binary1
-    let b = run ins.binary2
+    let a = unboxStripType run ins.binary1
+    let b = unboxStripType run ins.binary2
     result = toValue(a.int32Value - b.int32Value)
   of MulInt:
-    let a = run ins.binary1
-    let b = run ins.binary2
+    let a = unboxStripType run ins.binary1
+    let b = unboxStripType run ins.binary2
     result = toValue(a.int32Value * b.int32Value)
   of DivInt:
-    let a = run ins.binary1
-    let b = run ins.binary2
+    let a = unboxStripType run ins.binary1
+    let b = unboxStripType run ins.binary2
     result = toValue(a.int32Value div b.int32Value)
   of AddFloat:
-    let a = run ins.binary1
-    let b = run ins.binary2
+    let a = unboxStripType run ins.binary1
+    let b = unboxStripType run ins.binary2
     result = toValue(a.float32Value + b.float32Value)
   of SubFloat:
-    let a = run ins.binary1
-    let b = run ins.binary2
+    let a = unboxStripType run ins.binary1
+    let b = unboxStripType run ins.binary2
     result = toValue(a.float32Value - b.float32Value)
   of MulFloat:
-    let a = run ins.binary1
-    let b = run ins.binary2
+    let a = unboxStripType run ins.binary1
+    let b = unboxStripType run ins.binary2
     result = toValue(a.float32Value * b.float32Value)
   of DivFloat:
-    let a = run ins.binary1
-    let b = run ins.binary2
+    let a = unboxStripType run ins.binary1
+    let b = unboxStripType run ins.binary2
     result = toValue(a.float32Value / b.float32Value)
   of NegInt:
-    let a = run ins.unary
+    let a = unboxStripType run ins.unary
     result = toValue(-a.int32Value)
   of NegFloat:
-    let a = run ins.unary
+    let a = unboxStripType run ins.unary
     result = toValue(-a.float32Value)

@@ -15,11 +15,11 @@ module logic:
     funcTypeWithVarargs(StatementTy, [ScopeTy], StatementTy).withProperties(
       property(Meta, funcTypeWithVarargs(BoolTy, [], BoolTy))),
     toValue proc (valueArgs: openarray[Value]): Value =
-      var res = valueArgs[^1].boxedValue.statementValue
+      var res = valueArgs[^1].statementValue
       if valueArgs.len > 1:
         for i in countdown(valueArgs.len - 2, 1):
           res = Statement(kind: skIf,
-            ifCond: valueArgs[i].boxedValue.statementValue,
+            ifCond: valueArgs[i].statementValue,
             ifTrue: res,
             ifFalse: constant(false, BoolTy),
             knownType: BoolTy)
@@ -28,11 +28,11 @@ module logic:
     funcTypeWithVarargs(StatementTy, [ScopeTy], StatementTy).withProperties(
       property(Meta, funcTypeWithVarargs(BoolTy, [], BoolTy))),
     toValue proc (valueArgs: openarray[Value]): Value =
-      var res = valueArgs[^1].boxedValue.statementValue
+      var res = valueArgs[^1].statementValue
       if valueArgs.len > 1:
         for i in countdown(valueArgs.len - 2, 1):
           res = Statement(kind: skIf,
-            ifCond: valueArgs[i].boxedValue.statementValue,
+            ifCond: valueArgs[i].statementValue,
             ifTrue: constant(true, BoolTy),
             ifFalse: res,
             knownType: BoolTy)
@@ -42,30 +42,30 @@ module logic:
   define "if", funcType(StatementTy, [ScopeTy, StatementTy, ExpressionTy]).withProperties(
     property(Meta, funcType(AnyTy, [BoolTy, AnyTy]))
   ), toValue proc (valueArgs: openarray[Value]): Value = 
-    let sc = valueArgs[0].boxedValue.scopeValue.childScope()
+    let sc = valueArgs[0].scopeValue.childScope()
     result = toValue Statement(kind: skIf,
-      ifCond: valueArgs[1].boxedValue.statementValue,
-      ifTrue: sc.compile(valueArgs[2].boxedValue.expressionValue, +AnyTy),
+      ifCond: valueArgs[1].statementValue,
+      ifTrue: sc.compile(valueArgs[2].expressionValue, +AnyTy),
       ifFalse: Statement(kind: skNone))
   define "if", funcType(StatementTy, [ScopeTy, StatementTy, ExpressionTy, ExpressionTy]).withProperties(
     property(Meta, funcType(AnyTy, [BoolTy, AnyTy, AnyTy]))
   ), toValue proc (valueArgs: openarray[Value]): Value = 
-    var els = valueArgs[3].boxedValue.expressionValue
+    var els = valueArgs[3].expressionValue
     if els.kind == Colon and els.left.isIdentifier(ident) and ident == "else":
       els = els.right
-    let scope = valueArgs[0].boxedValue.scopeValue
+    let scope = valueArgs[0].scopeValue
     let sc = scope.childScope()
     let elsesc = scope.childScope()
     var res = Statement(kind: skIf,
-      ifCond: valueArgs[1].boxedValue.statementValue,
-      ifTrue: sc.compile(valueArgs[2].boxedValue.expressionValue, +AnyTy),
+      ifCond: valueArgs[1].statementValue,
+      ifTrue: sc.compile(valueArgs[2].expressionValue, +AnyTy),
       ifFalse: elsesc.compile(els, +AnyTy))
     res.knownType = commonSuperType(res.ifTrue.knownType, res.ifFalse.knownType)
     result = toValue(res)
   define "while", funcType(StatementTy, [ScopeTy, StatementTy, ExpressionTy]).withProperties(
     property(Meta, funcType(NoneTy, [BoolTy, NoneTy]))
   ), toValue proc (valueArgs: openarray[Value]): Value = 
-    let sc = valueArgs[0].boxedValue.scopeValue.childScope()
+    let sc = valueArgs[0].scopeValue.childScope()
     result = toValue Statement(kind: skWhile,
-      whileCond: valueArgs[1].boxedValue.statementValue,
-      whileBody: sc.compile(valueArgs[2].boxedValue.expressionValue, -NoneTy))
+      whileCond: valueArgs[1].statementValue,
+      whileBody: sc.compile(valueArgs[2].expressionValue, -NoneTy))

@@ -14,7 +14,7 @@ module syntax:
     let st = scope.compile(args[0], +AnyTy)
     result = toValue constant(scope.context.evaluateStatic(st.toInstruction), st.knownType)
   
-  # XXX (3) generic assignments or functions
+  # XXX (2) generic assignments or functions
   proc makeFn(scope: Scope, arguments: seq[Expression], body: Expression,
     name: string, returnBound: TypeBound, returnBoundSet: bool): Statement =
     let context = scope.childContext()
@@ -23,7 +23,7 @@ module syntax:
     for i in 0 ..< arguments.len:
       var arg = arguments[i]
       if arg.kind == Colon:
-        fnTypeArguments.elements[i] = scope.evaluateStatic(arg.right, +TypeTy[AnyTy]).boxedValue.type[].unwrapTypeType
+        fnTypeArguments.elements[i] = scope.evaluateStatic(arg.right, +TypeTy[AnyTy]).typeValue.type.unwrapTypeType
         arg = arg.left
       else:
         fnTypeArguments.elements[i] = AnyTy
@@ -47,7 +47,7 @@ module syntax:
       fun = toValue(TreeWalkFunction(
         stack: bodyScope.context.makeStack(),
         instruction: body.toInstruction))
-    fun.boxedValue.type = toRef(fnType)
+    setTypeIfBoxed(fun, fnType)
     if not v.isNil:
       scope.context.set(v, fun)
     var captures: seq[tuple[index, valueIndex: int]]
@@ -63,7 +63,7 @@ module syntax:
     var body = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.type[].unwrapTypeType
+        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).typeValue.type.unwrapTypeType
         lhs = lhs.left
         (+t, true)
       else:
@@ -82,7 +82,7 @@ module syntax:
     let rhs = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.type[].unwrapTypeType
+        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).typeValue.type.unwrapTypeType
         lhs = lhs.left
         (+t, true)
       else:
@@ -101,7 +101,7 @@ module syntax:
     let rhs = args[1]
     let (bound, typeSet) =
       if lhs.kind == Colon:
-        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).boxedValue.type[].unwrapTypeType
+        let t = scope.evaluateStatic(lhs.right, +TypeTy[AnyTy]).typeValue.type.unwrapTypeType
         lhs = lhs.left
         (+t, true)
       else:

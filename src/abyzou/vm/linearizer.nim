@@ -1,7 +1,7 @@
 import ./[primitives, arrays, valueconstr, typebasics], std/tables
 
-# xxx do some kind of register last use analysis to merge some registers
-# xxx (1) constant pool can be long string of serialized values,
+# XXX (4) do some kind of register last use analysis to merge some registers
+# XXX (5) constant pool can be long string of serialized values,
 # then they are deserialized and cached into registers when loaded
 
 type
@@ -331,7 +331,7 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
         (coll: args, ind: i.int32, val: value(a))))
     let tReg = fn.newRegister()
     for t, d in s.dispatchees.items:
-      # XXX make sure this type arming works
+      # XXX (3) make sure this type arming works
       let ty = funcType(AnyTy, t)
       fn.add(Instr(kind: LoadConstant, lc:
         (res: tReg, constant: fn.getConstant(toValue(ty)))))
@@ -391,7 +391,7 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
     fn.jumpPoint(falseLoc)
     linearize(context, fn, branchRes, s.ifFalse)
     fn.jumpPoint(endLoc)
-    # XXX maybe later optimize consecutive jump points to 1 jump point
+    # XXX (4) maybe later optimize consecutive jump points to 1 jump point
     # like if s.ifFalse is a skNone statement
   of skWhile:
     let startLoc = fn.newJumpLocation()
@@ -418,7 +418,7 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
     linearize(context, fn, result, s.effectBody)
     fn.add(Instr(kind: PopEffectHandler))
   of skTuple:
-    # XXX statement shouldn't build collection
+    # XXX (4) statement shouldn't build collection
     let res = resultRegister(fn, result)
     fn.add(Instr(kind: InitTuple, coll:
       (res: res, siz: s.elements.len.int32)))
@@ -426,7 +426,7 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
       fn.add(Instr(kind: SetConstIndex, sci:
         (coll: res, ind: i.int32, val: value(a))))
   of skList:
-    # XXX statement shouldn't build collection
+    # XXX (4) statement shouldn't build collection
     let res = resultRegister(fn, result)
     fn.add(Instr(kind: InitList, coll:
       (res: res, siz: s.elements.len.int32)))
@@ -436,7 +436,7 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
       fn.add(Instr(kind: SetConstIndex, sci:
         (coll: res, ind: i.int32, val: value(a))))
   of skSet:
-    # XXX statement shouldn't build collection
+    # XXX (4) statement shouldn't build collection
     let res = resultRegister(fn, result)
     fn.add(Instr(kind: InitSet, coll:
       (res: res, siz: s.elements.len.int32)))
@@ -445,7 +445,7 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
       fn.add(Instr(kind: SetIndex, sri:
         (coll: res, ind: value(a), val: value(a))))
   of skTable:
-    # XXX statement shouldn't build collection
+    # XXX (4) statement shouldn't build collection
     let res = resultRegister(fn, result)
     fn.add(Instr(kind: InitTable, coll:
       (res: res, siz: s.elements.len.int32)))

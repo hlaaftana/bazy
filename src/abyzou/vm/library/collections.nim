@@ -19,18 +19,18 @@ module collections:
     result.context.set rf, toValue proc (args: openarray[Value]): Value =
       result = Value(kind: vkReference)
       new(result.referenceValue.realRef)
-      result.referenceValue.realRef[] = args[0].toFullValueObj
+      result.referenceValue.realRef[] = args[0]
     result.context.set urf, toValue proc (args: openarray[Value]): Value =
-      args[0].referenceValue.unref.toSmallValue
+      args[0].referenceValue.unref
     result.context.set upd, toValue proc (args: openarray[Value]): Value =
-      args[0].referenceValue.realRef[] = args[1].toFullValueObj
+      args[0].referenceValue.realRef[] = args[1]
   define ".[]", funcType(StatementTy, [ScopeTy, StatementTy, StatementTy]).withProperties(
     property(Meta, funcType(AnyTy, [Type(kind: tyBase, typeBase: TupleTy), Int32Ty]))
   ), toValue proc (valueArgs: openarray[Value]): Value =
-    let scope = valueArgs[0].boxedValue.scopeValue
-    let index = scope.context.evaluateStatic(valueArgs[2].boxedValue.statementValue.toInstruction)
-    let nthType = valueArgs[1].boxedValue.statementValue.knownType.nth(index.int32Value)
+    let scope = valueArgs[0].scopeValue
+    let index = scope.context.evaluateStatic(valueArgs[2].statementValue.toInstruction)
+    let nthType = valueArgs[1].statementValue.knownType.nth(index.int32Value)
     result = toValue Statement(kind: skGetIndex,
       knownType: nthType,
-      getIndexAddress: valueArgs[1].boxedValue.statementValue,
+      getIndexAddress: valueArgs[1].statementValue,
       getIndex: index.int32Value)

@@ -413,7 +413,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
       let call = Statement(kind: skFunctionCall,
         callee: variableGet(scope.context, meta),
         arguments: arguments).toInstruction
-      result = scope.context.evaluateStatic(call).boxedValue.statementValue
+      result = scope.context.evaluateStatic(call).statementValue
     else:
       for d in subMetas:
         var arguments = newArray[Value](ex.arguments.len + 1)
@@ -429,7 +429,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
           let call = Statement(kind: skFunctionCall,
             callee: variableGet(scope.context, d),
             arguments: argumentStatement).toInstruction
-          result = scope.context.evaluateStatic(call).boxedValue.statementValue
+          result = scope.context.evaluateStatic(call).statementValue
           break
 
 proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
@@ -444,7 +444,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
   functionType = funcType(if bound.variance == Covariant: AnyTy else: bound.boundType, argumentTypes)
   # lowest supertype function:
   try:
-    # XXX (2) named arguments
+    # XXX (1) named arguments
     var withConstructor = functionType
     withConstructor.baseArguments[0] = TupleConstructorTy[withConstructor.baseArguments[0]]
     let callee = map(ex.address, -withConstructor)
@@ -474,7 +474,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
             let m = match(-argumentTypes[i], pt)
             if m.matches:
               # optimize checking types we know match
-              # XXX do this recursively using deep matches for some types
+              # XXX (3) do this recursively using deep matches for some types
               d[0][i] = AnyTy
             else:
               d[0][i] = pt
@@ -633,7 +633,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
           arguments: @[ex.left, ex.right]))
   of CallKinds: result = compileCall(scope, ex, bound)
   of Subscript:
-    # XXX specialize for generics
+    # XXX (2) specialize for generics
     result = forward(Expression(kind: PathCall,
       address: newSymbolExpression(short".[]"),
       arguments: @[ex.address] & ex.arguments))

@@ -7,7 +7,7 @@ import
 template withkind(k, val): Value =
   Value(kind: `vk k`, `k Value`: val)
 template withkindboxv(vk, kv, val): untyped =
-  Value(kind: `vk`, boxedValue: FullValue(kind: `vk`, `kv`: val))
+  Value(kind: `vk`, `kv`: BoxedValue[typeof(val)](value: val))
 template withkindbox(k, val): untyped =
   withkindboxv(`vk k`, `k Value`, val)
 
@@ -39,67 +39,60 @@ proc toValue*(x: sink Array[Value]): Value {.inline.} =
     else:
       toArray(a)
   withkind(array, arr x.toOpenArray(0, x.len - 1))
-proc toValue*(x: Type): Value = Value(kind: vkType, boxedValue: FullValue(kind: vkType, type: toRef TypeTy[x]))
-proc toValue*(x: Box[Type]): Value = Value(kind: vkType, boxedValue: FullValue(kind: vkType, type: toRef TypeTy[x.unbox]))
+proc toValue*(x: Type): Value = Value(kind: vkType, typeValue: BoxedValue[Type](type: TypeTy[x]))
+proc toValue*(x: Box[Type]): Value = Value(kind: vkType, typeValue: BoxedValue[Type](type: TypeTy[x.unbox]))
 proc toValue*(x: sink HashSet[Value]): Value = withkindbox(set, x)
 proc toValue*(x: sink Table[Value, Value]): Value = withkindbox(table, x)
-proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkindbox(nativeFunction, x)
+proc toValue*(x: proc (args: openarray[Value]): Value {.nimcall.}): Value = withkind(nativeFunction, x)
 proc toValue*(x: TreeWalkFunction): Value = withkindbox(function, x)
 proc toValue*(x: LinearFunction): Value = withkindbox(linearFunction, x)
-proc toValue*(x: Expression): Value = withkindbox(expression, x)
-proc toValue*(x: Statement): Value = withkindbox(statement, x)
-proc toValue*(x: Scope): Value = withkindbox(scope, x)
-
-proc toFullValueObj*(x: Value): FullValueObj =
-  case x.kind
-  of vkNone: FullValueObj(kind: vkNone)
-  of vkInt32: FullValueObj(kind: vkInt32, int32Value: x.int32Value)
-  of vkUint32: FullValueObj(kind: vkUint32, uint32Value: x.uint32Value)
-  of vkFloat32: FullValueObj(kind: vkFloat32, float32Value: x.float32Value)
-  of vkBool: FullValueObj(kind: vkBool, boolValue: x.boolValue)
-  of vkReference: FullValueObj(kind: vkReference, referenceValue: x.referenceValue)
-  of vkArray: FullValueObj(kind: vkArray, tupleValue: x.arrayValue.unref)
-  of boxedValueKinds: x.boxedValue[]
-  of vkEffect: x.effectValue.unbox.toFullValueObj
-
-proc toSmallValue*(x: FullValueObj | FullValue): Value =
-  let unboxedKind = x.kind notin boxedValueKinds
-  if unboxedKind and x.type.isNil:
-    case x.kind
-    of vkNone: result = Value(kind: vkNone)
-    of vkInt32: result = Value(kind: vkInt32, int32Value: x.int32Value)
-    of vkUint32: result = Value(kind: vkUint32, uint32Value: x.uint32Value) 
-    of vkFloat32: result = Value(kind: vkFloat32, float32Value: x.float32Value) 
-    of vkBool: result = Value(kind: vkBool, boolValue: x.boolValue) 
-    of vkReference: result = Value(kind: vkReference, referenceValue: x.referenceValue)
-    of vkEffect: result = Value(kind: vkEffect, effectValue: x.effectValue)
-    of vkArray: result = Value(kind: vkArray, arrayValue: x.tupleValue.toArrayRef)
-    of boxedValueKinds: discard # unreachable
-  else:
-    result = Value(kind: if unboxedKind: vkBoxed else: x.kind)
-    result.boxedValue = toRef x
-
-proc unboxStripType*(x: FullValueObj | FullValue): Value =
-  case x.kind
-  of vkNone: result = Value(kind: vkNone)
-  of vkInt32: result = Value(kind: vkInt32, int32Value: x.int32Value)
-  of vkUint32: result = Value(kind: vkUint32, uint32Value: x.uint32Value) 
-  of vkFloat32: result = Value(kind: vkFloat32, float32Value: x.float32Value) 
-  of vkBool: result = Value(kind: vkBool, boolValue: x.boolValue) 
-  of vkEffect: result = Value(kind: vkEffect, effectValue: x.effectValue)
-  of vkReference: result = Value(kind: vkReference, referenceValue: x.referenceValue)
-  of vkArray: result = Value(kind: vkArray, arrayValue: toArrayRef x.tupleValue)
-  of boxedValueKinds:
-    result = Value(kind: x.kind)
-    result.boxedValue = when x is ref: x else: toRef x
+proc toValue*(x: Expression): Value = withkind(expression, x)
+proc toValue*(x: Statement): Value = withkind(statement, x)
+proc toValue*(x: Scope): Value = withkind(scope, x)
 
 proc unboxStripType*(x: Value): Value {.inline.} =
-  case x.kind
-  of boxedValueKinds: result = unboxStripType(x.boxedValue)
+  if x.kind == vkBoxed: result = x.boxedValue.value
   else: result = x
 
+proc setTypeIfBoxed*(x: Value, t: Type) {.inline.} =
+  case x.kind
+  of unboxedValueKinds: discard
+  of vkBoxed: x.boxedValue.type = t
+  of vkList: x.listValue.type = t
+  of vkString: x.stringValue.type = t
+  of vkInt64: x.int64Value.type = t
+  of vkUint64: x.uint64Value.type = t
+  of vkFloat64: x.float64Value.type = t
+  of vkType: x.typeValue.type = t
+  of vkSet: x.setValue.type = t
+  of vkTable: x.tableValue.type = t
+  of vkFunction: x.functionValue.type = t
+  of vkLinearFunction: x.linearFunctionValue.type = t
+
+proc getTypeIfBoxed*(x: Value): Type {.inline.} =
+  case x.kind
+  of unboxedValueKinds: discard
+  of vkBoxed: result = x.boxedValue.type
+  of vkList: result = x.listValue.type
+  of vkString: result = x.stringValue.type
+  of vkInt64: result = x.int64Value.type
+  of vkUint64: result = x.uint64Value.type
+  of vkFloat64: result = x.float64Value.type
+  of vkType: result = x.typeValue.type
+  of vkSet: result = x.setValue.type
+  of vkTable: result = x.tableValue.type
+  of vkFunction: result = x.functionValue.type
+  of vkLinearFunction: result = x.linearFunctionValue.type
+
+proc makeTyped*(x: var Value, t: Type) =
+  if x.kind in unboxedValueKinds:
+    let y = Value(kind: vkBoxed, boxedValue: BoxedValue[Value](type: t, value: x))
+    x = y
+  else:
+    setTypeIfBoxed(x, t)
+
 when false:
-  # XXX this is probably important
+  # XXX (5) this is probably important
   proc copy*(value: Value): Value =
     case value.kind
     of vkNone, vkInt64, vkBool, vkUint64, vkFloat64,

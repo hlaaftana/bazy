@@ -39,7 +39,14 @@ type
       ## only value kind with reference semantics
     vkArray
       ## like java array but typed like TS, implementation of tuples
-    vkBoxed # XXX (4) maybe do BoxedInt32, BoxedUint32 etc
+    vkNativeFunction
+      ## Nim function that takes values as argument
+    # could be pointers or serialized but for now this is more efficient:
+    vkExpression
+    vkStatement
+    vkScope
+    vkBoxed
+      ## boxed version of unboxed values, used for type info
     vkInt64, vkUint64, vkFloat64
     vkType
       ## type value
@@ -52,72 +59,18 @@ type
     vkFunction
       ## function
     vkLinearFunction
-    vkNativeFunction
-      ## Nim function that takes values as argument
-    # could be pointers or serialized but for now this is more efficient:
-    vkExpression
-    vkStatement
-    vkScope
     # bigints can be added
+    # native types in general can be BoxedValue[pointer]
 
-const boxedValueKinds* = {vkBoxed..high(ValueKind)}
+const unboxedValueKinds* = {vkNone..pred(vkBoxed)}
 
 type
-  FullValueObj* = object
-    # XXX (4) replace with BoxedValue[T]
-    `type`*: ref Type
-      # XXX (4) actually use and account for this without losing performance
-      # for now it's mostly seen, but nothing initializes values with it 
-    case kind*: ValueKind
-    of vkNone: discard
-    of vkBool:
-      boolValue*: bool
-    of vkInt32:
-      int32Value*: int32
-    of vkUint32:
-      uint32Value*: uint32
-    of vkFloat32:
-      float32Value*: float32
-    of vkEffect:
-      effectValue*: Box[Value]
-    of vkReference:
-      referenceValue*: Reference[FullValueObj]
-    of vkBoxed:
-      boxedValue*: FullValue
-    of vkInt64:
-      int64Value*: int64
-    of vkUint64:
-      uint64Value*: uint64
-    of vkFloat64:
-      float64Value*: float64
-    of vkType:
-      discard#typeValue*: Type
-    of vkArray:
-      # XXX (6) pointer field location should be same as vkList, vkString
-      tupleValue*: Array[Value]
-    of vkString:
-      # XXX (6) pointer field location should be same as vkArray, vkList
-      stringValue*: string
-    of vkList:
-      # XXX (6) pointer field location should be same as vkArray, vkString
-      listValue*: seq[Value]
-    of vkSet:
-      setValue*: HashSet[Value]
-    of vkTable:
-      tableValue*: Table[Value, Value]
-    of vkFunction:
-      functionValue*: TreeWalkFunction
-    of vkLinearFunction:
-      linearFunctionValue*: LinearFunction
-    of vkNativeFunction:
-      nativeFunctionValue*: proc (args: openarray[Value]): Value {.nimcall.}
-    of vkExpression:
-      expressionValue*: Expression
-    of vkStatement:
-      statementValue*: Statement
-    of vkScope:
-      scopeValue*: Scope
-  FullValue* = ref FullValueObj
+  BoxedValueObj*[T] = object
+    # value first might be useful
+    when T isnot Type:
+      value*: T
+    `type`*: Type
+  BoxedValue*[T] = ref BoxedValueObj[T]
 
   ValueObj* = object
     # entire thing can be pointer tagged, but would need GC hooks
@@ -135,11 +88,43 @@ type
     of vkEffect:
       effectValue*: Box[Value]
     of vkReference:
-      referenceValue*: Reference[FullValueObj]
+      # XXX figure out how to optimize this for mutable collections
+      referenceValue*: Reference[Value]
     of vkArray:
+      # XXX (6) maybe match pointer field location with vkList, vkString
       arrayValue*: ArrayRef[Value]
-    of boxedValueKinds:
-      boxedValue*: FullValue
+    of vkBoxed:
+      boxedValue*: BoxedValue[Value]
+    of vkInt64:
+      int64Value*: BoxedValue[int64]
+    of vkUint64:
+      uint64Value*: BoxedValue[uint64]
+    of vkFloat64:
+      float64Value*: BoxedValue[float64]
+    of vkType:
+      typeValue*: BoxedValue[Type]
+    of vkString:
+      # XXX (6) maybe match pointer field location with vkArray, vkList
+      stringValue*: BoxedValue[string]
+    of vkList:
+      # XXX (6) maybe match pointer field location with vkArray, vkString
+      listValue*: BoxedValue[seq[Value]]
+    of vkSet:
+      setValue*: BoxedValue[HashSet[Value]]
+    of vkTable:
+      tableValue*: BoxedValue[Table[Value, Value]]
+    of vkFunction:
+      functionValue*: BoxedValue[TreeWalkFunction]
+    of vkLinearFunction:
+      linearFunctionValue*: BoxedValue[LinearFunction]
+    of vkNativeFunction:
+      nativeFunctionValue*: proc (args: openarray[Value]): Value {.nimcall.}
+    of vkExpression:
+      expressionValue*: Expression
+    of vkStatement:
+      statementValue*: Statement
+    of vkScope:
+      scopeValue*: Scope
   
   PointerTaggedValue* = distinct (
     when pointerTaggable:
@@ -155,7 +140,7 @@ type
     tyNoType,
     # concrete
     tyCompound,
-    tyTuple, # XXX (2) make into tyComposite, tuple, named tuple, array (i.e. int^20) all at once
+    tyTuple, # XXX (1) make into tyComposite, tuple, named tuple, array (i.e. int^20) all at once
     # typeclass
     tyAny, tyNone, ## none is bottom type
     tyUnion, tyIntersection, tyNot,
@@ -213,7 +198,7 @@ type
     ntyTupleConstructor
 
   TypeBase* = ref object
-    # XXX (3) check arguments at generic fill time
+    # XXX (2) check arguments at generic fill time
     id*: TypeBaseId
     name*: string
     nativeType*: NativeType
@@ -228,8 +213,8 @@ type
     bound*: TypeBound
   
   Type* = object
-    # XXX (4) 90 bytes
-    # XXX (3) figure out which kinds to merge with tyCompound
+    # XXX (2) 90 bytes
+    # XXX (2) figure out which kinds to merge with tyCompound (XXX (1) at least tyTuple)
     properties*: Table[TypeBase, Type]
       # can be a multitable later on
     case kind*: TypeKind
@@ -240,10 +225,10 @@ type
     of tyTuple:
       elements*: seq[Type]
       varargs*: Box[Type] # for now only trailing
-        # XXX (2) either move to property, or allow non-trailing
-        # XXX (2) definite length varargs? i.e. array[3, int]
+        # XXX (1) either move to property, or allow non-trailing
+        # XXX (1) definite length varargs? i.e. array[3, int]
       elementNames*: Table[string, int]
-      # XXX (2) also Defaults purely for initialization/conversion?
+      # XXX (1) also Defaults purely for initialization/conversion?
       # meaning only considered in function type relation
     of tyUnion, tyIntersection:
       operands*: seq[Type]
@@ -278,7 +263,7 @@ type
   LinearFunction* = object
     registerCount*: int
     argPositions*: Array[int] ## last is result
-    constants*: Array[Value] # XXX (1) serialize values
+    constants*: Array[Value] # XXX (5) serialize values
     jumpLocations*: Array[int]
     instructions*: seq[byte]
 
@@ -436,7 +421,7 @@ type
     stackIndex*: int
     scope* {.cursor.}: Scope
     genericParams*: seq[TypeParameter]
-      # XXX (3) maybe make this a tuple type too with signature for named and default generic params
+      # XXX (2) maybe make this a tuple type too with signature for named and default generic params
     lazyExpression*: Expression
     evaluated*: bool
 

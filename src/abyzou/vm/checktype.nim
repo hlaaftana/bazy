@@ -1,10 +1,8 @@
 import
   std/[tables, sets],
-  ./[primitives, typebasics, typematch, arrays, valueconstr, guesstype]
+  ./[primitives, typebasics, typematch, arrays, guesstype, valueconstr]
 
-proc checkType*(value: Value, t: Type): bool
-
-proc checkType*(value: FullValueObj, t: Type): bool =
+proc checkType*(value: Value, t: Type): bool =
   template eachAre(iter; types: seq[Type]): untyped =
     let ts = types; var yes = true; var i = 0
     for it in iter:
@@ -24,6 +22,9 @@ proc checkType*(value: FullValueObj, t: Type): bool =
       if not checkType(key, kt) or not checkType(value, vt):
         yes = false; break
     yes
+  let tValue = getTypeIfBoxed(value)
+  if not isNoType(tValue):
+    return match(t, tValue).matches
   result = case t.kind
   of tyCompound, tyBase:
     let b = if t.kind == tyCompound: t.base else: t.typeBase
@@ -37,25 +38,25 @@ proc checkType*(value: FullValueObj, t: Type): bool =
     of ntyUint64: value.kind == vkUint64
     of ntyFloat64: value.kind == vkFloat64
     of ntyFunction:
-      # XXX (4) no information about signature
+      # XXX (3) this is not necessarily correct, depends on boxed value type
       value.kind in {vkFunction, vkNativeFunction, vkLinearFunction}
     of ntyTuple:
       value.kind == vkArray and (t.kind == tyBase or value.tupleValue.unref.eachAre(t.baseArguments))
     of ntyReference:
       value.kind == vkReference and (t.kind == tyBase or value.referenceValue.unref.checkType(t.baseArguments[0]))
     of ntyList:
-      value.kind == vkList and (t.kind == tyBase or value.listValue.unref.eachAre(t.baseArguments[0]))
+      value.kind == vkList and (t.kind == tyBase or value.listValue.value.unref.eachAre(t.baseArguments[0]))
     of ntyString: value.kind == vkString
     of ntySet:
-      value.kind == vkSet and (t.kind == tyBase or value.setValue.eachAre(t.baseArguments[0]))
+      value.kind == vkSet and (t.kind == tyBase or value.setValue.value.eachAre(t.baseArguments[0]))
     of ntyTable:
-      value.kind == vkTable and (t.kind == tyBase or value.tableValue.eachAreTable(t.baseArguments[0], t.baseArguments[1]))
+      value.kind == vkTable and (t.kind == tyBase or value.tableValue.value.eachAreTable(t.baseArguments[0], t.baseArguments[1]))
     of ntyExpression: value.kind == vkExpression
     of ntyStatement: value.kind == vkStatement
     of ntyScope: value.kind == vkScope
     else:
       not b.valueMatcher.isNil and
-        b.valueMatcher(value.toSmallValue, t)
+        b.valueMatcher(value, t)
   of tyTuple:
     value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements)
   of tyAny: true
@@ -79,13 +80,9 @@ proc checkType*(value: FullValueObj, t: Type): bool =
     value.checkType(t.typeWithProperty.unbox) and value.getType.properties.hasKey(t.withProperty)
   of tySomeValue: false
   of tyParameter: value.checkType(t.parameter.bound.boundType)
-  of tyValue: value.checkType(t.valueType.unbox) and t.value.toFullValueObj == value
+  of tyValue: value.checkType(t.valueType.unbox) and t.value == value
   if result:
     for p, args in t.properties:
       if not p.valueMatcher.isNil:
-        result = result and p.valueMatcher(value.toSmallValue, args)
+        result = result and p.valueMatcher(value, args)
         if not result: return result
-
-proc checkType*(value: Value, t: Type): bool =
-  let fvo = value.toFullValueObj
-  checkType(fvo, t)

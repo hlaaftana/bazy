@@ -96,13 +96,13 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let val =
         case fn.kind
         of vkNativeFunction:
-          fn.boxedValue.nativeFunctionValue([])
+          fn.nativeFunctionValue([])
         of vkFunction:
-          fn.boxedValue.functionValue.call(
+          fn.functionValue.value.call(
             default(Array[Value]),
             effectHandler)
         of vkLinearFunction:
-          fn.boxedValue.linearFunctionValue.run([])
+          fn.linearFunctionValue.value.run([])
         else: raiseAssert("cannot call " & $fn)
       checkEffect val
       put instr.ncall.res, val
@@ -112,14 +112,14 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let val =
         case fn.kind
         of vkNativeFunction:
-          fn.boxedValue.nativeFunctionValue(
+          fn.nativeFunctionValue(
             [get instr.ucall.arg1])
         of vkFunction:
-          fn.boxedValue.functionValue.call(
+          fn.functionValue.value.call(
             toArray[Value]([get instr.ucall.arg1]),
             effectHandler)
         of vkLinearFunction:
-          fn.boxedValue.linearFunctionValue.run([get instr.ucall.arg1])
+          fn.linearFunctionValue.value.run([get instr.ucall.arg1])
         else: raiseAssert("cannot call " & $fn)
       checkEffect val
       put instr.ucall.res, val
@@ -130,11 +130,11 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let val =
         case fn.kind
         of vkNativeFunction:
-          fn.boxedValue.nativeFunctionValue(args)
+          fn.nativeFunctionValue(args)
         of vkFunction:
-          fn.boxedValue.functionValue.call(toArray[Value](args), effectHandler)
+          fn.functionValue.value.call(toArray[Value](args), effectHandler)
         of vkLinearFunction:
-          fn.boxedValue.linearFunctionValue.run(args)
+          fn.linearFunctionValue.value.run(args)
         else: raiseAssert("cannot call " & $fn)
       checkEffect val
       put instr.bcall.res, val
@@ -145,11 +145,11 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let val =
         case fn.kind
         of vkNativeFunction:
-          fn.boxedValue.nativeFunctionValue(args)
+          fn.nativeFunctionValue(args)
         of vkFunction:
-          fn.boxedValue.functionValue.call(toArray[Value](args), effectHandler)
+          fn.functionValue.value.call(toArray[Value](args), effectHandler)
         of vkLinearFunction:
-          fn.boxedValue.linearFunctionValue.run(args)
+          fn.linearFunctionValue.value.run(args)
         else: raiseAssert("cannot call " & $fn)
       checkEffect val
       put instr.tcall.res, val
@@ -160,11 +160,11 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let val =
         case fn.kind
         of vkNativeFunction:
-          fn.boxedValue.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
+          fn.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
         of vkFunction:
-          fn.boxedValue.functionValue.call(args, effectHandler)
+          fn.functionValue.value.call(args, effectHandler)
         of vkLinearFunction:
-          fn.boxedValue.linearFunctionValue.run(args.toOpenArray(0, args.len - 1))
+          fn.linearFunctionValue.value.run(args.toOpenArray(0, args.len - 1))
         else: raiseAssert("cannot call " & $fn)
       checkEffect val
       put instr.tupcall.res, val
@@ -180,11 +180,11 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
         let val =
           case fn.kind
           of vkNativeFunction:
-            fn.boxedValue.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
+            fn.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
           of vkFunction:
-            fn.boxedValue.functionValue.call(args, effectHandler)
+            fn.functionValue.value.call(args, effectHandler)
           of vkLinearFunction:
-            fn.boxedValue.linearFunctionValue.run(args.toOpenArray(0, args.len - 1))
+            fn.linearFunctionValue.value.run(args.toOpenArray(0, args.len - 1))
           else: raiseAssert("cannot call " & $fn)
         checkEffect val
         put instr.tdisp.res, val
@@ -193,43 +193,30 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       read instr.armt
       let tVal = get(instr.armt.typ)
       assert tVal.kind == vkType
-      let t = tVal.boxedValue.type[].unwrapTypeType
-      let val = get(instr.armt.val)
-      if val.kind in boxedValueKinds:
-        let box = val.boxedValue
-        if box.type.isNil:
-          new(box.type)
-        box.type[] = t
-      else:
-        var box = toFullValueObj(val)
-        new(box.type)
-        box.type[] = t
-        var newVal = Value(kind: vkBoxed)
-        new(newVal.boxedValue)
-        newVal.boxedValue[] = box
-        put(instr.armt.val, newVal)
+      let t = tVal.typeValue.type.unwrapTypeType
+      makeTyped(getMut(instr.armt.val), t)
     of ArmStack:
       read instr.arm
       let fn = get(instr.arm.fun)
       case fn.kind
       of vkFunction:
-        fn.boxedValue.functionValue.stack.set(instr.arm.ind, get(instr.arm.val))
+        fn.functionValue.value.stack.set(instr.arm.ind, get(instr.arm.val))
       of vkLinearFunction:
-        fn.boxedValue.linearFunctionValue.constants[instr.arm.ind] = get instr.arm.val
+        fn.linearFunctionValue.value.constants[instr.arm.ind] = get instr.arm.val
       else: raiseAssert("cannot arm stack of " & $fn)
     of RefreshStack:
       read instr.rfs
       let fn = get(instr.rfs.fun)
       case fn.kind
       of vkFunction:
-        fn.boxedValue.functionValue.stack = fn.boxedValue.functionValue.stack.shallowRefresh()
+        fn.functionValue.value.stack = fn.functionValue.value.stack.shallowRefresh()
       of vkLinearFunction:
-        let prev = fn.boxedValue.linearFunctionValue.constants
-        let oldBoxed = fn.boxedValue[]
-        getMut(instr.rfs.fun).boxedValue = nil
-        new(getMut(instr.rfs.fun).boxedValue)
-        getMut(instr.rfs.fun).boxedValue[] = oldBoxed
-        getMut(instr.rfs.fun).boxedValue.linearFunctionValue.constants =
+        let prev = fn.linearFunctionValue.value.constants
+        let oldBoxed = fn.linearFunctionValue[]
+        getMut(instr.rfs.fun).linearFunctionValue = nil
+        new(getMut(instr.rfs.fun).linearFunctionValue)
+        getMut(instr.rfs.fun).linearFunctionValue[] = oldBoxed
+        getMut(instr.rfs.fun).linearFunctionValue.value.constants =
           toArray(prev.toOpenArray(0, prev.len - 1))
       else: raiseAssert("cannot refresh stack of " & $fn)
     of JumpPoint:
@@ -261,18 +248,18 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       var handler: proc (effect: Value): bool
       case h.kind
       of vkNativeFunction:
-        let f = h.boxedValue.nativeFunctionValue
+        let f = h.nativeFunctionValue
         handler = proc (effect: Value): bool =
           f([effect]).toBool
       of vkFunction:
-        let f = h.boxedValue.functionValue
+        let f = h.functionValue.value
         handler = proc (effect: Value): bool =
           let val = f.call([effect].toArray)
           if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
             return false
           val.toBool
       of vkLinearFunction:
-        let f = h.boxedValue.linearFunctionValue
+        let f = h.linearFunctionValue.value
         handler = proc (effect: Value): bool =
           let val = f.run([effect])
           if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
@@ -305,9 +292,9 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       of vkArray:
         put instr.gci.res, coll.tupleValue.unref[instr.gci.ind.int]
       of vkList:
-        put instr.gci.res, coll.boxedValue.listValue[instr.gci.ind.int]
+        put instr.gci.res, coll.listValue.value[instr.gci.ind.int]
       of vkString:
-        put instr.gci.res, toValue(coll.boxedValue.stringValue[instr.gci.ind.int].int)
+        put instr.gci.res, toValue(coll.stringValue.value[instr.gci.ind.int].int)
       else: discard # error
     of SetConstIndex:
       read instr.sci
@@ -316,9 +303,9 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       of vkArray:
         coll.tupleValue[instr.sci.ind.int] = get(instr.sci.val)
       of vkList:
-        coll.boxedValue.listValue[instr.sci.ind.int] = get(instr.sci.val)
+        coll.listValue.value[instr.sci.ind.int] = get(instr.sci.val)
       of vkString:
-        coll.boxedValue.stringValue[instr.sci.ind.int] = get(instr.sci.val).int32Value.char
+        coll.stringValue.value[instr.sci.ind.int] = get(instr.sci.val).int32Value.char
       else: discard # error
     of GetIndex:
       read instr.gri
@@ -327,13 +314,13 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       # XXX (6) maybe prevent dispatch here
       case coll.kind
       of vkList:
-        put instr.gri.res, coll.boxedValue.listValue.unref[ind.unboxStripType.int32Value]
+        put instr.gri.res, coll.listValue.value.unref[ind.unboxStripType.int32Value]
       of vkArray:
         put instr.gri.res, coll.tupleValue.unref[ind.unboxStripType.int32Value]
       of vkString:
-        put instr.gri.res, toValue(coll.boxedValue.stringValue.unref[ind.unboxStripType.int32Value].int)
+        put instr.gri.res, toValue(coll.stringValue.value.unref[ind.unboxStripType.int32Value].int)
       of vkTable:
-        put instr.gri.res, coll.boxedValue.tableValue[ind]
+        put instr.gri.res, coll.tableValue.value[ind]
       else: discard # error
     of SetIndex:
       read instr.sri
@@ -343,15 +330,15 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       # XXX (6) maybe prevent dispatch here
       case coll.kind
       of vkList:
-        coll.boxedValue.listValue.unref[ind.unboxStripType.int32Value] = val
+        coll.listValue.value.unref[ind.unboxStripType.int32Value] = val
       of vkArray:
         coll.tupleValue[ind.unboxStripType.int32Value] = val
       of vkString:
-        coll.boxedValue.stringValue.unref[ind.unboxStripType.int32Value] = val.int32Value.char
+        coll.stringValue.value.unref[ind.unboxStripType.int32Value] = val.int32Value.char
       of vkTable:
-        coll.boxedValue.tableValue[ind] = val
+        coll.tableValue.value[ind] = val
       of vkSet:
-        coll.boxedValue.setValue.incl(val)
+        coll.setValue.value.incl(val)
       else: discard # error
     of AddInt32:
       read instr.binary

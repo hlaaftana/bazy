@@ -1,7 +1,7 @@
 import
   std/tables,
   ../../language/expressions,
-  ../[primitives, compilation, typebasics, guesstype]
+  ../[primitives, compilation, typebasics, guesstype, valueconstr]
 
 proc define*(scope: Scope, n: string, typ: Type): Variable =
   result = newVariable(n, typ)
@@ -9,7 +9,7 @@ proc define*(scope: Scope, n: string, typ: Type): Variable =
 
 proc define*(scope: Scope, n: string, typ: Type, x: sink Value) =
   let variable = define(scope, n, typ)
-  if x.kind in boxedValueKinds: x.boxedValue.type = toRef(typ)
+  setTypeIfBoxed(x, typ)
   scope.context.set(variable, x)
 
 proc define*(context: Context, n: string, typ: Type): Variable {.inline.} =
@@ -17,7 +17,7 @@ proc define*(context: Context, n: string, typ: Type): Variable {.inline.} =
 
 proc define*(context: Context, n: string, typ: Type, x: sink Value) =
   let variable = define(context, n, typ)
-  if x.kind in boxedValueKinds: x.boxedValue.type = toRef(typ)
+  setTypeIfBoxed(x, typ)
   context.set(variable, x)
 
 proc templType*(arity: int): Type {.inline.} =
@@ -32,10 +32,10 @@ proc templType*(arity: int): Type {.inline.} =
 
 template doTempl*(body): untyped =
   (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
-    let scope {.inject, used.} = valueArgs[0].boxedValue.scopeValue
+    let scope {.inject, used.} = valueArgs[0].scopeValue
     var args {.inject.} = newSeq[Expression](valueArgs.len - 1)
     for i in 0 ..< args.len:
-      args[i] = valueArgs[i + 1].boxedValue.expressionValue
+      args[i] = valueArgs[i + 1].expressionValue
     body)
 
 proc typedTemplType*(arity: int): Type {.inline.} =
@@ -58,10 +58,10 @@ proc typedTemplType*(realArgs: openarray[Type], returnType: Type): Type {.inline
 
 template doTypedTempl*(body): untyped =
   (proc (valueArgs: openarray[Value]): Value {.nimcall.} =
-    let scope {.inject, used.} = valueArgs[0].boxedValue.scopeValue
+    let scope {.inject, used.} = valueArgs[0].scopeValue
     var args {.inject.} = newSeq[Statement](valueArgs.len - 1)
     for i in 0 ..< args.len:
-      args[i] = valueArgs[i + 1].boxedValue.statementValue
+      args[i] = valueArgs[i + 1].statementValue
     body)
 
 template doFn*(body): untyped =

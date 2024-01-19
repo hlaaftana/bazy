@@ -194,7 +194,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
   of tyNoType, tyAny, tyNone, tyBase:
     discard
   of tyCompound:
-    # XXX (3) check argument bounds
+    # XXX (2) check argument bounds
     if unlikely(not pattern.base.paramFiller.isNil):
       pattern.base.paramFiller(pattern, table)
     else:

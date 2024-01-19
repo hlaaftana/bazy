@@ -239,16 +239,16 @@ module withGenericMeta:
   ))
   result.define(f2)
   result.context.set f, toValue proc (args: openarray[Value]): Value =
-    let scope = args[0].boxedValue.scopeValue
+    let scope = args[0].scopeValue
     result = toValue compile(scope, Expression(kind: Array,
-      elements: @[args[1].boxedValue.expressionValue]), +AnyTy)
+      elements: @[args[1].expressionValue]), +AnyTy)
   result.context.set f2, toValue proc (args: openarray[Value]): Value =
     result = toValue Statement(kind: skList,
       knownType: ListTy[Int32Ty],
       elements: @[Statement(kind: skUnaryInstruction,
         knownType: Int32Ty,
         unaryInstructionKind: NegInt,
-        unary: args[1].boxedValue.statementValue)])
+        unary: args[1].statementValue)])
 
 test "generic meta":
   let libraries = @[Prelude, withGenericMeta()]
