@@ -140,13 +140,8 @@ proc matchBound*(b: TypeBound, t: Type): bool {.inline.} =
   b.match(t).matches
 
 proc commonSubType*(a, b: Type, doUnion = true, variance = Covariant): Type =
-  var m1, m2: TypeMatch
-  if variance == Covariant:
-    m1 = a.match(b)
-    m2 = b.match(a)
-  else:
-    m1 = (a * variance).match(b)
-    m2 = (b * variance).match(a)
+  let m1 = (a * variance).match(b)
+  let m2 = (b * variance).match(a)
   let cmp = compare(m1, m2)
   if cmp > 0:
     b
@@ -160,13 +155,8 @@ proc commonSubType*(a, b: Type, doUnion = true, variance = Covariant): Type =
     NoType
 
 proc commonSuperType*(a, b: Type, doUnion = true, variance = Covariant): Type =
-  var m1, m2: TypeMatch
-  if variance == Covariant:
-    m1 = a.match(b)
-    m2 = b.match(a)
-  else:
-    m1 = (a * variance).match(b)
-    m2 = (b * variance).match(a)
+  let m1 = (a * variance).match(b)
+  let m2 = (b * variance).match(a)
   let cmp = compare(m1, m2)
   if cmp > 0:
     a
@@ -283,7 +273,7 @@ proc match*(matcher, t: Type, inst: var ParameterInstantiation): TypeMatch =
       if matcher.typeBase == t.typeBase: atomicMatch(tmAlmostEqual)
       else: atomicMatch(tmNone)
     of tyCompound:
-      boolMatch matcher.typeBase == t.typeBase
+      boolMatch matcher.typeBase == t.base
     else: atomicMatch(tmNone)
   of tySomeValue:
     case t.kind

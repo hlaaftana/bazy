@@ -3,7 +3,7 @@ import
   ../defines,
   ../language/[expressions, number, shortstring],
   ./[ids, primitives, arrays, typebasics, typematch,
-    valueconstr, checktype, guesstype, treewalk, linearizer]
+    valueconstr, guesstype, treewalk, linearizer]
 
 defineTypeBase Meta, TypeBase(name: "Meta",
   arguments: @[newTypeParameter("", +Type(kind: tyBase, typeBase: FunctionTy))])
@@ -377,10 +377,12 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
           if same(e.expression, ex.arguments[i]):
             reset(allMetas)
             break
+          continue
         except TypeBoundMatchError as e:
           if same(e.expression, ex.arguments[i]):
             reset(allMetas)
             break
+          continue
         argumentTypes[i] = commonSubType(argumentTypes[i], argumentStatements[i].knownType)
     var superMetas, subMetas: typeof(allMetas)
     for i, m in allMetas:
@@ -418,19 +420,30 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
       for d in subMetas:
         var arguments = newArray[Value](ex.arguments.len + 1)
         arguments[0] = toValue scope
+        var noMatch = false
         for i in 0 ..< ex.arguments.len:
           if matchBound(+StatementTy, d.type.param(i + 1)):
-            arguments[i + 1] = toValue argumentStatements[i]
+            let st = argumentStatements[i]
+            if st.isNil:
+              noMatch = true
+              break
+            arguments[i + 1] = toValue st
           else:
             arguments[i + 1] = toValue copy ex.arguments[i]
-        if checkType(toValue arguments, d.type.baseArguments[0]):
-          var argumentStatement = newSeq[Statement](arguments.len)
-          for i, a in arguments: argumentStatement[i] = constant(a, a.getType)
-          let call = Statement(kind: skFunctionCall,
-            callee: variableGet(scope.context, d),
-            arguments: argumentStatement).toInstruction
-          result = scope.context.evaluateStatic(call).statementValue
-          break
+        if noMatch: continue
+        let metaTy = d.type.properties[Meta].baseArguments[0].baseArguments[0]
+        for i, a in argumentStatements:
+          if not a.isNil and not match(metaTy.nth(i), a.knownType).matches:
+            noMatch = true
+            break
+        if noMatch: continue
+        var argumentStatement = newSeq[Statement](arguments.len)
+        for i, a in arguments: argumentStatement[i] = constant(a, a.getType)
+        let call = Statement(kind: skFunctionCall,
+          callee: variableGet(scope.context, d),
+          arguments: argumentStatement).toInstruction
+        result = scope.context.evaluateStatic(call).statementValue
+        break
 
 proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: var seq[Statement],
@@ -466,6 +479,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
       let subs = overloads(scope, name, +functionType)
       if subs.len != 0:
         var dispatchees = newSeq[(seq[Type], Statement)](subs.len)
+        var returnType = NoneTy
         for i, d in dispatchees.mpairs:
           let t = subs[i].type
           d[0].newSeq(argumentStatements.len)
@@ -479,8 +493,9 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
             else:
               d[0][i] = pt
           d[1] = variableGet(scope.context, subs[i])
+          returnType = commonSuperType(returnType, t.baseArguments[1])
         result = Statement(kind: skDispatch,
-          knownType: functionType.baseArguments[1],
+          knownType: returnType,
             # we could calculate a union here but it could become too complex
           dispatchees: dispatchees,
           dispatchArguments: argumentStatements)
@@ -642,7 +657,7 @@ proc compile*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       address: newSymbolExpression(short".{}"),
       arguments: @[ex.address] & ex.arguments))
   of Colon:
-    assert false, "cannot compile lone colon expression"
+    assert false, "cannot compile lone colon expression " & $ex
   of Comma, Tuple:
     result = compileTupleExpression(scope, ex, bound)
   of ExpressionKind.Array:

@@ -164,7 +164,9 @@ static
   _ = a.setter.(3)
   b = foo()
 c = foo()
-[a.getter.(), b.getter.(), c.getter.()]""": toValue(@[toValue(3), toValue(1), toValue(1)])
+[a.getter.(), b.getter.(), c.getter.()]""": toValue(@[toValue(3), toValue(1), toValue(1)]),
+    "[1, 2, 3][0]": toValue(1),
+    "x = 1; [1, 2, 3][x]": toValue(2)
   }
 
   for inp, outp in tests.items:
@@ -256,3 +258,20 @@ test "generic meta":
 (foo(123), foo("abc"))
 """, libraries)
   check compiled.run() == toValue(toArray([toValue(@[toValue(-123)]), toValue(@[toValue("abc")])]))
+
+module checks:
+  define "assert", funcType(NoneTy, BoolTy), (doFn do:
+    # could use more info
+    if not args[0].boolValue:
+      raise newException(AssertionDefect, "assertion failed"))
+
+test "examples":
+  let libraries = @[Prelude, checks()]
+  for f in [
+    "examples/binary_search.by"
+  ]:
+    let s = when declared(read): read(f) else: readFile(f)
+    checkpoint s
+    let compiled = compile(s, libraries)
+    discard compiled.run() 
+

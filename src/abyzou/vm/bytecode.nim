@@ -92,7 +92,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       mov instr.srr.src, instr.srr.dest
     of NullaryCall:
       read instr.ncall
-      let fn {.cursor.} = get instr.ncall.callee
+      let fn {.cursor.} = unboxStripType get instr.ncall.callee
       let val =
         case fn.kind
         of vkNativeFunction:
@@ -108,7 +108,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       put instr.ncall.res, val
     of UnaryCall:
       read instr.ucall
-      let fn {.cursor.} = get instr.ucall.callee
+      let fn {.cursor.} = unboxStripType get instr.ucall.callee
       let val =
         case fn.kind
         of vkNativeFunction:
@@ -125,7 +125,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       put instr.ucall.res, val
     of BinaryCall:
       read instr.bcall
-      let fn {.cursor.} = get instr.bcall.callee
+      let fn {.cursor.} = unboxStripType get instr.bcall.callee
       let args = [get instr.bcall.arg1, get instr.bcall.arg2]
       let val =
         case fn.kind
@@ -140,7 +140,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       put instr.bcall.res, val
     of TernaryCall:
       read instr.tcall
-      let fn {.cursor.} = get instr.tcall.callee
+      let fn {.cursor.} = unboxStripType get instr.tcall.callee
       let args = [get instr.tcall.arg1, get instr.tcall.arg2, get instr.tcall.arg3]
       let val =
         case fn.kind
@@ -155,7 +155,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       put instr.tcall.res, val
     of TupleCall:
       read instr.tupcall
-      let fn {.cursor.} = get instr.tupcall.callee
+      let fn {.cursor.} = unboxStripType get instr.tupcall.callee
       let args = (get instr.tupcall.args).tupleValue.unref # maybe move
       let val =
         case fn.kind
@@ -173,10 +173,11 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let fn {.cursor.} = get instr.tdisp.callee
       let argsVal = get instr.tdisp.args
       let t = fn.getType
-      assert t.kind == tyCompound and t.base.nativeType == ntyFunction
+      assert t.kind == tyCompound and t.base.nativeType == ntyFunction, $t
       let argt = t.baseArguments[0]
       if argsVal.checkType(argt):
         let args = argsVal.tupleValue.unref
+        let fn = unboxStripType fn
         let val =
           case fn.kind
           of vkNativeFunction:
@@ -244,7 +245,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       checkEffect eff
     of PushEffectHandler:
       read instr.pueh
-      let h = get instr.pueh.handler
+      let h = unboxStripType get instr.pueh.handler
       var handler: proc (effect: Value): bool
       case h.kind
       of vkNativeFunction:
@@ -338,7 +339,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       of vkTable:
         coll.tableValue.value[ind] = val
       of vkSet:
-        coll.setValue.value.incl(val)
+        coll.setValue.value.incl(ind)
       else: discard # error
     of AddInt32:
       read instr.binary

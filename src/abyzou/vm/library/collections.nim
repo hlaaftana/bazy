@@ -24,6 +24,7 @@ module collections:
       args[0].referenceValue.unref
     result.context.set upd, toValue proc (args: openarray[Value]): Value =
       args[0].referenceValue.realRef[] = args[1]
+  # maybe move this to compilation, or allow dynamic dispatch of .[] some other way
   define ".[]", funcType(StatementTy, [ScopeTy, StatementTy, StatementTy]).withProperties(
     property(Meta, funcType(AnyTy, [Type(kind: tyBase, typeBase: TupleTy), Int32Ty]))
   ), toValue proc (valueArgs: openarray[Value]): Value =
@@ -34,3 +35,15 @@ module collections:
       knownType: nthType,
       getIndexAddress: valueArgs[1].statementValue,
       getIndex: index.int32Value)
+  block list:
+    let T = Type(kind: tyParameter, parameter: newTypeParameter("T"))
+    let get = define(result, ".[]", funcType(T, [ListTy[T], Int32Ty]))
+    get.genericParams = @[T.parameter]
+    result.define(get)
+    let size = define(result, "size", funcType(Int32Ty, [ListTy[T]]))
+    size.genericParams = @[T.parameter]
+    result.define(size)
+    result.context.set get, toValue proc (args: openarray[Value]): Value =
+      args[0].listValue.value[args[1].int32Value]
+    result.context.set size, toValue proc (args: openarray[Value]): Value =
+      args[0].listValue.value.len.int32.toValue

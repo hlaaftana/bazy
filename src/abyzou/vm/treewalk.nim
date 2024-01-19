@@ -57,7 +57,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
   of Constant:
     result = ins.constantValue
   of FunctionCall:
-    let fn = run ins.function
+    let fn = unboxStripType run ins.function
     var args = newArray[Value](ins.arguments.len)
     for i in 0 ..< args.len:
       args[i] = run ins.arguments[i]
@@ -72,7 +72,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
           for i in 0 ..< args.len:
             if not args[i].checkType(ts[i]):
               break accepted
-          let fn = run fnInstr
+          let fn = unboxStripType run fnInstr
           result = fn.call(args, effectHandler)
           break dispatch
   of Sequence:
@@ -109,7 +109,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     result = Value(kind: vkEffect)
     result.effectValue.store(run ins.effect)
   of HandleEffect:
-    let h = run ins.effectHandler
+    let h = unboxStripType run ins.effectHandler
     var handler: proc (effect: Value): bool
     case h.kind
     of vkNativeFunction:

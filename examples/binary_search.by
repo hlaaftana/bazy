@@ -1,0 +1,14 @@
+binary_search(a, k) =
+  i = 0
+  b = a.size()
+  while i < b
+    mid = (i + b) div 2
+    if a[mid] < k
+      i = mid + 1
+    else
+      b = mid
+  if not (i < a.size() and a[i] == k), i = -1
+  i
+
+assert [3, 5, 1, 4, 1].binary_search(1) == -1
+assert do 3 == do binary_search [1, 2, 3, 4, 5, 6], 4

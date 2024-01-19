@@ -41,7 +41,7 @@ module logic:
     toValue(args[0].boolValue xor args[1].boolValue)
   define "if", funcType(StatementTy, [ScopeTy, StatementTy, ExpressionTy]).withProperties(
     property(Meta, funcType(AnyTy, [BoolTy, AnyTy]))
-  ), toValue proc (valueArgs: openarray[Value]): Value = 
+  ), toValue proc (valueArgs: openarray[Value]): Value =
     let sc = valueArgs[0].scopeValue.childScope()
     result = toValue Statement(kind: skIf,
       ifCond: valueArgs[1].statementValue,

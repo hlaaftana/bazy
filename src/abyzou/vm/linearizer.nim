@@ -339,7 +339,7 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
       fn.add(Instr(kind: ArmType, armt:
         (val: fun, typ: tReg)))
       fn.add(Instr(kind: TryDispatch, tdisp:
-        (res: res, callee: value(d), args: args, successPos: successPos)))
+        (res: res, callee: fun, args: args, successPos: successPos)))
     fn.jumpPoint(successPos)
   of skSequence:
     let h = s.sequence.len - 1
