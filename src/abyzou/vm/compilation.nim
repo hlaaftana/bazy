@@ -391,7 +391,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
         funcType(if bound.variance == Covariant: AnyTy else: bound.boundType, argumentTypes)):
         superMetas.add(m)
       if matchBound(
-        +funcType(if bound.variance == Covariant: NoneTy else: bound.boundType, argumentTypes),
+        +funcType(if bound.variance == Covariant: AllTy else: bound.boundType, argumentTypes),
         mt):
         subMetas.add(m)
     superMetas.sort(
@@ -473,14 +473,14 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
     if same(e.expression, ex.address) and ex.address.isIdentifier(name):
       functionType.baseArguments[1] =
         if bound.variance == Covariant:
-          NoneTy
+          AllTy
         else:
           bound.boundType
       let subs = overloads(scope, name, +functionType)
       if subs.len != 0:
         # structured like this to make refc work
         result = Statement(kind: skDispatch,
-          knownType: NoneTy,
+          knownType: AllTy,
           dispatchees: newSeq[(seq[Type], Statement)](subs.len),
           dispatchArguments: argumentStatements)
         for i in 0 ..< result.dispatchees.len:
@@ -619,7 +619,7 @@ proc compileBlock*(scope: Scope, ex: Expression, bound: TypeBound): Statement =
       if i == ex.statements.high:
         bound
       else:
-        -NoneTy # like void
+        -AllTy # like void
     let element = map(e, bound = b)
     result.sequence.add(element)
     if i == ex.statements.high:

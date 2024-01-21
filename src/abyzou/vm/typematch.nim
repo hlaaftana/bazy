@@ -241,7 +241,7 @@ proc match*(matcher, t: Type, inst: var ParameterInstantiation): TypeMatch =
       if vm.level < res.level: res.level = vm.level
     res
   of tyAny: atomicMatch(tmUniversalTrue)
-  of tyNone: atomicMatch(tmUniversalFalse)
+  of tyAll: atomicMatch(tmUniversalFalse)
   of tyUnion:
     var max = TypeMatch(level: tmFiniteFalse, deep: true, children: @[atomicMatch(tmUnknown)])
     for a in matcher.operands:

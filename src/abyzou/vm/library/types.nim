@@ -4,8 +4,8 @@ import common
 
 module types:
   define "Any", AnyTy
-  define "None", NoneTy
-  define "NoneValue", NoneValueTy
+  define "All", AllTy
+  define "None", NoneValueTy
   define "none", NoneValueTy, Value(kind: vkNone)
   typedTempl "type_of", [AnyTy], TypeTy[AnyTy]:
     let t = args[0].knownType

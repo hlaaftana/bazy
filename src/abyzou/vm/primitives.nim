@@ -142,7 +142,7 @@ type
     tyCompound,
     tyTuple, # XXX (1) make into tyComposite, tuple, named tuple, array (i.e. int^20) all at once
     # typeclass
-    tyAny, tyNone, ## none is bottom type
+    tyAny, tyAll, ## top and bottom types
     tyUnion, tyIntersection, tyNot,
     tyBase,
     tySomeValue,
@@ -217,7 +217,7 @@ type
     properties*: Table[TypeBase, Type]
       # can be a multitable later on
     case kind*: TypeKind
-    of tyNoType, tyAny, tyNone: discard
+    of tyNoType, tyAny, tyAll: discard
     of tyCompound:
       base*: TypeBase
       baseArguments*: seq[Type]

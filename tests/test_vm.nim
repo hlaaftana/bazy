@@ -260,7 +260,7 @@ test "generic meta":
   check compiled.run() == toValue(toArray([toValue(@[toValue(-123)]), toValue(@[toValue("abc")])]))
 
 module checks:
-  define "assert", funcType(NoneTy, BoolTy), (doFn do:
+  define "assert", funcType(NoneValueTy, BoolTy), (doFn do:
     # could use more info
     if not args[0].boolValue:
       raise newException(AssertionDefect, "assertion failed"))

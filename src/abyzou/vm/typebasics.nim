@@ -2,7 +2,7 @@ import std/tables, ./[primitives, ids]
 
 template NoType*: untyped = Type(kind: tyNoType)
 template AnyTy*: untyped = Type(kind: tyAny)
-template NoneTy*: untyped = Type(kind: tyNone)
+template AllTy*: untyped = Type(kind: tyAll)
 
 proc `+`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Covariant)
 proc `-`*(t: Type): TypeBound {.inline.} = TypeBound(boundType: t, variance: Contravariant)
@@ -67,7 +67,7 @@ nativeType Reference, [+AnyTy]
 nativeType List, [+AnyTy]
 nativeType Set, [+AnyTy]
 nativeType Table, [+AnyTy, +AnyTy]
-nativeType Function, [+Type(kind: tyBase, typeBase: TupleTy), -NoneTy]
+nativeType Function, [+Type(kind: tyBase, typeBase: TupleTy), -AllTy]
 nativeType Type, [+AnyTy]
 
 nativeType TupleConstructor, [+Type(kind: tyBase, typeBase: TupleTy)]
@@ -125,7 +125,7 @@ const definiteTypeLengths*: array[TypeKind, int] = [
   tyCompound: -1,
   tyTuple: -1,
   tyAny: 0,
-  tyNone: 0,
+  tyAll: 0,
   tyUnion: -1,
   tyIntersection: -1,
   tyNot: 1,
@@ -153,7 +153,7 @@ proc hasNth*(t: Type, i: int): bool {.inline.} =
 
 proc nth*(t: Type, i: int): Type =
   case t.kind
-  of tyNoType, tyAny, tyNone:
+  of tyNoType, tyAny, tyAll:
     discard # inapplicable
   of tyTuple:
     if i < t.elements.len or t.varargs.isNoType:
@@ -188,7 +188,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
   case pattern.kind
   of tyParameter:
     pattern = table.table[pattern.parameter]
-  of tyNoType, tyAny, tyNone, tyBase:
+  of tyNoType, tyAny, tyAll, tyBase:
     discard
   of tyCompound:
     # XXX (2) check argument bounds
