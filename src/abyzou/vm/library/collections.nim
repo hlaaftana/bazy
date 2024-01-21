@@ -13,7 +13,7 @@ module collections:
     let urf = define(result, "unref", funcType(T, [ReferenceTy[T]]))
     urf.genericParams = @[T.parameter]
     result.define(urf)
-    let upd = define(result, "update", funcType(AllTy, [ReferenceTy[T], T]))
+    let upd = define(result, "update", funcType(NoneValueTy, [ReferenceTy[T], T]))
     upd.genericParams = @[T.parameter]
     result.define(upd)
     result.context.set rf, toValue proc (args: openarray[Value]): Value =

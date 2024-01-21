@@ -388,7 +388,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
     for i, m in allMetas:
       let mt = metaTypes[i]
       if matchBound(+mt,
-        funcType(if bound.variance == Covariant: AnyTy else: bound.boundType, argumentTypes)):
+        funcType(if bound.variance == Contravariant: AnyTy else: bound.boundType, argumentTypes)):
         superMetas.add(m)
       if matchBound(
         +funcType(if bound.variance == Covariant: AllTy else: bound.boundType, argumentTypes),
@@ -454,7 +454,7 @@ proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
     if argumentStatements[i].isNil:
       argumentStatements[i] = map(ex.arguments[i])
     argumentTypes[i] = argumentStatements[i].knownType
-  functionType = funcType(if bound.variance == Covariant: AnyTy else: bound.boundType, argumentTypes)
+  functionType = funcType(if bound.variance == Contravariant: AnyTy else: bound.boundType, argumentTypes)
   # lowest supertype function:
   try:
     # XXX (1) named arguments
@@ -514,7 +514,7 @@ proc compileCall*(scope: Scope, ex: Expression, bound: TypeBound,
       let callee = map ex.address
       argumentStatements.insert(callee, 0)
       argumentTypes.insert(callee.knownType, 0)
-      functionType = funcType(if bound.variance == Covariant: AnyTy else: bound.boundType, argumentTypes)
+      functionType = funcType(if bound.variance == Contravariant: AnyTy else: bound.boundType, argumentTypes)
       let overs = overloads(scope, ".call", -functionType)
       if overs.len != 0:
         let dotCall = variableGet(scope.context, overs[0])
