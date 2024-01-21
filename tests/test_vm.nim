@@ -260,10 +260,10 @@ test "generic meta":
   check compiled.run() == toValue(toArray([toValue(@[toValue(-123)]), toValue(@[toValue("abc")])]))
 
 module checks:
-  define "assert", funcType(NoneValueTy, BoolTy), (doFn do:
+  fn "assert", [BoolTy], NoneValueTy:
     # could use more info
     if not args[0].boolValue:
-      raise newException(AssertionDefect, "assertion failed"))
+      raise newException(AssertionDefect, "assertion failed")
 
 test "examples":
   let libraries = @[Prelude, checks()]
