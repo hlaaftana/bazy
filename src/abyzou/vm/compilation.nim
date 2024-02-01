@@ -417,6 +417,8 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
         arguments: arguments).toInstruction
       result = scope.context.evaluateStatic(call).statementValue
     else:
+      # XXX (8) sub metas should opt in to runtime dispatch instead like +
+      # i.e. instead of calling a function, the output code of the meta is run
       for d in subMetas:
         var arguments = newArray[Value](ex.arguments.len + 1)
         arguments[0] = toValue scope

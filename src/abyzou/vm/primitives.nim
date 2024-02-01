@@ -366,6 +366,7 @@ type
       callee*: Statement
       arguments*: seq[Statement]
     of skDispatch:
+      # XXX (8) generalize dispatch result
       dispatchees*: seq[(seq[Type], Statement)]
       dispatchArguments*: seq[Statement]
     of skSequence:
