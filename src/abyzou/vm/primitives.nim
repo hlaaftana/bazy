@@ -281,10 +281,11 @@ type
     # binary
     AddInt, SubInt, MulInt, DivInt
     AddFloat, SubFloat, MulFloat, DivFloat
+    CheckType
     # unary
     NegInt, NegFloat
   
-  BinaryInstructionKind* = range[AddInt .. DivFloat]
+  BinaryInstructionKind* = range[AddInt .. CheckType]
   UnaryInstructionKind* = range[NegInt .. NegFloat]
 
   InstructionObj* = object ## compact version of Statement
@@ -414,6 +415,7 @@ type
     id*: VariableId
     name*: string
     nameHash*: Hash
+    hidden*: bool # unable to look up
     knownType*: Type
     stackIndex*: int
     scope* {.cursor.}: Scope

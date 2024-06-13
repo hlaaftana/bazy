@@ -175,7 +175,7 @@ proc symbols*(scope: Scope, name: string, bound: TypeBound,
       result.add(VariableReference(variable: a.variable, type: a.type,
         kind: Constant))
   for i, v in scope.variables:
-    if (v.nameHash == 0 or v.nameHash == nameHash) and name == v.name:
+    if (v.nameHash == 0 or v.nameHash == nameHash) and name == v.name and not v.hidden:
       var t = v.getType
       if v.genericParams.len != 0:
         var matches = ParameterInstantiation(strict: true,
@@ -354,9 +354,10 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
   for i in 1 ..< realArgumentTypes.len:
     realArgumentTypes[i] = union(ExpressionTy, StatementTy)
   # get all metas first and type statements accordingly
+  let funcTy = funcType(if bound.variance == Covariant: AnyTy else: bound.boundType, argumentTypes)
   var allMetas = overloads(scope, name,
     *funcType(StatementTy, realArgumentTypes).withProperties(
-      property(Meta, funcType(if bound.variance == Covariant: AnyTy else: bound.boundType, argumentTypes))))
+      property(Meta, funcTy)))
   if allMetas.len != 0:
     var makeStatement = newSeq[bool](ex.arguments.len)
     var metaTypes = newSeq[Type](allMetas.len)
@@ -416,36 +417,82 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
         callee: variableGet(scope.context, meta),
         arguments: arguments).toInstruction
       result = scope.context.evaluateStatic(call).statementValue
-    else:
-      # XXX (8) sub metas should opt in to runtime dispatch instead like +
-      # i.e. instead of calling a function, the output code of the meta is run
+    elif subMetas.len != 0:
+      # XXX (8) sub meta dispatch, needs better output and described semantics
+      var argumentValues = newSeq[Variable](ex.arguments.len)
+      var dispatches: seq[tuple[condition, body: Statement]]
       for d in subMetas:
         var arguments = newArray[Value](ex.arguments.len + 1)
         arguments[0] = toValue scope
+        var variableCheckTypes = newSeq[Type](ex.arguments.len)
         var noMatch = false
+        let metaTy = d.type.properties[Meta].baseArguments[0].baseArguments[0]
+        var newVariables: seq[(Statement, Variable)]
         for i in 0 ..< ex.arguments.len:
           if matchBound(+StatementTy, d.type.param(i + 1)):
             let st = argumentStatements[i]
-            if st.isNil:
+            let matchTy = metaTy.nth(i)
+            if st.isNil or not match(matchTy, st.knownType).matches:
               noMatch = true
               break
-            arguments[i + 1] = toValue st
+            var v = argumentValues[i]
+            if v.isNil:
+              v = newVariable("arg" & $i, st.knownType)
+              v.hidden = true
+              newVariables.add((st, v))
+              argumentValues[i] = v
+            variableCheckTypes[i] = matchTy
+        if noMatch: continue
+        var variableAssignments = newSeqOfCap[Statement](newVariables.len + 1)
+        for st, v in newVariables.items:
+          scope.define(v)
+          variableAssignments.add(Statement(kind: skVariableSet,
+            variableSetIndex: v.stackIndex,
+            variableSetValue: st,
+            knownType: v.knownType))
+        for i in 0 ..< ex.arguments.len:
+          if not variableCheckTypes[i].isNoType:
+            arguments[i + 1] = toValue Statement(kind: skVariableGet,
+              variableGetIndex: argumentValues[i].stackIndex,
+              knownType: argumentValues[i].knownType)
           else:
             arguments[i + 1] = toValue copy ex.arguments[i]
-        if noMatch: continue
-        let metaTy = d.type.properties[Meta].baseArguments[0].baseArguments[0]
-        for i, a in argumentStatements:
-          if not a.isNil and not match(metaTy.nth(i), a.knownType).matches:
-            noMatch = true
-            break
-        if noMatch: continue
         var argumentStatement = newSeq[Statement](arguments.len)
         for i, a in arguments: argumentStatement[i] = constant(a, a.getType)
         let call = Statement(kind: skFunctionCall,
           callee: variableGet(scope.context, d),
           arguments: argumentStatement).toInstruction
-        result = scope.context.evaluateStatic(call).statementValue
-        break
+        let body = scope.context.evaluateStatic(call).statementValue
+        var operands: seq[Statement]
+        for i, checkType in variableCheckTypes:
+          if not checkType.isNoType:
+            operands.add(Statement(kind: skBinaryInstruction, binaryInstructionKind: CheckType,
+              binary1: arguments[i + 1].statementValue,
+              binary2: constant(toValue(checkType), TypeTy[checkType]),
+              knownType: BoolTy))
+        var cond = if operands.len == 0: constant(toValue true, BoolTy) else: operands[^1]
+        if operands.len > 1:
+          for i in countdown(operands.len - 2, 0):
+            cond = Statement(kind: skIf,
+              ifCond: operands[i],
+              ifTrue: cond,
+              ifFalse: constant(false, BoolTy),
+              knownType: BoolTy)
+        if variableAssignments.len != 0:
+          variableAssignments.add(cond)
+          cond = Statement(kind: skSequence,
+            sequence: variableAssignments,
+            knownType: BoolTy)
+        dispatches.add((cond, body))
+      if dispatches.len != 0:
+        result = Statement(kind: skNone, knownType: AllTy) # should be error 
+        for i in countdown(dispatches.len - 1, 0):
+          let (cond, body) = dispatches[i]
+          result = Statement(kind: skIf,
+            ifCond: cond,
+            ifTrue: body,
+            ifFalse: result,
+            knownType: commonSuperType(result.knownType, body.knownType))
 
 proc compileRuntimeCall*(scope: Scope, ex: Expression, bound: TypeBound,
   argumentStatements: var seq[Statement],

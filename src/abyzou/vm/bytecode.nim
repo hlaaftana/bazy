@@ -196,6 +196,13 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       assert tVal.kind == vkType
       let t = tVal.typeValue.type.unwrapTypeType
       makeTyped(getMut(instr.armt.val), t)
+    of CheckType:
+      read instr.binary
+      let val = get(instr.binary.arg1)
+      let tVal = get(instr.binary.arg2)
+      assert tVal.kind == vkType
+      let t = tVal.typeValue.type.unwrapTypeType
+      put instr.binary.res, toValue val.checkType(t)
     of ArmStack:
       read instr.arm
       let fn = get(instr.arm.fun)

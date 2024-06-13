@@ -75,6 +75,12 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
           let fn = unboxStripType run fnInstr
           result = fn.call(args, effectHandler)
           break dispatch
+  of CheckType:
+    let val = run ins.binary1
+    let tVal = run ins.binary2
+    assert tVal.kind == vkType
+    let t = tVal.typeValue.type.unwrapTypeType
+    result = toValue val.checkType(t)
   of Sequence:
     for instr in ins.sequence:
       result = run instr

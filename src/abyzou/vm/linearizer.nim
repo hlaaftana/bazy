@@ -31,7 +31,7 @@ type
     GetConstIndex, SetConstIndex
     # binary
     AddInt32, SubInt32, MulInt32, DivInt32
-    AddFloat32, SubFloat32, MulFloat32, DivFloat32
+    AddFloat32, SubFloat32, MulFloat32, DivFloat32, CheckType
     # unary
     NegInt32, NegFloat32
   
@@ -86,7 +86,7 @@ type
     of SetIndex:
       sri*: tuple[coll, ind, val: Register]
     of AddInt32, SubInt32, MulInt32, DivInt32,
-      AddFloat32, SubFloat32, MulFloat32, DivFloat32:
+      AddFloat32, SubFloat32, MulFloat32, DivFloat32, CheckType:
       binary*: tuple[res, arg1, arg2: Register]
     of NegInt32, NegFloat32:
       unary*: tuple[res, arg: Register]
@@ -121,12 +121,13 @@ type
 
 const
   lowBinary = AddInt32
-  highBinary = DivFloat32
+  highBinary = CheckType
   lowUnary = NegInt32
   highUnary = NegFloat32
   binaryInstructions: array[BinaryInstructionKind, range[lowBinary .. highBinary]] = [
     AddInt: range[lowBinary .. highBinary] AddInt32, SubInt: SubInt32, MulInt: MulInt32, DivInt: DivInt32,
-    AddFloat: AddFloat32, SubFloat: SubFloat32, MulFloat: MulFloat32, DivFloat: DivFloat32
+    AddFloat: AddFloat32, SubFloat: SubFloat32, MulFloat: MulFloat32, DivFloat: DivFloat32,
+    CheckType: CheckType
   ]
   unaryInstructions: array[UnaryInstructionKind, range[lowUnary .. highUnary]] = [
     NegInt: range[lowUnary .. highUnary] NegInt32, NegFloat: NegFloat32
@@ -222,7 +223,7 @@ proc addBytes*(bytes: var openarray[byte], i: var int, instr: LinearInstruction)
   of SetIndex:
     add instr.sri
   of AddInt32, SubInt32, MulInt32, DivInt32,
-    AddFloat32, SubFloat32, MulFloat32, DivFloat32:
+    AddFloat32, SubFloat32, MulFloat32, DivFloat32, CheckType:
     add instr.binary
   of NegInt32, NegFloat32:
     add instr.unary
