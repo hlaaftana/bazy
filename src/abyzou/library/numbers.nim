@@ -1,4 +1,4 @@
-import ../[compilation, primitives, valueconstr, typebasics]
+import ../vm/[compilation, primitives, valueconstr, typebasics]
 
 import common
 
