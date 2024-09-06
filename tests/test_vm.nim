@@ -187,7 +187,7 @@ c = foo()
       raise
     {.pop.}
 
-import abyzou/vm/[library/common]
+import abyzou/library/common
 
 module withVarargsFn:
   define "max", funcTypeWithVarargs(Int32Ty, [], Int32Ty), (doFn do:
