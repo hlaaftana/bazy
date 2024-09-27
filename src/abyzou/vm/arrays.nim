@@ -29,14 +29,14 @@ when arrayImpl == "seq":
     template `==`*[T](a, b: `name`[T]): untyped =
       mixin `==`
       `==`(toSeq(a), toSeq(b))
+    
+    template `$`*[T](a: `name`[T]): string =
+      `$`(toSeq(a))[1..^1]
 
   distinctSeq Array
 elif arrayImpl == "hybrid":
   import ../disabled/hybridarrays
   export hybridarrays
-elif arrayImpl == "ref":
-  import ../util/refarray
-  export refarray
 elif arrayImpl == "manta":
   import manta/refarray
   export refarray
@@ -47,6 +47,12 @@ elif arrayImpl == "manta":
     newRefArray[T](foo)
   template unref*[T](arr: RefArray[T]): Array[T] =
     arr
+elif arrayImpl == "mantavalue":
+  # needs https://github.com/nim-lang/Nim/pull/24194
+  import manta
+  export manta
+  proc unref*[T](arr: RefArray[T]): Array[T] {.inline.} =
+    toArray(arr.toOpenArray(0, arr.len - 1))
 
 when not declared(RefArray):
   type RefArray*[T] = ref Array[T]
@@ -54,6 +60,23 @@ when not declared(RefArray):
     var res = new(typeof(toArray(foo)))
     res[] = toArray(foo)
     res
+
+  proc len*[T](arr: RefArray[T]): int =
+    if arr.isNil: 0 else: arr[].len
+
+  template `[]`*[T](arr: RefArray[T], index): untyped =
+    arr[][index]
+
+  template `[]=`*[T](arr: RefArray[T], index, value) =
+    arr[][index] = value
+  
+  iterator items*[T](arr: RefArray[T]): T =
+    if not arr.isNil:
+      for a in arr[]:
+        yield a
+  
+  proc `$`*[T](a: RefArray[T]): string {.inline.} =
+    if a.isNil: "" else: $a[]
 
   proc `==`*[T](a, b: RefArray[T]): bool {.inline.} =
     mixin `==`
