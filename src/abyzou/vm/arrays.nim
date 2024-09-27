@@ -1,9 +1,6 @@
 import ../defines
 
-when arrayImpl == "custom":
-  import ../disabled/arrayimpl
-  export ../disabled/arrayimpl
-elif arrayImpl == "seq":
+when arrayImpl == "seq":
   template distinctSeq(name) {.dirty.} =
     type `name`*[T] = distinct seq[T]
 
@@ -40,21 +37,31 @@ elif arrayImpl == "hybrid":
 elif arrayImpl == "ref":
   import ../util/refarray
   export refarray
+elif arrayImpl == "manta":
+  import manta/refarray
+  export refarray
+  type Array*[T] = RefArray[T]
+  template toArray*[T](foo: openarray[T]): RefArray =
+    toRefArray[T](foo)
+  template newArray*[T](foo): RefArray[T] =
+    newRefArray[T](foo)
+  template unref*[T](arr: RefArray[T]): Array[T] =
+    arr
 
-when not declared(ArrayRef):
-  type ArrayRef*[T] = ref Array[T]
-  template toArrayRef*(foo): ArrayRef =
+when not declared(RefArray):
+  type RefArray*[T] = ref Array[T]
+  template toRefArray*(foo): RefArray =
     var res = new(typeof(toArray(foo)))
     res[] = toArray(foo)
     res
 
-  proc `==`*[T](a, b: ArrayRef[T]): bool {.inline.} =
+  proc `==`*[T](a, b: RefArray[T]): bool {.inline.} =
     mixin `==`
     system.`==`(a, b) or (not a.isNil and not b.isNil and a[] == b[])
 
   import hashes
 
-  proc hash*[T](x: ArrayRef[T]): Hash =
+  proc hash*[T](x: RefArray[T]): Hash =
     mixin hash
     if x.isNil:
       hash(pointer nil)

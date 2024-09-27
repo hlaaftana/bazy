@@ -36,9 +36,9 @@ proc getType*(x: Value): Type =
   of vStatement: result = StatementTy
   of vScope: result = ScopeTy
   of vArray:
-    let val = x.tupleValue.unref
+    let val = x.tupleValue
     var elems = newSeq[Type](val.len)
-    for i in 0 ..< x.tupleValue.unref.len:
+    for i in 0 ..< x.tupleValue.len:
       elems[i] = val[i].getType
     result = Type(kind: tyTuple, elements: elems)
   of vType:

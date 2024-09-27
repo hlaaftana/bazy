@@ -41,7 +41,7 @@ proc checkType*(value: Value, t: Type): bool =
       # XXX (3) this is not necessarily correct, depends on boxed value type
       value.kind in {vFunction, vNativeFunction, vLinearFunction}
     of ntyTuple:
-      value.kind == vArray and (t.kind == tyBase or value.tupleValue.unref.eachAre(t.baseArguments))
+      value.kind == vArray and (t.kind == tyBase or value.tupleValue.eachAre(t.baseArguments))
     of ntyReference:
       value.kind == vReference and (t.kind == tyBase or value.referenceValue.unref.checkType(t.baseArguments[0]))
     of ntyList:
@@ -58,7 +58,7 @@ proc checkType*(value: Value, t: Type): bool =
       not b.valueMatcher.isNil and
         b.valueMatcher(value, t)
   of tyTuple:
-    value.kind == vArray and value.tupleValue.unref.eachAre(t.elements)
+    value.kind == vArray and value.tupleValue.eachAre(t.elements)
   of tyAny: true
   of tyAll, tyNoType: false
   of tyUnion:

@@ -110,7 +110,7 @@ proc `$`*(value: Value): string =
   of vBool: $value.boolValue
   of vReference: "ref[" & $cast[int](value.referenceValue) & "](" & $value.referenceValue.unref & ")"
   of vArray:
-    var s = ($value.tupleValue.unref)[1..^1]
+    var s = ($value.tupleValue)[1..^1]
     s[0] = '('
     s[^1] = ')'
     s

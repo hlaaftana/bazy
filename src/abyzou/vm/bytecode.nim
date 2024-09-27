@@ -116,7 +116,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
             [get instr.ucall.arg1])
         of vFunction:
           fn.functionValue.value.call(
-            toArray[Value]([get instr.ucall.arg1]),
+            toArray([get instr.ucall.arg1]),
             effectHandler)
         of vLinearFunction:
           fn.linearFunctionValue.value.run([get instr.ucall.arg1])
@@ -132,7 +132,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
         of vNativeFunction:
           fn.nativeFunctionValue(args)
         of vFunction:
-          fn.functionValue.value.call(toArray[Value](args), effectHandler)
+          fn.functionValue.value.call(toArray(args), effectHandler)
         of vLinearFunction:
           fn.linearFunctionValue.value.run(args)
         else: raiseAssert("cannot call " & $fn)
@@ -147,7 +147,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
         of vNativeFunction:
           fn.nativeFunctionValue(args)
         of vFunction:
-          fn.functionValue.value.call(toArray[Value](args), effectHandler)
+          fn.functionValue.value.call(toArray(args), effectHandler)
         of vLinearFunction:
           fn.linearFunctionValue.value.run(args)
         else: raiseAssert("cannot call " & $fn)
@@ -298,7 +298,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let coll = get(instr.gci.coll)
       case coll.kind
       of vArray:
-        put instr.gci.res, coll.tupleValue.unref[instr.gci.ind.int]
+        put instr.gci.res, coll.tupleValue[instr.gci.ind.int]
       of vList:
         put instr.gci.res, coll.listValue.value[instr.gci.ind.int]
       of vString:
@@ -324,7 +324,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       of vList:
         put instr.gri.res, coll.listValue.value.unref[ind.unboxStripType.int32Value]
       of vArray:
-        put instr.gri.res, coll.tupleValue.unref[ind.unboxStripType.int32Value]
+        put instr.gri.res, coll.tupleValue[ind.unboxStripType.int32Value]
       of vString:
         put instr.gri.res, toValue(coll.stringValue.value.unref[ind.unboxStripType.int32Value].int)
       of vTable:

@@ -34,8 +34,8 @@ proc toValue*(x: sink seq[Value]): Value = withkindbox(list, x)
 proc toValue*(x: sink string): Value = withkindbox(string, x)
 proc toValue*(x: sink Array[Value]): Value {.inline.} =
   template arr(a: untyped): untyped =
-    when result.tupleValue is ArrayRef:
-      toArrayRef(a)
+    when result.tupleValue is RefArray:
+      toRefArray(a)
     else:
       toArray(a)
   withkind(array, arr x.toOpenArray(0, x.len - 1))

@@ -92,7 +92,7 @@ type
       referenceValue*: Reference[Value]
     of vArray:
       # XXX (6) maybe match pointer field location with vList, vString
-      arrayValue*: ArrayRef[Value]
+      arrayValue*: RefArray[Value]
     of vBoxed:
       boxedValue*: BoxedValue[Value]
     of vInt64:

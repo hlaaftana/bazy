@@ -13,6 +13,7 @@ skipDirs      = @["src/abyzou/disabled"]
 
 requires "nim >= 1.6.14"
 requires "skinsuit >= 0.2.3"
+requires "manta >= 0.1.0"
 
 when (compiles do: import nimbleutils):
   import nimbleutils
@@ -30,6 +31,10 @@ task tests, "run tests for multiple backends":
       "--mm:refc -d:abyzouUseBytecode=false",
       "--mm:orc -d:abyzouUseBytecode=true",
       "--mm:orc -d:abyzouUseBytecode=false",
+      "--mm:refc -d:abyzouUseBytecode=true -d:abyzouArrayImpl=manta",
+      "--mm:refc -d:abyzouUseBytecode=false -d:abyzouArrayImpl=manta",
+      "--mm:orc -d:abyzouUseBytecode=true -d:abyzouArrayImpl=manta",
+      "--mm:orc -d:abyzouUseBytecode=false -d:abyzouArrayImpl=manta",
       #"--gc:orc -d:useMalloc",
       #"--gc:orc -d:danger",
       #"-d:abyzouUseUnicode=false",

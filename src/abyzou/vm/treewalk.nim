@@ -170,7 +170,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     of vList:
       result = x.listValue.value.unref[ins.getIndex]
     of vArray:
-      result = x.tupleValue.unref[ins.getIndex]
+      result = x.tupleValue[ins.getIndex]
     of vString:
       result = toValue(x.stringValue.value.unref[ins.getIndex].int)
     else: discard # error
