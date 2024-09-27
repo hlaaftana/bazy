@@ -17,7 +17,7 @@ module collections:
     upd.genericParams = @[T.parameter]
     result.define(upd)
     result.context.set rf, toValue proc (args: openarray[Value]): Value =
-      result = Value(kind: vkReference)
+      result = Value(kind: vReference)
       new(result.referenceValue.realRef)
       result.referenceValue.realRef[] = args[0]
     result.context.set urf, toValue proc (args: openarray[Value]): Value =

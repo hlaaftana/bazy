@@ -103,33 +103,33 @@ proc `$`*(value: BoxedValue): string =
 
 proc `$`*(value: Value): string =
   case value.kind
-  of vkNone: "()"
-  of vkInt32: $value.int32Value
-  of vkUint32: $value.uint32Value
-  of vkFloat32: $value.float32Value
-  of vkBool: $value.boolValue
-  of vkReference: "ref[" & $cast[int](value.referenceValue) & "](" & $value.referenceValue.unref & ")"
-  of vkArray:
+  of vNone: "()"
+  of vInt32: $value.int32Value
+  of vUint32: $value.uint32Value
+  of vFloat32: $value.float32Value
+  of vBool: $value.boolValue
+  of vReference: "ref[" & $cast[int](value.referenceValue) & "](" & $value.referenceValue.unref & ")"
+  of vArray:
     var s = ($value.tupleValue.unref)[1..^1]
     s[0] = '('
     s[^1] = ')'
     s
-  of vkEffect: "Effect(" & $value.effectValue.unref & ")"
-  of vkBoxed: $value.boxedValue.value
-  of vkInt64: $value.int64Value.value
-  of vkUint64: $value.uint64Value.value
-  of vkFloat64: $value.float64Value.value
-  of vkList: ($value.listValue.value.unref)[1..^1]
-  of vkString: value.stringValue.value.unref
-  of vkType: $value.typeValue.type
-  of vkFunction: "<function>"
-  of vkLinearFunction: "<linear function>"
-  of vkNativeFunction: "<native function>"
-  of vkSet: $value.setValue.value
-  of vkTable: $value.tableValue.value
-  of vkExpression: $value.expressionValue[]
-  of vkStatement: $value.statementValue[]
-  of vkScope: $value.scopeValue[]
+  of vEffect: "Effect(" & $value.effectValue.unref & ")"
+  of vBoxed: $value.boxedValue.value
+  of vInt64: $value.int64Value.value
+  of vUint64: $value.uint64Value.value
+  of vFloat64: $value.float64Value.value
+  of vList: ($value.listValue.value.unref)[1..^1]
+  of vString: value.stringValue.value.unref
+  of vType: $value.typeValue.type
+  of vFunction: "<function>"
+  of vLinearFunction: "<linear function>"
+  of vNativeFunction: "<native function>"
+  of vSet: $value.setValue.value
+  of vTable: $value.tableValue.value
+  of vExpression: $value.expressionValue[]
+  of vStatement: $value.statementValue[]
+  of vScope: $value.scopeValue[]
 
 proc `$`*(p: TypeBase): string {.inline.} = p.name
 

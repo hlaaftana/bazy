@@ -289,11 +289,11 @@ proc linearize*(context: Context, fn: LinearContext, result: var Result, s: Stat
     case resultKind
     of SetRegister:
       fn.add(Instr(kind: LoadConstant, lc:
-        (res: result.register, constant: fn.getConstant(Value(kind: vkNone)))))
+        (res: result.register, constant: fn.getConstant(Value(kind: vNone)))))
     of Value:
       result.value = fn.newRegister()
       fn.add(Instr(kind: LoadConstant, lc:
-        (res: result.value, constant: fn.getConstant(Value(kind: vkNone)))))
+        (res: result.value, constant: fn.getConstant(Value(kind: vNone)))))
     of Statement: discard # nothing
   of skConstant:
     fn.add(Instr(kind: LoadConstant, lc: (res: resultRegister(fn, result),
@@ -502,7 +502,7 @@ proc createLinearContext*(context: Context): LinearContext =
       result.argRegisters.add(reg)
     # this might lose performance but is needed for capture arming
     let defaultValue = context.stackSlots[i].value
-    if defaultValue.kind != vkNone or context.stackSlots[i].kind == Capture:
+    if defaultValue.kind != vNone or context.stackSlots[i].kind == Capture:
       result.constants[i] = defaultValue
       result.add(LinearInstruction(kind: LoadConstant, lc:
         (res: reg, constant: Constant(i))))

@@ -68,7 +68,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
     i = lf.jumpLocations[p.int]
 
   template checkEffect(val: Value): untyped =
-    if val.kind == vkEffect:
+    if val.kind == vEffect:
       let eff = val.effectValue.unref
       if effectHandler.isNil or not effectHandler(eff):
         result = val
@@ -95,13 +95,13 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let fn {.cursor.} = unboxStripType get instr.ncall.callee
       let val =
         case fn.kind
-        of vkNativeFunction:
+        of vNativeFunction:
           fn.nativeFunctionValue([])
-        of vkFunction:
+        of vFunction:
           fn.functionValue.value.call(
             default(Array[Value]),
             effectHandler)
-        of vkLinearFunction:
+        of vLinearFunction:
           fn.linearFunctionValue.value.run([])
         else: raiseAssert("cannot call " & $fn)
       checkEffect val
@@ -111,14 +111,14 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let fn {.cursor.} = unboxStripType get instr.ucall.callee
       let val =
         case fn.kind
-        of vkNativeFunction:
+        of vNativeFunction:
           fn.nativeFunctionValue(
             [get instr.ucall.arg1])
-        of vkFunction:
+        of vFunction:
           fn.functionValue.value.call(
             toArray[Value]([get instr.ucall.arg1]),
             effectHandler)
-        of vkLinearFunction:
+        of vLinearFunction:
           fn.linearFunctionValue.value.run([get instr.ucall.arg1])
         else: raiseAssert("cannot call " & $fn)
       checkEffect val
@@ -129,11 +129,11 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let args = [get instr.bcall.arg1, get instr.bcall.arg2]
       let val =
         case fn.kind
-        of vkNativeFunction:
+        of vNativeFunction:
           fn.nativeFunctionValue(args)
-        of vkFunction:
+        of vFunction:
           fn.functionValue.value.call(toArray[Value](args), effectHandler)
-        of vkLinearFunction:
+        of vLinearFunction:
           fn.linearFunctionValue.value.run(args)
         else: raiseAssert("cannot call " & $fn)
       checkEffect val
@@ -144,11 +144,11 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let args = [get instr.tcall.arg1, get instr.tcall.arg2, get instr.tcall.arg3]
       let val =
         case fn.kind
-        of vkNativeFunction:
+        of vNativeFunction:
           fn.nativeFunctionValue(args)
-        of vkFunction:
+        of vFunction:
           fn.functionValue.value.call(toArray[Value](args), effectHandler)
-        of vkLinearFunction:
+        of vLinearFunction:
           fn.linearFunctionValue.value.run(args)
         else: raiseAssert("cannot call " & $fn)
       checkEffect val
@@ -159,11 +159,11 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let args = (get instr.tupcall.args).tupleValue.unref # maybe move
       let val =
         case fn.kind
-        of vkNativeFunction:
+        of vNativeFunction:
           fn.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
-        of vkFunction:
+        of vFunction:
           fn.functionValue.value.call(args, effectHandler)
-        of vkLinearFunction:
+        of vLinearFunction:
           fn.linearFunctionValue.value.run(args.toOpenArray(0, args.len - 1))
         else: raiseAssert("cannot call " & $fn)
       checkEffect val
@@ -180,11 +180,11 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
         let fn = unboxStripType fn
         let val =
           case fn.kind
-          of vkNativeFunction:
+          of vNativeFunction:
             fn.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
-          of vkFunction:
+          of vFunction:
             fn.functionValue.value.call(args, effectHandler)
-          of vkLinearFunction:
+          of vLinearFunction:
             fn.linearFunctionValue.value.run(args.toOpenArray(0, args.len - 1))
           else: raiseAssert("cannot call " & $fn)
         checkEffect val
@@ -193,32 +193,32 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
     of ArmType:
       read instr.armt
       let tVal = get(instr.armt.typ)
-      assert tVal.kind == vkType
+      assert tVal.kind == vType
       let t = tVal.typeValue.type.unwrapTypeType
       makeTyped(getMut(instr.armt.val), t)
     of CheckType:
       read instr.binary
       let val = get(instr.binary.arg1)
       let tVal = get(instr.binary.arg2)
-      assert tVal.kind == vkType
+      assert tVal.kind == vType
       let t = tVal.typeValue.type.unwrapTypeType
       put instr.binary.res, toValue val.checkType(t)
     of ArmStack:
       read instr.arm
       let fn = get(instr.arm.fun)
       case fn.kind
-      of vkFunction:
+      of vFunction:
         fn.functionValue.value.stack.set(instr.arm.ind, get(instr.arm.val))
-      of vkLinearFunction:
+      of vLinearFunction:
         fn.linearFunctionValue.value.constants[instr.arm.ind] = get instr.arm.val
       else: raiseAssert("cannot arm stack of " & $fn)
     of RefreshStack:
       read instr.rfs
       let fn = get(instr.rfs.fun)
       case fn.kind
-      of vkFunction:
+      of vFunction:
         fn.functionValue.value.stack = fn.functionValue.value.stack.shallowRefresh()
-      of vkLinearFunction:
+      of vLinearFunction:
         let prev = fn.linearFunctionValue.value.constants
         let oldBoxed = fn.linearFunctionValue[]
         getMut(instr.rfs.fun).linearFunctionValue = nil
@@ -233,13 +233,13 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
     of IfTrueJump:
       read instr.iftj
       let cond = get(instr.iftj.cond)
-      assert cond.kind == vkBool
+      assert cond.kind == vBool
       if cond.boolValue:
         jump instr.iftj.truePos
     of IfFalseJump:
       read instr.iffj
       let cond = get(instr.iffj.cond)
-      assert cond.kind == vkBool
+      assert cond.kind == vBool
       if not cond.boolValue:
         jump instr.iffj.falsePos
     of Jump:
@@ -247,7 +247,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       jump instr.jmp.pos
     of EmitEffect:
       read instr.emit
-      var eff = Value(kind: vkEffect)
+      var eff = Value(kind: vEffect)
       eff.effectValue.store get(instr.emit.effect)
       checkEffect eff
     of PushEffectHandler:
@@ -255,22 +255,22 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let h = unboxStripType get instr.pueh.handler
       var handler: proc (effect: Value): bool
       case h.kind
-      of vkNativeFunction:
+      of vNativeFunction:
         let f = h.nativeFunctionValue
         handler = proc (effect: Value): bool =
           f([effect]).toBool
-      of vkFunction:
+      of vFunction:
         let f = h.functionValue.value
         handler = proc (effect: Value): bool =
           let val = f.call([effect].toArray)
-          if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
+          if val.kind == vEffect and (effectHandler.isNil or not effectHandler(val)):
             return false
           val.toBool
-      of vkLinearFunction:
+      of vLinearFunction:
         let f = h.linearFunctionValue.value
         handler = proc (effect: Value): bool =
           let val = f.run([effect])
-          if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
+          if val.kind == vEffect and (effectHandler.isNil or not effectHandler(val)):
             return false
           val.toBool
       else: raiseAssert("cannot make " & $h & " into effect handler")
@@ -297,22 +297,22 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       read instr.gci
       let coll = get(instr.gci.coll)
       case coll.kind
-      of vkArray:
+      of vArray:
         put instr.gci.res, coll.tupleValue.unref[instr.gci.ind.int]
-      of vkList:
+      of vList:
         put instr.gci.res, coll.listValue.value[instr.gci.ind.int]
-      of vkString:
+      of vString:
         put instr.gci.res, toValue(coll.stringValue.value[instr.gci.ind.int].int)
       else: discard # error
     of SetConstIndex:
       read instr.sci
       let coll = get(instr.sci.coll)
       case coll.kind
-      of vkArray:
+      of vArray:
         coll.tupleValue[instr.sci.ind.int] = get(instr.sci.val)
-      of vkList:
+      of vList:
         coll.listValue.value[instr.sci.ind.int] = get(instr.sci.val)
-      of vkString:
+      of vString:
         coll.stringValue.value[instr.sci.ind.int] = get(instr.sci.val).int32Value.char
       else: discard # error
     of GetIndex:
@@ -321,13 +321,13 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let ind = get instr.gri.ind
       # XXX (6) maybe prevent dispatch here
       case coll.kind
-      of vkList:
+      of vList:
         put instr.gri.res, coll.listValue.value.unref[ind.unboxStripType.int32Value]
-      of vkArray:
+      of vArray:
         put instr.gri.res, coll.tupleValue.unref[ind.unboxStripType.int32Value]
-      of vkString:
+      of vString:
         put instr.gri.res, toValue(coll.stringValue.value.unref[ind.unboxStripType.int32Value].int)
-      of vkTable:
+      of vTable:
         put instr.gri.res, coll.tableValue.value[ind]
       else: discard # error
     of SetIndex:
@@ -337,15 +337,15 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let val = get instr.sri.val
       # XXX (6) maybe prevent dispatch here
       case coll.kind
-      of vkList:
+      of vList:
         coll.listValue.value.unref[ind.unboxStripType.int32Value] = val
-      of vkArray:
+      of vArray:
         coll.tupleValue[ind.unboxStripType.int32Value] = val
-      of vkString:
+      of vString:
         coll.stringValue.value.unref[ind.unboxStripType.int32Value] = val.int32Value.char
-      of vkTable:
+      of vTable:
         coll.tableValue.value[ind] = val
-      of vkSet:
+      of vSet:
         coll.setValue.value.incl(ind)
       else: discard # error
     of AddInt32:

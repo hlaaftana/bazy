@@ -26,43 +26,43 @@ template realRef*[T](x: Reference[T]): ref T = (ref T)(x)
 
 type
   ValueKind* = enum
-    vkNone
+    vNone
       ## singleton null value
-    vkInt32, vkUint32, vkFloat32, vkBool
+    vInt32, vUint32, vFloat32, vBool
       ## unboxed numbers
-    vkEffect
+    vEffect
       ## embedded effect value for exceptions/return/yield/whatever
-    #vkShortestString
+    #vShortestString
     #  ## word size string
-    vkReference
+    vReference
       ## reference value, can be mutable
       ## only value kind with reference semantics
-    vkArray
+    vArray
       ## like java array but typed like TS, implementation of tuples
-    vkNativeFunction
+    vNativeFunction
       ## Nim function that takes values as argument
     # could be pointers or serialized but for now this is more efficient:
-    vkExpression
-    vkStatement
-    vkScope
-    vkBoxed
+    vExpression
+    vStatement
+    vScope
+    vBoxed
       ## boxed version of unboxed values, used for type info
-    vkInt64, vkUint64, vkFloat64
-    vkType
+    vInt64, vUint64, vFloat64
+    vType
       ## type value
-    vkString
+    vString
       ## general byte sequence type
-    vkList
+    vList
       ## both seq and string are references to save memory
-    vkSet
-    vkTable
-    vkFunction
+    vSet
+    vTable
+    vFunction
       ## function
-    vkLinearFunction
+    vLinearFunction
     # bigints can be added
     # native types in general can be BoxedValue[pointer]
 
-const unboxedValueKinds* = {vkNone..pred(vkBoxed)}
+const unboxedValueKinds* = {vNone..pred(vBoxed)}
 
 type
   BoxedValueObj*[T] = object
@@ -76,54 +76,54 @@ type
     # entire thing can be pointer tagged, but would need GC hooks
     # maybe interning for some pointer types
     case kind*: ValueKind
-    of vkNone: discard
-    of vkBool:
+    of vNone: discard
+    of vBool:
       boolValue*: bool
-    of vkInt32:
+    of vInt32:
       int32Value*: int32
-    of vkUint32:
+    of vUint32:
       uint32Value*: uint32
-    of vkFloat32:
+    of vFloat32:
       float32Value*: float32
-    of vkEffect:
+    of vEffect:
       effectValue*: Box[Value]
-    of vkReference:
+    of vReference:
       # XXX figure out how to optimize this for mutable collections
       referenceValue*: Reference[Value]
-    of vkArray:
-      # XXX (6) maybe match pointer field location with vkList, vkString
+    of vArray:
+      # XXX (6) maybe match pointer field location with vList, vString
       arrayValue*: ArrayRef[Value]
-    of vkBoxed:
+    of vBoxed:
       boxedValue*: BoxedValue[Value]
-    of vkInt64:
+    of vInt64:
       int64Value*: BoxedValue[int64]
-    of vkUint64:
+    of vUint64:
       uint64Value*: BoxedValue[uint64]
-    of vkFloat64:
+    of vFloat64:
       float64Value*: BoxedValue[float64]
-    of vkType:
+    of vType:
       typeValue*: BoxedValue[Type]
-    of vkString:
-      # XXX (6) maybe match pointer field location with vkArray, vkList
+    of vString:
+      # XXX (6) maybe match pointer field location with vArray, vList
       stringValue*: BoxedValue[string]
-    of vkList:
-      # XXX (6) maybe match pointer field location with vkArray, vkString
+    of vList:
+      # XXX (6) maybe match pointer field location with vArray, vString
       listValue*: BoxedValue[seq[Value]]
-    of vkSet:
+    of vSet:
       setValue*: BoxedValue[HashSet[Value]]
-    of vkTable:
+    of vTable:
       tableValue*: BoxedValue[Table[Value, Value]]
-    of vkFunction:
+    of vFunction:
       functionValue*: BoxedValue[TreeWalkFunction]
-    of vkLinearFunction:
+    of vLinearFunction:
       linearFunctionValue*: BoxedValue[LinearFunction]
-    of vkNativeFunction:
+    of vNativeFunction:
       nativeFunctionValue*: proc (args: openarray[Value]): Value {.nimcall.}
-    of vkExpression:
+    of vExpression:
       expressionValue*: Expression
-    of vkStatement:
+    of vStatement:
       statementValue*: Statement
-    of vkScope:
+    of vScope:
       scopeValue*: Scope
   
   PointerTaggedValue* = distinct (

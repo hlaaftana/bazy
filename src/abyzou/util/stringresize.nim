@@ -1,3 +1,5 @@
+# XXX move to library
+
 when not declared(capacity):
   template capacity(s: string): int = high(int)
 

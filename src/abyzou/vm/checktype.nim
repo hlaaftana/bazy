@@ -29,36 +29,36 @@ proc checkType*(value: Value, t: Type): bool =
   of tyCompound, tyBase:
     let b = if t.kind == tyCompound: t.base else: t.typeBase
     case b.nativeType
-    of ntyNoneValue: value.kind == vkNone
-    of ntyInt32: value.kind == vkInt32
-    of ntyUint32: value.kind == vkUint32
-    of ntyFloat32: value.kind == vkFloat32
-    of ntyBool: value.kind == vkBool
-    of ntyInt64: value.kind == vkInt64
-    of ntyUint64: value.kind == vkUint64
-    of ntyFloat64: value.kind == vkFloat64
+    of ntyNoneValue: value.kind == vNone
+    of ntyInt32: value.kind == vInt32
+    of ntyUint32: value.kind == vUint32
+    of ntyFloat32: value.kind == vFloat32
+    of ntyBool: value.kind == vBool
+    of ntyInt64: value.kind == vInt64
+    of ntyUint64: value.kind == vUint64
+    of ntyFloat64: value.kind == vFloat64
     of ntyFunction:
       # XXX (3) this is not necessarily correct, depends on boxed value type
-      value.kind in {vkFunction, vkNativeFunction, vkLinearFunction}
+      value.kind in {vFunction, vNativeFunction, vLinearFunction}
     of ntyTuple:
-      value.kind == vkArray and (t.kind == tyBase or value.tupleValue.unref.eachAre(t.baseArguments))
+      value.kind == vArray and (t.kind == tyBase or value.tupleValue.unref.eachAre(t.baseArguments))
     of ntyReference:
-      value.kind == vkReference and (t.kind == tyBase or value.referenceValue.unref.checkType(t.baseArguments[0]))
+      value.kind == vReference and (t.kind == tyBase or value.referenceValue.unref.checkType(t.baseArguments[0]))
     of ntyList:
-      value.kind == vkList and (t.kind == tyBase or value.listValue.value.unref.eachAre(t.baseArguments[0]))
-    of ntyString: value.kind == vkString
+      value.kind == vList and (t.kind == tyBase or value.listValue.value.unref.eachAre(t.baseArguments[0]))
+    of ntyString: value.kind == vString
     of ntySet:
-      value.kind == vkSet and (t.kind == tyBase or value.setValue.value.eachAre(t.baseArguments[0]))
+      value.kind == vSet and (t.kind == tyBase or value.setValue.value.eachAre(t.baseArguments[0]))
     of ntyTable:
-      value.kind == vkTable and (t.kind == tyBase or value.tableValue.value.eachAreTable(t.baseArguments[0], t.baseArguments[1]))
-    of ntyExpression: value.kind == vkExpression
-    of ntyStatement: value.kind == vkStatement
-    of ntyScope: value.kind == vkScope
+      value.kind == vTable and (t.kind == tyBase or value.tableValue.value.eachAreTable(t.baseArguments[0], t.baseArguments[1]))
+    of ntyExpression: value.kind == vExpression
+    of ntyStatement: value.kind == vStatement
+    of ntyScope: value.kind == vScope
     else:
       not b.valueMatcher.isNil and
         b.valueMatcher(value, t)
   of tyTuple:
-    value.kind == vkArray and value.tupleValue.unref.eachAre(t.elements)
+    value.kind == vArray and value.tupleValue.unref.eachAre(t.elements)
   of tyAny: true
   of tyAll, tyNoType: false
   of tyUnion:

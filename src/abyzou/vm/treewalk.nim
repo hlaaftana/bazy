@@ -25,7 +25,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
 
 template runCheckEffect(instr: Instruction, stack, effectHandler): Value =
   let val = evaluate(instr, stack, effectHandler)
-  if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val.effectValue.unref)):
+  if val.kind == vEffect and (effectHandler.isNil or not effectHandler(val.effectValue.unref)):
     return val
   val
 
@@ -39,11 +39,11 @@ include ./bytecode
 
 proc call*(fun: Value, args: sink Array[Value], effectHandler: EffectHandler = nil): Value {.inline.} =
   case fun.kind
-  of vkNativeFunction:
+  of vNativeFunction:
     result = fun.nativeFunctionValue(args.toOpenArray(0, args.len - 1))
-  of vkFunction:
+  of vFunction:
     result = fun.functionValue.value.call(args, effectHandler)
-  of vkLinearFunction:
+  of vLinearFunction:
     result = fun.linearFunctionValue.value.run(args.toOpenArray(0, args.len - 1))
   else: raiseAssert("cannot call " & $fun)
 
@@ -53,7 +53,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
   let ins = ins[]
   case ins.kind
   of NoOp:
-    result = Value(kind: vkNone)
+    result = Value(kind: vNone)
   of Constant:
     result = ins.constantValue
   of FunctionCall:
@@ -78,7 +78,7 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
   of CheckType:
     let val = run ins.binary1
     let tVal = run ins.binary2
-    assert tVal.kind == vkType
+    assert tVal.kind == vType
     let t = tVal.typeValue.type.unwrapTypeType
     result = toValue val.checkType(t)
   of Sequence:
@@ -112,28 +112,28 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
       if cond.toBool:
         break
   of EmitEffect:
-    result = Value(kind: vkEffect)
+    result = Value(kind: vEffect)
     result.effectValue.store(run ins.effect)
   of HandleEffect:
     let h = unboxStripType run ins.effectHandler
     var handler: proc (effect: Value): bool
     case h.kind
-    of vkNativeFunction:
+    of vNativeFunction:
       let f = h.nativeFunctionValue
       handler = proc (effect: Value): bool =
         f([effect]).toBool
-    of vkFunction:
+    of vFunction:
       let f = h.functionValue.value
       handler = proc (effect: Value): bool =
         let val = f.call([effect].toArray)
-        if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
+        if val.kind == vEffect and (effectHandler.isNil or not effectHandler(val)):
           return false
         val.toBool
-    of vkLinearFunction:
+    of vLinearFunction:
       let f = h.linearFunctionValue.value
       handler = proc (effect: Value): bool =
         let val = f.run([effect])
-        if val.kind == vkEffect and (effectHandler.isNil or not effectHandler(val)):
+        if val.kind == vEffect and (effectHandler.isNil or not effectHandler(val)):
           return false
         val.toBool
     else: raiseAssert("cannot make " & $h & " into effect handler")
@@ -167,23 +167,23 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
   of GetIndex:
     let x = run ins.getIndexAddress
     case x.kind
-    of vkList:
+    of vList:
       result = x.listValue.value.unref[ins.getIndex]
-    of vkArray:
+    of vArray:
       result = x.tupleValue.unref[ins.getIndex]
-    of vkString:
+    of vString:
       result = toValue(x.stringValue.value.unref[ins.getIndex].int)
     else: discard # error
   of SetIndex:
     let x = run ins.setIndexAddress
     result = run ins.setIndexValue
     case x.kind
-    of vkList:
+    of vList:
       x.listValue.value.unref[ins.setIndex] = result
-    of vkArray:
+    of vArray:
       x.tupleValue[ins.setIndex] = result
-    of vkString:
-      assert result.kind == vkInt32 and result.int32Value >= 0 and result.int32Value <= 255
+    of vString:
+      assert result.kind == vInt32 and result.int32Value >= 0 and result.int32Value <= 255
       x.stringValue.value.unref[ins.setIndex] = result.int32Value.char
     else: discard # error
   of AddInt:

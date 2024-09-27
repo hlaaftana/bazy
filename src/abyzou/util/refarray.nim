@@ -1,5 +1,7 @@
+# XXX move to library
+
 type
-  ArrayObj[T] = object
+  ArrayObj[T] {.byref.} = object
     length: int
     data: UncheckedArray[T]
   Array*[T] = object
@@ -9,16 +11,12 @@ template uninitArr*(arr, L): untyped =
   unsafeNew(arr.impl, sizeof(arr.impl.length) + L * sizeof(T))
   arr.impl.length = L
 
-when false and (NimMajor, NimMinor) >= (2, 0):
-  # XXX doesn't work
+when defined(nimPreviewNonVarDestructor):
+  # needs `ArrayObj` to be `byref`, or at least the parameter
   proc `=destroy`*[T](arr: ArrayObj[T]) =
     for i in 0 ..< arr.length:
       {.cast(raises: []).}:
-        when false:
-          `=destroy`(addr(arr.data[i])[])
-        else:
-          when compiles(`=destroy`(arr.data[i])):
-            `=destroy`(arr.data[i])
+        `=destroy`(arr.data[i])
 else:
   {.warning[Deprecated]: off.}
   proc `=destroy`*[T](arr: var ArrayObj[T]) =
