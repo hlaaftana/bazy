@@ -1,6 +1,7 @@
 import
   std/strutils,
-  ../defines, ../util/stringresize,
+  hemodyne/syncvein,
+  ../defines,
   ./[number, shortstring, tokens, info]
 
 when useUnicode:
@@ -46,10 +47,7 @@ type
 
   Tokenizer* = ref object
     options*: TokenizerOptions
-    buffer*: string
-    bufferLoader*: proc (): string
-      ## loads a string at a time to add to the buffer when needed
-      ## set to nil after returning empty string
+    vein*: Vein ## input buffer
     indentContexts*: seq[IndentContext]
     lastKind*: TokenKind
     queueMode*: QueueMode
@@ -58,8 +56,6 @@ type
     queue*: seq[Token]
     queuePos*: int
     indent*: int
-    consumedPos*: int
-      ## position before which we can cull the buffer
     pos*, previousPos*: int
     when doLineColumn:
       ln*, cl*, previousCol*: int
@@ -80,42 +76,25 @@ proc resetTokenizer*(tz: var Tokenizer) =
   tz.indentContexts = @[IndentContext()]
 
 proc newTokenizer*(str: sink string = "", options = defaultOptions()): Tokenizer =
-  result = Tokenizer(buffer: str, options: options)
+  result = Tokenizer(vein: initVein(str), options: options)
   result.resetTokenizer()
 
 proc newTokenizer*(loader: proc(): string, options = defaultOptions()): Tokenizer =
-  result = Tokenizer(bufferLoader: loader, options: options)
+  result = Tokenizer(vein: initVein(loader), options: options)
   result.resetTokenizer()
 
 proc extendBufferOne(tz: var Tokenizer) =
-  if not tz.bufferLoader.isNil:
-    let ex = tz.bufferLoader()
-    if ex.len == 0:
-      tz.bufferLoader = nil
-    else:
-      if tz.buffer.smartResizeAdd(ex, tz.consumedPos):
-        tz.pos -= tz.consumedPos
-        tz.previousPos -= tz.consumedPos
-
-proc extendBufferBy(tz: var Tokenizer, n: int) =
-  var i = 0
-  while not tz.bufferLoader.isNil and i < n:
-    let ex = tz.bufferLoader()
-    if ex.len == 0:
-      tz.bufferLoader = nil
-    else:
-      i += ex.len
-      if tz.buffer.smartResizeAdd(ex, tz.consumedPos):
-        tz.pos -= tz.consumedPos
-        tz.previousPos -= tz.consumedPos
+  let remove = tz.vein.extendBufferOne()
+  tz.pos -= remove
+  tz.previousPos -= remove
 
 proc peekCharOrZero(tz: var Tokenizer): char =
-  if tz.pos < tz.buffer.len:
-    result = tz.buffer[tz.pos]
+  if tz.pos < tz.vein.buffer.len:
+    result = tz.vein.buffer[tz.pos]
   else:
     tz.extendBufferOne()
-    if tz.pos < tz.buffer.len:
-      result = tz.buffer[tz.pos]
+    if tz.pos < tz.vein.buffer.len:
+      result = tz.vein.buffer[tz.pos]
     else:
       result = '\0'
 
@@ -134,12 +113,12 @@ proc nextRune*(tz: var Tokenizer): bool =
   when doLineColumn:
     tz.previousCol = tz.cl
   let c =
-    if tz.pos < tz.buffer.len:
-      tz.buffer[tz.pos]
+    if tz.pos < tz.vein.buffer.len:
+      tz.vein.buffer[tz.pos]
     else:
       tz.extendBufferOne()
-      if tz.pos < tz.buffer.len:
-        tz.buffer[tz.pos]
+      if tz.pos < tz.vein.buffer.len:
+        tz.vein.buffer[tz.pos]
       else:
         return false
   if c == '\r' and (inc tz.pos;
@@ -152,22 +131,10 @@ proc nextRune*(tz: var Tokenizer): bool =
       tz.cl = 0
   else:
     when useUnicode:
-      # may need testing
-      let b = byte(c)
-      if (b and 0b10000000) != 0:
-        var n = 0
-        if b shr 5 == 0b110:
-          n = 1
-        elif b shr 4 == 0b1110:
-          n = 2
-        elif b shr 3 == 0b11110:
-          n = 3
-        elif b shr 2 == 0b111110:
-          n = 4
-        elif b shr 1 == 0b1111110:
-          n = 5
-        extendBufferBy(tz, n)
-      fastRuneAt(tz.buffer, tz.pos, tz.currentRune, true)
+      let remove = tz.vein.extendBufferRuneStart(c)
+      tz.pos -= remove
+      tz.previousPos -= remove
+      fastRuneAt(tz.vein.buffer, tz.pos, tz.currentRune, true)
     else:
       tz.currentRune = c
       inc tz.pos
@@ -177,7 +144,7 @@ proc nextRune*(tz: var Tokenizer): bool =
         tz.cl = 0
       else:
         tz.cl += 1
-  tz.consumedPos = tz.previousPos
+  tz.vein.setFreeBefore(tz.previousPos)
   result = true
 
 iterator runes*(tz: var Tokenizer): Rune =
@@ -237,7 +204,7 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
     if prevPosSet:
       # would be prevPos2, but we can't keep track of how much the buffer shifts left
       # (unless we move this logic inside the tokenizer)
-      tz.consumedPos = 0
+      tz.vein.resetFreeBefore()
     case stage
     of inBase:
       let ch = c.asChar
@@ -255,14 +222,14 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
         when doLineColumn:
           prevCol2 = tz.previousCol
         prevPosSet = true
-        tz.consumedPos = 0
+        tz.vein.resetFreeBefore()
       of 'e', 'E':
         stage = inExpStart
         prevPos2 = tz.previousPos
         when doLineColumn:
           prevCol2 = tz.previousCol
         prevPosSet = true
-        tz.consumedPos = 0
+        tz.vein.resetFreeBefore()
       of 'i', 'I':
         result.kind = Integer
         stage = inBits
@@ -303,7 +270,7 @@ proc recordNumber*(tz: var Tokenizer, negative = false): NumberRepr =
         when doLineColumn:
           prevCol2 = tz.previousCol
         prevPosSet = true
-        tz.consumedPos = 0
+        tz.vein.resetFreeBefore()
       else:
         tz.resetPos()
         return

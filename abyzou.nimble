@@ -13,7 +13,8 @@ skipDirs      = @["src/abyzou/disabled"]
 
 requires "nim >= 1.6.14"
 requires "skinsuit >= 0.2.3"
-requires "manta >= 0.1.0"
+requires "manta"
+requires "https://github.com/metagn/hemodyne"
 
 when (compiles do: import nimbleutils):
   import nimbleutils
