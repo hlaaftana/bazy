@@ -5,7 +5,7 @@ import
 import common
 
 module logic:
-  define "Boolean", BoolTy
+  define "Bool", BoolTy
   define "true", true
   define "false", false
   fn "not", [BoolTy], BoolTy:

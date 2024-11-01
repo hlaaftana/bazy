@@ -252,7 +252,7 @@ template constant*(value: uint32): Statement = constant(value, Uint32Ty)
 template constant*(value: float32): Statement = constant(value, Float32Ty)
 
 proc isNative(bound: TypeBound, nt: NativeType): bool {.inline.} =
-  bound.boundType.kind == tyCompound and bound.boundType.base.nativeType == nt
+  bound.boundType.kind == tyInstance and bound.boundType.base.nativeType == nt
 
 proc compileNumber*(ex: Expression, bound: TypeBound): Statement =
   let s = $ex.number

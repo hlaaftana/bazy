@@ -3,7 +3,7 @@ import tables, hashes
 type
   CachedFile* = distinct uint32
   
-  Info* {.byref.} = object
+  Info* = object
     file*: CachedFile
     line*, column*: uint16
 

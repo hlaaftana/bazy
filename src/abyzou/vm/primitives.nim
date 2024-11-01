@@ -139,7 +139,7 @@ type
     # maybe add unknown type for values with unknown type at runtime
     tyNoType,
     # concrete
-    tyCompound,
+    tyInstance,
     tyTuple, # XXX (1) make into tyComposite, tuple, named tuple, array (i.e. int^20) all at once
     # typeclass
     tyAny, tyAll, ## top and bottom types
@@ -213,12 +213,12 @@ type
   
   Type* = object
     # XXX (2) 90 bytes
-    # XXX (2) figure out which kinds to merge with tyCompound (XXX (1) at least tyTuple)
+    # XXX (2) figure out which kinds to merge with tyInstance (XXX (1) at least tyTuple)
     properties*: Table[TypeBase, Type]
       # can be a multitable later on
     case kind*: TypeKind
     of tyNoType, tyAny, tyAll: discard
-    of tyCompound:
+    of tyInstance:
       base*: TypeBase
       baseArguments*: seq[Type]
     of tyTuple:

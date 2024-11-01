@@ -47,7 +47,7 @@ template nativeType(n: untyped, args: varargs[TypeBound]) =
 
 template nativeAtomicType(n: untyped) =
   nativeType(`n TyBase`, astToStr(n), `nty n`)
-  template `n Ty`*: untyped = Type(kind: tyCompound, base: `n TyBase`)
+  template `n Ty`*: untyped = Type(kind: tyInstance, base: `n TyBase`)
 
 nativeType TupleTy, "Tuple", ntyTuple, [] # not used for tuple type construction
 
@@ -72,17 +72,17 @@ nativeType Type, [+AnyTy]
 
 nativeType TupleConstructor, [+Type(kind: tyBase, typeBase: TupleTy)]
 
-proc compound*(tag: TypeBase, args: varargs[Type]): Type {.inline.} =
-  Type(kind: tyCompound, base: tag, baseArguments: @args)
+proc instance*(tag: TypeBase, args: varargs[Type]): Type {.inline.} =
+  Type(kind: tyInstance, base: tag, baseArguments: @args)
 
-template `!`*(tag: TypeBase): Type = compound(tag)
-template `[]`*(tag: TypeBase, args: varargs[Type]): Type = compound(tag, args)
+template `!`*(tag: TypeBase): Type = instance(tag)
+template `[]`*(tag: TypeBase, args: varargs[Type]): Type = instance(tag, args)
 
 proc property*(tag: TypeBase, args: varargs[Type]): Type {.inline.} =
-  compound(tag, args)
+  instance(tag, args)
 
 proc property*(prop: Type): Type {.inline.} =
-  assert prop.kind == tyCompound
+  assert prop.kind == tyInstance
   prop
 
 proc properties*(ps: varargs[Type, property]): Table[TypeBase, Type] =
@@ -117,12 +117,12 @@ proc union*(s: varargs[Type]): Type =
 
 proc unwrapTypeType*(t: Type): Type {.inline.} =
   result = t
-  if t.kind == tyCompound and t.base.nativeType == ntyType:
+  if t.kind == tyInstance and t.base.nativeType == ntyType:
     result = t.baseArguments[0]
 
 const definiteTypeLengths*: array[TypeKind, int] = [
   tyNoType: 0,
-  tyCompound: -1,
+  tyInstance: -1,
   tyTuple: -1,
   tyAny: 0,
   tyAll: 0,
@@ -142,7 +142,7 @@ proc len*(t: Type): int =
     of tyTuple:
       if t.varargs.isNoType:
         result = t.elements.len
-    of tyCompound:
+    of tyInstance:
       result = t.baseArguments.len
     of tyUnion, tyIntersection:
       result = t.operands.len
@@ -160,7 +160,7 @@ proc nth*(t: Type, i: int): Type =
       result = t.elements[i]
     else:
       result = t.varargs.unbox
-  of tyCompound:
+  of tyInstance:
     result = t.baseArguments[i]
   of tyUnion, tyIntersection:
     # this is actually not supposed to happen
@@ -175,7 +175,7 @@ proc nth*(t: Type, i: int): Type =
     discard # what
 
 proc param*(t: Type, i: int): Type {.inline.} =
-  assert t.kind == tyCompound and t.base.nativeType == ntyFunction
+  assert t.kind == tyInstance and t.base.nativeType == ntyFunction
   t.baseArguments[0].nth(i)
 
 proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
@@ -190,7 +190,7 @@ proc fillParameters*(pattern: var Type, table: ParameterInstantiation) =
     pattern = table.table[pattern.parameter]
   of tyNoType, tyAny, tyAll, tyBase:
     discard
-  of tyCompound:
+  of tyInstance:
     # XXX (2) check argument bounds
     if unlikely(not pattern.base.paramFiller.isNil):
       pattern.base.paramFiller(pattern, table)

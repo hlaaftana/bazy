@@ -173,7 +173,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
       let fn {.cursor.} = get instr.tdisp.callee
       let argsVal = get instr.tdisp.args
       let t = fn.getType
-      assert t.kind == tyCompound and t.base.nativeType == ntyFunction, $t
+      assert t.kind == tyInstance and t.base.nativeType == ntyFunction, $t
       let argt = t.baseArguments[0]
       if argsVal.checkType(argt):
         let args = argsVal.tupleValue.unref

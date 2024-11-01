@@ -143,7 +143,7 @@ proc `$`*(t: Type): string =
       result.add($t)
   result = case t.kind
   of tyNoType: "NoType"
-  of tyCompound: t.base.name & "(" & $t.baseArguments & ")"
+  of tyInstance: t.base.name & "(" & $t.baseArguments & ")"
   of tyAny: "Any"
   of tyAll: "All"
   of tyTuple: "Tuple(" & $t.elements & (if t.varargs.isNoType: ")" else: ", " & $t.varargs & "...)")

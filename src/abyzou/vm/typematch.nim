@@ -178,11 +178,11 @@ proc match*(matcher, t: Type, inst: var ParameterInstantiation): TypeMatch =
   if matcher == t: return atomicMatch(tmEqual)
   result = case matcher.kind
   of tyNoType: atomicMatch(tmUnknown)
-  of tyCompound:
+  of tyInstance:
     case matcher.base.nativeType
     of ntyTupleConstructor:
       case t.kind
-      of tyCompound:
+      of tyInstance:
         if matcher.base == t.base:
           match(matcher.baseArguments[0], t.baseArguments[0])
         else: atomicMatch(tmUnknown)
@@ -196,7 +196,7 @@ proc match*(matcher, t: Type, inst: var ParameterInstantiation): TypeMatch =
       matcher.base.typeMatcher(matcher, t, inst)
     else:
       case t.kind
-      of tyCompound:
+      of tyInstance:
         let mnt = matcher.base.nativeType
         let tnt = t.base.nativeType
         if mnt != tnt:
@@ -267,12 +267,12 @@ proc match*(matcher, t: Type, inst: var ParameterInstantiation): TypeMatch =
   of tyBase:
     if matcher.typeBase.nativeType == ntyTuple and t.kind == tyTuple:
       return atomicMatch(tmTrue)
-    # in nim a dummy compound type is created from the base and compared
+    # in nim a dummy instance type is created from the base and compared
     case t.kind
     of tyBase:
       if matcher.typeBase == t.typeBase: atomicMatch(tmAlmostEqual)
       else: atomicMatch(tmNone)
-    of tyCompound:
+    of tyInstance:
       boolMatch matcher.typeBase == t.base
     else: atomicMatch(tmNone)
   of tySomeValue:

@@ -26,8 +26,8 @@ proc checkType*(value: Value, t: Type): bool =
   if not isNoType(tValue):
     return match(t, tValue).matches
   result = case t.kind
-  of tyCompound, tyBase:
-    let b = if t.kind == tyCompound: t.base else: t.typeBase
+  of tyInstance, tyBase:
+    let b = if t.kind == tyInstance: t.base else: t.typeBase
     case b.nativeType
     of ntyNoneValue: value.kind == vNone
     of ntyInt32: value.kind == vInt32
