@@ -8,7 +8,7 @@ proc set*(stack: Stack, index: int, value: sink Value) {.inline.} =
   stack.stack[index] = value
 
 proc shallowRefresh*(stack: Stack): Stack =
-  result = Stack(stack: newArray[Value](stack.stack.len))
+  result = Stack(stack: initArray[Value](stack.stack.len))
   for i in 0 ..< stack.stack.len:
     result.stack[i] = stack.stack[i]
 
@@ -58,12 +58,12 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     result = ins.constantValue
   of FunctionCall:
     let fn = unboxStripType run ins.function
-    var args = newArray[Value](ins.arguments.len)
+    var args = initArray[Value](ins.arguments.len)
     for i in 0 ..< args.len:
       args[i] = run ins.arguments[i]
     result = fn.call(args, effectHandler)
   of Dispatch:
-    var args = newArray[Value](ins.dispatchArguments.len)
+    var args = initArray[Value](ins.dispatchArguments.len)
     for i in 0 ..< args.len:
       args[i] = run ins.dispatchArguments[i]
     block dispatch:
@@ -140,12 +140,12 @@ proc evaluate*(ins: Instruction, stack: Stack, effectHandler: EffectHandler = ni
     result = run(ins.effectEmitter, stack, handler)
   of BuildTuple:
     if ins.elements.len <= 255:
-      var arr = newArray[Value](ins.elements.len)
+      var arr = initArray[Value](ins.elements.len)
       for i in 0 ..< arr.len:
         arr[i] = run ins.elements[i]
       result = toValue(arr)
     else:
-      var arr = newArray[Value](ins.elements.len)
+      var arr = initArray[Value](ins.elements.len)
       for i in 0 ..< arr.len:
         arr[i] = run ins.elements[i]
       result = toValue(arr)

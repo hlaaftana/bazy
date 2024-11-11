@@ -210,7 +210,7 @@ type
     id*: TypeParameterId # this needs to be assigned
     name*: string
     bound*: TypeBound
-  
+
   Type* = object
     # XXX (2) 90 bytes
     # XXX (2) figure out which kinds to merge with tyInstance (XXX (1) at least tyTuple)

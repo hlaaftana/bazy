@@ -514,7 +514,7 @@ proc linear*(context: Context, body: Statement): LinearContext =
   linearize(context, result, res, body)
 
 proc toFunction*(lc: LinearContext): LinearFunction =
-  var ap = newArray[int](lc.argRegisters.len)
+  var ap = initArray[int](lc.argRegisters.len)
   for i in 0 ..< lc.argRegisters.len:
     ap[i] = lc.argRegisters[i].int
   result = LinearFunction(

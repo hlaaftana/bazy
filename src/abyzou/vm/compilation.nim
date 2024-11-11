@@ -22,7 +22,7 @@ proc childScope*(scope: Scope): Scope =
   result = Scope(parent: scope, context: scope.context)
 
 proc makeStack*(context: Context): Stack =
-  result = Stack(stack: newArray[Value](context.stackSlots.len))
+  result = Stack(stack: initArray[Value](context.stackSlots.len))
   for i in 0 ..< context.stackSlots.len:
     result.stack[i] = context.stackSlots[i].value
 
@@ -58,7 +58,7 @@ proc toInstruction*(st: Statement): Instruction =
   template map[T, U](s: (T, U)): untyped =
     (map s[0], map s[1])
   template map(s: seq): Array =
-    var arr = newArray[typeof map s[0]](s.len)
+    var arr = initArray[typeof map s[0]](s.len)
     for i in 0 ..< arr.len:
       arr[i] = map s[i]
     arr
@@ -422,7 +422,7 @@ proc compileMetaCall*(scope: Scope, name: string, ex: Expression, bound: TypeBou
       var argumentValues = newSeq[Variable](ex.arguments.len)
       var dispatches: seq[tuple[condition, body: Statement]]
       for d in subMetas:
-        var arguments = newArray[Value](ex.arguments.len + 1)
+        var arguments = initArray[Value](ex.arguments.len + 1)
         arguments[0] = toValue scope
         var variableCheckTypes = newSeq[Type](ex.arguments.len)
         var noMatch = false

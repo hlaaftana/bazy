@@ -43,8 +43,8 @@ elif arrayImpl == "manta":
   type Array*[T] = RefArray[T]
   template toArray*[T](foo: openarray[T]): RefArray =
     toRefArray[T](foo)
-  template newArray*[T](foo): RefArray[T] =
-    newRefArray[T](foo)
+  template initArray*[T](foo): RefArray[T] =
+    newArray[T](foo)
   template unref*[T](arr: RefArray[T]): Array[T] =
     arr
 elif arrayImpl == "mantavalue":

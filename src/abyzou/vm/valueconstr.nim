@@ -105,7 +105,7 @@ when false:
       toValue(newSeq)
     of vString: toValue(value.stringValue.unref)
     of vArray:
-      var newArray = newArray[Value](value.tupleValue.unref.len)
+      var newArray = initArray[Value](value.tupleValue.unref.len)
       for i in 0 ..< newArray.len:
         newArray[i] = copy value.tupleValue.unref[i]
       toValue(newArray)

@@ -8,7 +8,7 @@ when not declared(EffectHandler):
 {.pop.}
 
 proc run*(lf: LinearFunction, args: openarray[Value]): Value =
-  var registers = newArray[Value](lf.registerCount)
+  var registers = initArray[Value](lf.registerCount)
   template put(reg: Register, val: Value) =
     registers[reg.int32] = val
   template get(reg: Register): Value =
@@ -57,7 +57,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
   template read(ia: var Array[int32]) =
     var len: int32
     read(len)
-    ia = newArray[int32](len)
+    ia = initArray[int32](len)
     for x in ia.mitems:
       read(x)
   template read[T: tuple](tup: var T) =
@@ -283,7 +283,7 @@ proc run*(lf: LinearFunction, args: openarray[Value]): Value =
         unhandledEffect = false
     of InitTuple:
       read instr.coll
-      put instr.coll.res, toValue newArray[Value](instr.coll.siz)
+      put instr.coll.res, toValue initArray[Value](instr.coll.siz)
     of InitList:
       read instr.coll
       put instr.coll.res, toValue newSeq[Value](instr.coll.siz)
